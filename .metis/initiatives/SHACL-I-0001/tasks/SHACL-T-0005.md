@@ -4,14 +4,14 @@ level: task
 title: "Target resolution: focus nodes from all Core target declarations"
 short_code: "SHACL-T-0005"
 created_at: 2026-08-06T13:58:14.591923+00:00
-updated_at: 2026-08-06T17:41:54.648706+00:00
+updated_at: 2026-08-06T17:55:20.931823+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0003]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -30,6 +30,8 @@ Turn a shape's target declarations into the focus nodes it applies to, reading t
 through `match` alone. This is also the initiative's designated evidence generator: target
 resolution is where the vision predicted this project would want store capabilities it does
 not have, and this task starts the log that tests that prediction.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

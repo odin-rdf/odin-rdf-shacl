@@ -39,7 +39,8 @@ Scan :: #type proc(
 	visit_data: rawptr,
 ) -> bool
 
-// Focus_Node is a node a shape applies to.
+// Node_Ref names a node of the data graph: its ID when the store holds one,
+// and otherwise the term itself.
 //
 // `bound` is false when the node is not in the data store's dictionary, which
 // happens for `sh:targetNode` naming a term the data graph never mentions.
@@ -50,11 +51,15 @@ Scan :: #type proc(
 // So `term` carries it. For a bound node `term` is nil and the caller
 // materialises through the dictionary if it needs one; for an unbound node
 // `term` borrows the compiled model's storage, which outlives the validation.
-Focus_Node :: struct {
+Node_Ref :: struct {
 	id:    store.Term_ID,
 	bound: bool,
 	term:  rdf.Term,
 }
+
+// Focus_Node is a node a shape applies to — the same shape as any other node
+// reference, named for where it is used.
+Focus_Node :: Node_Ref
 
 // Focus_Visitor receives each focus node. Returning false stops resolution.
 Focus_Visitor :: #type proc(data: rawptr, focus: Focus_Node) -> bool

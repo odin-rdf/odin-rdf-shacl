@@ -289,3 +289,83 @@ test_kvstore_target_resolution :: proc(t: ^testing.T) {
 
 	testing.expectf(t, session_error(&session) == nil, "store error: %v", session_error(&session))
 }
+
+// Report building against the persistent backend. The interesting difference
+// is that kvstore's lookup_term allocates where memstore's borrows, so this
+// asserts the report still owns every term afterwards — by closing the store
+// before reading the graph.
+@(test)
+test_kvstore_report_owns_its_terms :: proc(t: ^testing.T) {
+	path := temp_path("report")
+	defer remove_store(path)
+
+	st, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
+		return
+	}
+
+	source := `
+	@prefix sh: <http://www.w3.org/ns/shacl#> .
+	@prefix ex: <http://example.org/> .
+	ex:S a sh:NodeShape ; sh:targetNode ex:focus ;
+		sh:property [ sh:path [ sh:inversePath ex:child ] ; sh:minCount 1 ] .
+	ex:focus ex:name "x" .
+	`
+	_, parse_err, load_err := kvstore.load_turtle(st, transmute([]byte)source)
+	testing.expectf(t, parse_err.message == "", "parse failed: %s", parse_err.message)
+	testing.expectf(t, load_err == nil, "load failed: %v", load_err)
+
+	session: Session
+	session_init(&session, st)
+
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	testing.expect_value(t, compile(&s, &session).kind, shacl.Error_Kind.None)
+
+	// The property shape, found by having a path.
+	index := -1
+	for sh, i in s.shapes {
+		if sh.path >= 0 {
+			index = i
+			break
+		}
+	}
+	if !testing.expect(t, index >= 0, "no property shape compiled") {
+		kvstore.close(st)
+		return
+	}
+
+	focus, found, _ := kvstore.find_term(session.db, rdf.IRI(EX + "focus"))
+	testing.expect(t, found, "focus node missing")
+
+	r: shacl.Report
+	shacl.report_init(&r)
+	defer shacl.report_destroy(&r)
+	report_add(
+		&r,
+		&s,
+		shacl.Result {
+			focus = shacl.Node_Ref{id = focus, bound = true},
+			path = s.shapes[index].path,
+			shape = index,
+			component = .Min_Count,
+			severity = .Violation,
+		},
+		&session,
+	)
+	shacl.report_finish(&r)
+
+	// Every term in the graph came from bytes this invalidates.
+	kvstore.close(st)
+
+	testing.expect(t, !shacl.report_conforms(&r), "a violation must break conformance")
+	saw_focus := false
+	for tr in shacl.report_triples(&r) {
+		if pred, is_iri := tr.predicate.(rdf.IRI); is_iri && string(pred) == shacl.FOCUS_NODE {
+			if obj, obj_iri := tr.object.(rdf.IRI); obj_iri && string(obj) == EX + "focus" {
+				saw_focus = true
+			}
+		}
+	}
+	testing.expect(t, saw_focus, "the report lost its focus node when the store closed")
+}

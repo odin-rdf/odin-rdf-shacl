@@ -243,6 +243,71 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 	})
 }
 
+// A report is the one thing in the engine that is *supposed* to grow with the
+// violation count — it is a graph. What it must not do is strand any of it.
+@(test)
+test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "report build/destroy", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(PATHS), "", nil, allocator)
+
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+
+		focus, _ := memstore.find_term(&dictionary, rdf.IRI("http://example.org/a"))
+
+		r: shacl.Report
+		shacl.report_init(&r, allocator)
+		defer shacl.report_destroy(&r)
+		// Every path form, so the RDF-list and blank-node structures the
+		// serialiser builds are all exercised.
+		for sh, i in s.shapes {
+			for _ in 0 ..< 8 {
+				shacl_memstore.report_add(
+					&r,
+					&s,
+					shacl.Result {
+						focus = shacl.Node_Ref{id = focus, bound = true},
+						path = sh.path,
+						shape = i,
+						component = .Min_Count,
+						severity = .Violation,
+					},
+					&dictionary,
+				)
+			}
+		}
+		shacl.report_finish(&r)
+	})
+}
+
+// The conformance-only consumer is the case where memory really must stay
+// flat: it answers a boolean, so no number of results may cost it anything.
+@(test)
+test_conformance_consumer_allocates_nothing :: proc(t: ^testing.T) {
+	track(t, "conformance consumer", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+		c: shacl.Conformance
+		shacl.conformance_init(&c)
+		result := shacl.Result {
+			severity = .Warning,
+		}
+		for _ in 0 ..< 10_000 {
+			if !shacl.conformance_visitor(&c, result) {
+				break
+			}
+		}
+	})
+}
+
 // Compiling the same graph twice into the same model must not accumulate:
 // compile re-initialises, so the second call's model is the only one alive
 // and the first one's storage is not stranded.

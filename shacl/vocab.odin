@@ -65,6 +65,17 @@ BLANK_NODE_OR_IRI :: NS + "BlankNodeOrIRI"
 BLANK_NODE_OR_LITERAL :: NS + "BlankNodeOrLiteral"
 IRI_OR_LITERAL :: NS + "IRIOrLiteral"
 
+// The constraint components, as the IRIs a validation result names in
+// sh:sourceConstraintComponent (§4). One per Constraint_Kind, and the
+// catalogue initiative extends both together.
+MIN_COUNT_COMPONENT :: NS + "MinCountConstraintComponent"
+MAX_COUNT_COMPONENT :: NS + "MaxCountConstraintComponent"
+CLASS_COMPONENT :: NS + "ClassConstraintComponent"
+DATATYPE_COMPONENT :: NS + "DatatypeConstraintComponent"
+NODE_KIND_COMPONENT :: NS + "NodeKindConstraintComponent"
+HAS_VALUE_COMPONENT :: NS + "HasValueConstraintComponent"
+IN_COMPONENT :: NS + "InConstraintComponent"
+
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"
 VALIDATION_RESULT :: NS + "ValidationResult"
