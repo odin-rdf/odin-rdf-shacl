@@ -18,12 +18,14 @@ COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store
 # `shacl` is the backend-independent core; the two instantiation packages bind
 # it to a backend each and are peers, so each carries its own tests; guards
 # holds the allocation assertions; readme compiles the README's examples so the
-# documentation cannot drift from the API. SHACL-T-0002 adds tests/w3c/harness.
+# documentation cannot drift from the API; w3c/harness reads the vendored W3C
+# SHACL suite and is what will run it (SHACL-T-0002).
 PKGS := shacl \
 				shacl/memstore \
 				shacl/kvstore \
 				tests/guards \
-				tests/readme
+				tests/readme \
+				tests/w3c/harness
 
 # Packages that are built rather than tested, and so are vetted separately.
 BUILD_PKGS := tests/purity

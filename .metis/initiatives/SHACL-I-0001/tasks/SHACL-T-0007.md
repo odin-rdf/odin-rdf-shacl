@@ -45,7 +45,15 @@ gets its shape.
       the on-stack shape set carrying **recursion detection**: a recursive shape is reported
       as a failure, not hung on and not silently accepted.
 - [ ] Minimal constraint set implemented: `sh:minCount`, `sh:maxCount`, `sh:class`,
-      `sh:datatype`, `sh:nodeKind`.
+      `sh:datatype`, `sh:nodeKind`, **`sh:in`, and `sh:hasValue`**.
+
+      The last two were added after SHACL-T-0002 vendored the suite and measured what the
+      exit-criteria directories actually exercise: `sh:in` is wanted by
+      `targets/multipleTargets-001` and `targets/targetClassImplicit-001`, `sh:hasValue` by
+      `path/path-complex-001`. Both were listed as non-goals in SHACL-I-0001 on the
+      expectation that the spine could green those directories without them; under "enabled
+      means fully green" they cannot be skipped. Both are simple value comparisons needing no
+      new machinery — this is a scope correction, not a design change.
 - [ ] `sh:deactivated` honoured (a deactivated shape produces no results), and `sh:severity`
       carried through to results with `sh:Violation` as the default.
 - [ ] **The suite's target and path directories enabled and fully green**, with pinned entry

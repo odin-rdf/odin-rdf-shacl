@@ -357,6 +357,35 @@ README-as-contract test; the two review-gated write-ups delivered.
 
 ## Status Updates
 
+- **2026-08-06 — SHACL-T-0002 corrects two things in this document.** Both come from
+  measuring the vendored suite rather than predicting it; neither is absorbed silently.
+
+  1. **The Non-Goals list is wrong about two constraint components.** It puts `sh:in` and
+     `sh:hasValue` in the catalogue initiative, on the expectation that the spine could green
+     `core/targets` and `core/path` with cardinality, `sh:class`, `sh:datatype`, and
+     `sh:nodeKind`. It cannot: `sh:in` is exercised by `targets/multipleTargets-001` and
+     `targets/targetClassImplicit-001`, and `sh:hasValue` by `path/path-complex-001`. Under
+     "enabled means fully green" they cannot be skipped, so **the spine's constraint set is
+     seven components, not five**. SHACL-T-0007's criteria are updated. Both are simple value
+     comparisons — scope correction, not design change.
+
+  2. **The language-tag exposure is zero, not "deferred to the catalogue initiative".** The
+     Detailed Design predicted the exposure would sit in `sh:uniqueLang`, `sh:hasValue`, and
+     `sh:in`. Surveying the whole corpus: two files carry an uppercase-bearing tag and neither
+     depends on folding — one spells the literal identically in target and data, the other is
+     `sh:languageIn`, which SHACL defines by BCP 47 basic filtering (case-insensitive and
+     prefix-based by RFC 4647, independent of interning) and which expects `@en-NZ` to
+     conform. **The trigger cannot fire on this corpus at all**, so odin-rdf-parser stays
+     untouched for the whole initiative and, on current evidence, the catalogue one too. The
+     recorded decision stands as the family's answer; this project has no evidence forcing it.
+
+  Also raised and **not** decided: the upstream repository carries a **SHACL 1.2 test suite**
+  (138 core entries against 1.0's 98, plus `node-expr/` and `rules/`). The family ships RDF
+  1.2 and SPARQL 1.2, so 1.2 is plausibly the consistent long-run target. 1.0 was vendored
+  because it is the Recommendation and this initiative's exit criteria are stated against it,
+  matching odin-rdf-sparql's order. Recorded in `tests/w3c/README.md` as a live question that
+  wants a decision before the catalogue initiative is scoped.
+
 - **2026-08-06 — Decomposed into 8 tasks** (SHACL-T-0001 … SHACL-T-0008): scaffolding →
   suite vendoring + harness → shapes model + SHACL-A-0001 → paths → targets → results and
   report → constraint dispatch and first green directories → API, docs, and evidence

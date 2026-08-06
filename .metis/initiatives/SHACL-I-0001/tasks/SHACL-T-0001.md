@@ -4,14 +4,14 @@ level: task
 title: "Repo scaffolding: package layout, pinned PKGS, CI, and the test conventions"
 short_code: "SHACL-T-0001"
 created_at: 2026-08-06T13:58:05.326339+00:00
-updated_at: 2026-08-06T14:13:27.751173+00:00
+updated_at: 2026-08-06T14:27:44.133030+00:00
 parent: SHACL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -32,6 +32,8 @@ backend-binding decision requires, pin `PKGS` as the `Makefile`'s own note asks,
 the `tests/guards` and `tests/readme` conventions now rather than retrofitting them. No
 validation logic — this task's deliverable is a green, empty skeleton every later task hangs
 work on.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
