@@ -20,19 +20,38 @@ odin-rdf-parser and odin-rdf-sparql share, so it carries its own pin.
 98 entries across seven directories, every one `sht:Validate` with
 `mf:status sht:approved` — no proposed entries, no other entry type.
 
-| Directory | Entries | Owner |
-| --- | ---: | --- |
-| `core/targets/` | 7 | **SHACL-I-0001** (spine exit criteria) |
-| `core/path/` | 13 | **SHACL-I-0001** (spine exit criteria) |
-| `core/node/` | 32 | catalogue initiative |
-| `core/property/` | 38 | catalogue initiative |
-| `core/misc/` | 5 | catalogue initiative |
-| `core/complex/` | 2 | catalogue initiative |
-| `core/validation-reports/` | 1 | catalogue initiative |
+| Directory | Entries | State | Owner |
+| --- | ---: | --- | --- |
+| `core/targets/` | 7 | **enabled** (SHACL-T-0007) | **SHACL-I-0001** (spine exit criteria) |
+| `core/path/` | 13 | **enabled** (SHACL-T-0007) | **SHACL-I-0001** (spine exit criteria) |
+| `core/node/` | 32 | disabled, floor 7 | **SHACL-I-0002** (catalogue) |
+| `core/property/` | 38 | disabled, floor 11 | **SHACL-I-0002** (catalogue) |
+| `core/misc/` | 5 | **enabled** (SHACL-T-0008) | **SHACL-I-0001** |
+| `core/complex/` | 2 | disabled, floor 0 | SHACL-SPARQL phase |
+| `core/validation-reports/` | 1 | **enabled** (SHACL-T-0008) | **SHACL-I-0001** |
 
-**Enabled directories: none.** Nothing can validate yet; SHACL-T-0007 enables
-`core/targets/` and `core/path/`. The family's rule holds — enabled means
-fully green, no skip list, no expected-failure file.
+**26 entries enabled.** The family's rule holds — enabled means fully green, no
+skip list, no expected-failure file — and `ENABLED_ENTRIES` is pinned against
+both the table and the number the runner actually ran.
+
+### The progress floor
+
+The three disabled directories additionally carry a **floor**: how many of their
+entries pass today, pinned as a *minimum* and asserted to only ever go up
+(SHACL-T-0009). It exists because per-directory enablement gives the catalogue
+initiative no signal at all until nearly every constraint component of §4 is
+built — two directories remain, and neither can be enabled before then.
+
+It **enables nothing and excuses nothing**: a directory in the floor is still
+disabled, and the only conformance claim this repository makes is the set of
+enabled directories. Raising a floor is a deliberate edit, exactly as enabling a
+directory is, and the counts are printed on every run whether they pass or not.
+
+**A floor is not a scoreboard**, and the reason is worth carrying with the
+number: an entry expecting `sh:conforms true` passes whether it was validated or
+merely ignored. `core/complex/shacl-shacl` is the clearest case — it needs
+`sh:sparql`, `sh:shapesGraph`, and `sh:entailment`, none of which exist here, and
+it passes anyway — which is why that directory is counted but pinned at 0.
 
 ## Exclusions
 

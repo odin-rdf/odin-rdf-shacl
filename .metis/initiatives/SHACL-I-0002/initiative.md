@@ -4,14 +4,14 @@ level: initiative
 title: "The SHACL Core constraint catalogue: the rest of §4"
 short_code: "SHACL-I-0002"
 created_at: 2026-08-06T19:09:51.760962+00:00
-updated_at: 2026-08-06T19:26:18.098465+00:00
+updated_at: 2026-08-06T20:45:33.206531+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -298,6 +298,22 @@ odin-rdf-sparql; public API documented to the family contract standard; the stor
 language-tag write-ups brought to review.
 
 ## Status Updates
+
+- **2026-08-06 — Transitioned to active; SHACL-T-0009 implemented and awaiting review.**
+  The progress floor exists and is pinned, so every task after this one has a number that
+  must move. The initiative's 18 of 69 reproduced exactly and now splits per directory:
+  **`core/node` 7 of 32, `core/property` 11 of 38**, identical on both backends at both
+  widths. `make test` and `make check` green; nothing under `shacl/` was touched.
+
+  One thing decomposition did not anticipate: **`core/complex` passes 1 of its 2 entries
+  today**, and it is pinned at 0 rather than 1. `shacl-shacl` expects `sh:conforms true` and
+  needs `sh:sparql`, `sh:shapesGraph`, and `sh:entailment` — so what it demonstrates is
+  ignoring, not validating. It is the sharpest instance of the hazard this document already
+  named around `property/minCount-002` and `property/uniqueLang-002`, and it is fragile the
+  other way too: as components land, that shapes graph starts producing real results and the
+  entry may go red before it goes green for the right reason. Counted and printed,
+  deliberately not pinned. The floor total therefore prints as 19 of 72 against a pinned 18;
+  the catalogue's number is still 18 of 69.
 
 - **2026-08-06 — Design decisions resolved with Greger; transitioned through design and ready
   to decompose.** Both open decisions settled, written into Detailed Design:

@@ -18,11 +18,19 @@ SUITE_ROOT :: #directory + ".."
 // There is no skip list and no expected-failure file; a directory is either
 // entirely passing or entirely off, and turning one on is a deliberate act
 // recorded in the task that did it.
+//
+// `floor` is how many entries a **disabled** directory passes today, pinned as
+// a minimum rather than an equality. It enables nothing and excuses nothing; it
+// exists because the catalogue initiative would otherwise run most of its
+// length with no measured progress at all. An enabled directory leaves it 0 —
+// it is fully green by definition. See floor_test.odin for what the number does
+// and, more importantly, does not mean.
 Suite :: struct {
 	dir:      string,
 	includes: int,
 	entries:  int,
 	enabled:  bool,
+	floor:    int,
 }
 
 // The inventory, pinned at the commit recorded in tests/w3c/README.md.
@@ -45,14 +53,30 @@ Suite :: struct {
 // them on one at a time under the same rule. `core/complex` additionally needs
 // `sh:sparql`, so it belongs to the SHACL-SPARQL phase rather than to the
 // catalogue.
+// The floors were measured by this table's own instrumentation at SHACL-T-0009,
+// and they reproduce the diagnostic figure SHACL-I-0001 closed on: 18 of the 69
+// entries in `core/node` and `core/property`, which is why the catalogue's real
+// work is 51 entries rather than 69.
+//
+// **`core/complex` is pinned at 0 deliberately, and it is the exception worth
+// reading.** It scores 1 of 2 today, and that entry — `shacl-shacl`, SHACL's own
+// shapes validating SHACL's own shapes — expects `sh:conforms true`. It needs
+// `sh:sparql`, `sh:shapesGraph`, and `sh:entailment`, none of which exist here,
+// so what the engine is doing is not validating it but ignoring most of it and
+// finding nothing to report. Pinning that as a floor would pin the clearest
+// example in the tree of an entry passing for the wrong reason — and it is
+// fragile in the other direction too: as the catalogue lands components, that
+// shapes graph starts producing real results and the entry may well go red
+// before it goes green for the right reason. It belongs to the SHACL-SPARQL
+// phase, and it is counted and printed here without being pinned.
 SUITES := []Suite {
-	{"core/targets", 7, 7, true},
-	{"core/path", 13, 13, true},
-	{"core/node", 32, 32, false},
-	{"core/property", 38, 38, false},
-	{"core/misc", 5, 5, true},
-	{"core/complex", 2, 2, false},
-	{"core/validation-reports", 1, 1, true},
+	{"core/targets", 7, 7, true, 0},
+	{"core/path", 13, 13, true, 0},
+	{"core/node", 32, 32, false, 7},
+	{"core/property", 38, 38, false, 11},
+	{"core/misc", 5, 5, true, 0},
+	{"core/complex", 2, 2, false, 0},
+	{"core/validation-reports", 1, 1, true, 0},
 }
 
 // TOTAL_ENTRIES is asserted against the sum of the table above, so adding a
@@ -64,3 +88,12 @@ TOTAL_ENTRIES :: 98
 // A directory that quietly stopped being enabled, or a runner that quietly
 // skipped an entry, has to fail somewhere; this is where.
 ENABLED_ENTRIES :: 26
+
+// PROGRESS_FLOOR is the sum of the disabled directories' floors, pinned
+// separately from them for the same reason ENABLED_ENTRIES is pinned separately
+// from `enabled`: a number that can be edited in one place only is not a pin.
+// Raising a directory's floor without raising this fails.
+//
+// It starts at the catalogue initiative's measured 18 — `core/node` 7 plus
+// `core/property` 11 — and every component task is expected to move it.
+PROGRESS_FLOOR :: 18
