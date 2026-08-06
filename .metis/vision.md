@@ -4,7 +4,7 @@ level: vision
 title: "odin-rdf-shacl"
 short_code: "SHACL-V-0001"
 created_at: 2026-08-04T16:47:41.838764+00:00
-updated_at: 2026-08-04T16:48:59.367044+00:00
+updated_at: 2026-08-06T12:00:00.000000+00:00
 archived: false
 
 tags:
@@ -35,7 +35,18 @@ The library is deliberately validation-only: inference/entailment, SHACL rules (
 
 ## Current State
 
-The project is at its inception; no validation code exists. odin-rdf-parser is complete (100% W3C conformance, RDF 1.2/RDF-star included); odin-rdf-store is newly started and will provide the match interface this project reads through; odin-rdf-sparql is newly started and only matters here for the later SHACL-SPARQL phase. Work can begin once the store's first match interface exists — shape model design and shapes-graph parsing can start against odin-rdf-parser alone.
+The project is at its inception; no validation code exists. The repository holds a `Makefile`, `ols.json`, `LICENSE`, and this vision. **Every dependency is complete — nothing blocks starting (2026-08-06).**
+
+- **odin-rdf-parser** — done and tagged v0.1.0. All 1045 W3C conformance tests pass, RDF 1.2/RDF-star included, on Linux, macOS, and Windows. Shapes graphs and validation reports both parse and emit through it.
+- **odin-rdf-store** — done and tagged v0.1.0, well past "newly started". The match interface is published (STORE-A-0002, `store/interface.odin`) with **two** conforming backends, memstore and kvstore-over-LMDB, verified by one shared conformance suite passing verbatim against both at both `Term_ID` widths. LMDB archives are vendored for five platforms (STORE-A-0004), so a persistent SHACL run works everywhere CI does.
+- **odin-rdf-sparql** — done and tagged v0.1.0, relevant here only for the later SHACL-SPARQL phase, which it is ready to serve.
+
+The `Makefile` already declares the `rdf:` and `store:` collections and notes where the `sparql:` collection is added when the SHACL-SPARQL phase begins. It discovers packages by globbing rather than listing them, with a note to pin `PKGS` to an explicit list once the layout settles — worth doing with the first package, as the sibling projects do. There is no CI workflow yet; the store's is the template, minus the LMDB platform constraint until a backend is actually linked.
+
+Two things to expect rather than be surprised by:
+
+- **Store capabilities this project will probably pull.** Two items already sit in odin-rdf-store's backlog with odin-rdf-sparql's evidence attached, and target resolution is likely to want both: *dataset introspection* (the named-graph list, and the terms a graph holds) and *a named-graph wildcard for the graph position of a match pattern*. The family's pattern is to propose upstream with evidence rather than work around locally, exactly as `find_term` arrived.
+- **The open term-identity question.** Whether language tags fold case and IRIs normalize is undecided family-wide, and SHACL Core is term comparison end to end — `sh:datatype`, `sh:hasValue`, `sh:in`, `sh:class`, node equality. Deciding it before the constraint components are built is cheaper than re-verifying a passing suite afterwards.
 
 ## Future State
 
