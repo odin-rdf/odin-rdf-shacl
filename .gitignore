@@ -1,4 +1,25 @@
 build/
 
+# Test binaries `odin test` leaves at the repository root.
+#
+# A clean run deletes its own binary; an *interrupted* one does not — and
+# piping the output into `head`, or anything else that exits early, interrupts
+# it. That is common enough while reading test output to be worth ignoring.
+#
+# The name is the package's last path component. Every entry is anchored with a
+# leading slash so it can only ever match a file at the root, never the source
+# directory of the same name — `shacl/memstore`, `shacl/kvstore`,
+# `tests/guards`, `tests/readme`, `tests/w3c/harness` are all real packages, and
+# an unanchored `memstore` would ignore one of them.
+#
+# Package `shacl` needs no entry: its binary would collide with the `shacl/`
+# directory, so none is written. Do not add `/shacl` here — it would match the
+# directory and ignore the whole core package.
+/memstore
+/kvstore
+/guards
+/readme
+/harness
+
 # Metis Ralph loop state -- per-session runtime state, not source
 .claude/
