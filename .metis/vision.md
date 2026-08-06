@@ -46,7 +46,9 @@ The `Makefile` already declares the `rdf:` and `store:` collections and notes wh
 Two things to expect rather than be surprised by:
 
 - **Store capabilities this project will probably pull.** Two items already sit in odin-rdf-store's backlog with odin-rdf-sparql's evidence attached, and target resolution is likely to want both: *dataset introspection* (the named-graph list, and the terms a graph holds) and *a named-graph wildcard for the graph position of a match pattern*. The family's pattern is to propose upstream with evidence rather than work around locally, exactly as `find_term` arrived.
-- **The open term-identity question.** Whether language tags fold case and IRIs normalize is undecided family-wide, and SHACL Core is term comparison end to end — `sh:datatype`, `sh:hasValue`, `sh:in`, `sh:class`, node equality. Deciding it before the constraint components are built is cheaper than re-verifying a passing suite afterwards.
+- **The open term-identity question, deliberately deferred to this project (2026-08-06).** Half of it is settled: IRIs are **never** normalized, because RDF 1.1 Concepts §3.2 requires Simple String Comparison and says "further normalization MUST NOT be performed". The open half is whether language tags fold case — `"string"@EN` against `"string"@en`. §3.3 compares them character by character but also states that the value space of language tags is always lower case, so folding is permitted rather than required.
+
+  It was deferred here because SHACL Core is term comparison end to end — `sh:datatype`, `sh:hasValue`, `sh:in`, `sh:languageIn`, node equality — so this is where the need stops being theoretical. If it is taken up, the fix belongs in **odin-rdf-parser at literal construction** and nowhere else: memstore interns with `map[rdf.Literal]Term_ID` and never calls `rdf.equal`, so changing equality alone does nothing, and folding only in the store dictionaries would leave the data model disagreeing with storage while forcing a kvstore on-disk format bump. The full analysis is in odin-rdf-sparql's SPARQL-T-0021.
 
 ## Future State
 
