@@ -9,12 +9,18 @@ through [odin-rdf-store](../odin-rdf-store)'s match interface alone, so the
 same shapes validate in-memory and LMDB-backed data identically. Written in
 Odin with no external dependencies.
 
-**Status: under construction.** This repository currently holds scaffolding
-only — no validation logic yet. The first initiative (SHACL-I-0001, the "Core
-spine") is building shapes compilation, target resolution, property paths, the
-validation report, and the first constraint components, measured against the
-official W3C SHACL test suite. See `.metis/` for the vision, the initiative,
-and SHACL-A-0001.
+**Status: under construction.** The Core spine validates: shapes compilation,
+target resolution, property paths, constraint dispatch, and
+`sh:ValidationReport` emission all work end to end, and the W3C suite's
+`core/targets` and `core/path` directories are green — every entry, against
+both storage backends, at both `Term_ID` widths. What is missing is most of the
+SHACL Core constraint catalogue: the spine implements `sh:minCount`,
+`sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
+`sh:in`, which is what those two directories exercise. The value-range and
+string components, `sh:closed`, the logical combinators, and the shape-based
+constraints are the second initiative, and the remaining suite directories stay
+disabled until they land. The public API and its documentation are
+SHACL-T-0008. See `.metis/` for the vision, the initiative, and SHACL-A-0001.
 
 This is a peer of [odin-rdf-sparql](../odin-rdf-sparql) on the same
 foundation, not a layer above it. **SHACL Core has no dependency on the query

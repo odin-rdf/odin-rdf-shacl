@@ -308,6 +308,192 @@ test_conformance_consumer_allocates_nothing :: proc(t: ^testing.T) {
 	})
 }
 
+// A shapes graph exercising every path form, every target form, and all seven
+// constraint components at once, over data with a cycle in it — the widest
+// single validation the spine can be asked to run.
+VALIDATION_SHAPES :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex: <http://example.org/> .
+
+ex:S a sh:NodeShape ; sh:targetClass ex:Super ; sh:targetSubjectsOf ex:p ;
+	sh:targetNode ex:a, ex:never_mentioned_anywhere ;
+	sh:class ex:Super ;
+	sh:property [ sh:path ex:p ; sh:minCount 2 ; sh:maxCount 1 ] ;
+	sh:property [ sh:path [ sh:inversePath ex:p ] ; sh:nodeKind sh:Literal ] ;
+	sh:property [ sh:path ( ex:p ex:q ) ; sh:datatype xsd:string ] ;
+	sh:property [ sh:path [ sh:alternativePath ( ex:p ex:q ) ] ; sh:hasValue ex:never ] ;
+	sh:property [ sh:path [ sh:zeroOrMorePath ex:p ] ; sh:class ex:Missing ] ;
+	sh:property [ sh:path [ sh:oneOrMorePath ex:p ] ; sh:in ( ex:a ) ] ;
+	sh:property [ sh:path [ sh:zeroOrOnePath ex:p ] ; sh:minCount 9 ] .
+`
+
+VALIDATION_DATA :: `
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ex: <http://example.org/> .
+ex:Sub rdfs:subClassOf ex:Super .
+ex:a a ex:Sub ; ex:p ex:b . ex:b ex:p ex:c ; ex:q "s" . ex:c ex:p ex:a .
+`
+
+// Validation is what the engine is for, and the allocations it makes are the
+// ones that repeat: a value-node set per focus node per property shape, a
+// frontier per reachability round, a stack frame per shape entered. Each is
+// bounded and each must be returned, or a long-running validator leaks in
+// proportion to the data rather than to the shapes.
+//
+// The cyclic data matters for the same reason it does in the path guard: a walk
+// that leaked its frontier would leak once per traversal of the cycle.
+@(test)
+test_validation_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "validation", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "", allocator)
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+		_, _ = memstore.load_turtle(
+			&dictionary,
+			&dataset,
+			transmute([]byte)string(VALIDATION_DATA),
+			"",
+			nil,
+			allocator,
+		)
+
+		b: shacl.Bindings
+		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		defer shacl.bindings_destroy(&b)
+
+		count := 0
+		visit :: proc(data: rawptr, result: shacl.Result) -> bool {
+			n := cast(^int)data
+			n^ += 1
+			return true
+		}
+		// Repeated, because a per-validation leak and a per-result leak look the
+		// same after one run.
+		for _ in 0 ..< 4 {
+			_ = shacl_memstore.validate(
+				&s,
+				&b,
+				&dictionary,
+				&dataset,
+				visit,
+				&count,
+				store.DEFAULT_GRAPH,
+				allocator,
+			)
+		}
+	})
+}
+
+// The abnormal exits have to free like the normal one, and they are the paths
+// ordinary use never takes: a visitor that stops leaves frames on the stack,
+// and a recursive shape abandons the walk mid-flight. Both unwind by hand
+// rather than by returning, which is exactly the code most likely to strand a
+// value-node set.
+@(test)
+test_early_exit_and_recursion_unwind_cleanly :: proc(t: ^testing.T) {
+	track(t, "abnormal unwind", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		RECURSIVE :: `
+		@prefix sh: <http://www.w3.org/ns/shacl#> .
+		@prefix ex: <http://example.org/> .
+		ex:R a sh:PropertyShape ; sh:targetNode ex:a ; sh:path ex:p ; sh:property ex:R .
+		`
+		// The first source stops at the first result; the second fails on
+		// recursion. Both leave the walk mid-flight.
+		sources := [2]string{VALIDATION_SHAPES, RECURSIVE}
+		for source in sources {
+			s: shacl.Shapes
+			defer shacl.shapes_destroy(&s)
+			_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)source, "", allocator)
+
+			dictionary: memstore.Dictionary
+			memstore.dictionary_init(&dictionary, allocator)
+			defer memstore.dictionary_destroy(&dictionary)
+			dataset: memstore.Dataset
+			memstore.dataset_init(&dataset, allocator)
+			defer memstore.dataset_destroy(&dataset)
+			_, _ = memstore.load_turtle(
+				&dictionary,
+				&dataset,
+				transmute([]byte)string(VALIDATION_DATA),
+				"",
+				nil,
+				allocator,
+			)
+
+			b: shacl.Bindings
+			shacl_memstore.bind(&b, &s, &dictionary, allocator)
+			defer shacl.bindings_destroy(&b)
+
+			stop :: proc(data: rawptr, result: shacl.Result) -> bool {
+				return false
+			}
+			for _ in 0 ..< 4 {
+				_ = shacl_memstore.validate(
+					&s,
+					&b,
+					&dictionary,
+					&dataset,
+					stop,
+					nil,
+					store.DEFAULT_GRAPH,
+					allocator,
+				)
+			}
+		}
+	})
+}
+
+// The conformance answer must cost nothing beyond the traversal: it is the
+// consumer that exists for the deployment shape — ~200 processes per machine,
+// each answering "does this conform?" — and a per-result allocation there is a
+// per-result allocation everywhere.
+@(test)
+test_conformance_validation_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "conformance validation", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "", allocator)
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+		_, _ = memstore.load_turtle(
+			&dictionary,
+			&dataset,
+			transmute([]byte)string(VALIDATION_DATA),
+			"",
+			nil,
+			allocator,
+		)
+
+		b: shacl.Bindings
+		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		defer shacl.bindings_destroy(&b)
+
+		for _ in 0 ..< 4 {
+			_, _ = shacl_memstore.conforms(&s, &b, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+		}
+	})
+}
+
 // Compiling the same graph twice into the same model must not accumulate:
 // compile re-initialises, so the second call's model is the only one alive
 // and the first one's storage is not stranded.

@@ -269,17 +269,27 @@ test_expected_report_extraction :: proc(t: ^testing.T) {
 	)
 }
 
-// No directory is enabled, and that is a deliberate state rather than an
-// oversight: there is no validation engine yet. This test exists so that
-// enabling one is a visible change here too.
+// Exactly the two directories the spine's exit criteria name are enabled, and
+// no others. Turning one on is a deliberate act with a task behind it, so it
+// has to be a visible change here as well as in the table.
 @(test)
-test_no_directories_enabled_yet :: proc(t: ^testing.T) {
+test_exactly_the_spine_directories_are_enabled :: proc(t: ^testing.T) {
+	SPINE :: []string{"core/targets", "core/path"}
+
 	for suite in SUITES {
+		want := false
+		for dir in SPINE {
+			if suite.dir == dir {
+				want = true
+			}
+		}
 		testing.expectf(
 			t,
-			!suite.enabled,
-			"%s is enabled, but no validation engine exists yet (SHACL-T-0007 enables the first two)",
+			suite.enabled == want,
+			"%s: enabled = %v, but the spine enables core/targets and core/path only "+
+			"(the rest need catalogue constraint components)",
 			suite.dir,
+			suite.enabled,
 		)
 	}
 }

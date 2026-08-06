@@ -12,3 +12,21 @@ import shacl ".."
 report_add :: proc(r: ^shacl.Report, s: ^shacl.Shapes, result: shacl.Result, session: ^Session) {
 	shacl.report_add(r, s, result, load_adapter, session)
 }
+
+// Report_Sink is `report_add` as a Result_Visitor — the persistent twin of
+// `shacl/memstore`'s, and one field shorter because kvstore keeps its
+// dictionary and its quads in one handle.
+//
+// It never stops the stream: a report wants every result, and a short report is
+// a wrong one. `Conformance` is the consumer that stops.
+Report_Sink :: struct {
+	report:  ^shacl.Report,
+	shapes:  ^shacl.Shapes,
+	session: ^Session,
+}
+
+report_sink_visitor :: proc(data: rawptr, result: shacl.Result) -> bool {
+	sink := cast(^Report_Sink)data
+	shacl.report_add(sink.report, sink.shapes, result, load_adapter, sink.session)
+	return true
+}

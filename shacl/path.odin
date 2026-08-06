@@ -120,6 +120,16 @@ compile_path :: proc(
 // classify_path decides what a non-IRI path node is and returns its operands.
 // Flat: it issues queries and calls list_items, but nothing calls it back, so
 // it cannot participate in an instantiation cycle.
+//
+// **A sequence wins over every other form**, which is why `rdf:first` is
+// tested before `sh:inversePath` and friends. §2.3.1 says nothing about a node
+// carrying two path forms at once — it is ill-formed and the spec leaves the
+// behaviour open — but the suite does not: `path-strange-001` and
+// `path-strange-002` each write a node that is both a sequence and an
+// `sh:inversePath`, and both expect `sh:resultPath ( ex:p ex:q )`, the
+// sequence. Established here by measurement rather than guessed
+// (SHACL-T-0007); the original order read the single-operand forms first and
+// would have compiled the inverse instead.
 @(private = "file")
 classify_path :: proc(
 	r: Reader($D, $It),
@@ -133,6 +143,19 @@ classify_path :: proc(
 	operands: [dynamic]store.Term_ID,
 	ok: bool,
 ) {
+	// A sequence path is a bare RDF list, recognised by rdf:first.
+	if r.has_first {
+		if _, is_cell := first_object(r, node, r.first_id, MATCH, NEXT, DESTROY); is_cell {
+			items, list_ok := list_items(r, node, MATCH, NEXT, DESTROY)
+			if !list_ok {
+				delete(items)
+				return .Sequence, operands, false
+			}
+			delete(operands)
+			return .Sequence, items, true
+		}
+	}
+
 	// The single-operand forms.
 	single := [4]struct {
 		iri:  string,
@@ -166,14 +189,8 @@ classify_path :: proc(
 		}
 	}
 
-	// Anything else must be a sequence path, which is a bare RDF list.
-	items, list_ok := list_items(r, node, MATCH, NEXT, DESTROY)
-	if !list_ok {
-		delete(items)
-		return .Sequence, operands, false
-	}
-	delete(operands)
-	return .Sequence, items, true
+	// A node that is neither a list nor any of the named forms is not a path.
+	return .Sequence, operands, false
 }
 
 // emit_path appends a node and returns its index. Children are copied into

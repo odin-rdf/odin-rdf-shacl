@@ -18,3 +18,21 @@ report_add :: proc(
 ) {
 	shacl.report_add(r, s, result, load_adapter, dictionary)
 }
+
+// Report_Sink is `report_add` as a Result_Visitor: the three things folding a
+// result into a graph needs, in the one `rawptr` the streaming API carries.
+//
+// It never stops the stream, which is the point — a report is the case where
+// every result matters, so early exit would produce a graph that quietly said
+// less than the truth. `Conformance` is the consumer that stops.
+Report_Sink :: struct {
+	report:     ^shacl.Report,
+	shapes:     ^shacl.Shapes,
+	dictionary: ^memstore.Dictionary,
+}
+
+report_sink_visitor :: proc(data: rawptr, result: shacl.Result) -> bool {
+	sink := cast(^Report_Sink)data
+	shacl.report_add(sink.report, sink.shapes, result, load_adapter, sink.dictionary)
+	return true
+}

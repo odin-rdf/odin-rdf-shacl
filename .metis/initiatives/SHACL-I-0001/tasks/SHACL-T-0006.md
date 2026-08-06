@@ -4,17 +4,17 @@ level: task
 title: "Validation results: the streaming result API and the report graph"
 short_code: "SHACL-T-0006"
 created_at: 2026-08-06T13:58:16.016854+00:00
-updated_at: 2026-08-06T17:55:21.294159+00:00
+updated_at: 2026-08-06T18:04:01.463154+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0003]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: SHACL-I-0001
 ---
 
@@ -30,6 +30,8 @@ Build the output half of the spine: the programmatic result API that delivers vi
 they are found, and the `sh:ValidationReport` graph emitted over it. This is what makes the
 initiative measurable — the W3C suite compares report graphs, so without this nothing can be
 scored.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

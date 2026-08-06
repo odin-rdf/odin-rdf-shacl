@@ -27,13 +27,15 @@ Suite :: struct {
 
 // The inventory, pinned at the commit recorded in tests/w3c/README.md.
 //
-// Nothing is enabled: SHACL-T-0002 delivers the harness, and no validation
-// engine exists yet to run against it. SHACL-T-0007 enables `core/targets`
-// and `core/path` — the spine's exit criteria — and the catalogue initiative
-// takes the rest.
+// `core/targets` and `core/path` are the spine's exit criteria, enabled in
+// SHACL-T-0007 when the validator that greens them landed. Every remaining
+// directory needs constraint components the spine deliberately does not
+// implement — the logical combinators, the value-range and string families,
+// `sh:node`, `sh:closed` — and belongs to the catalogue initiative, which turns
+// them on one at a time under the same rule.
 SUITES := []Suite {
-	{"core/targets", 7, 7, false},
-	{"core/path", 13, 13, false},
+	{"core/targets", 7, 7, true},
+	{"core/path", 13, 13, true},
 	{"core/node", 32, 32, false},
 	{"core/property", 38, 38, false},
 	{"core/misc", 5, 5, false},
@@ -44,3 +46,9 @@ SUITES := []Suite {
 // TOTAL_ENTRIES is asserted against the sum of the table above, so adding a
 // directory without updating the total — or vice versa — fails.
 TOTAL_ENTRIES :: 98
+
+// ENABLED_ENTRIES is how many entries actually run, pinned separately and
+// asserted against both the table and the number the runner really executed.
+// A directory that quietly stopped being enabled, or a runner that quietly
+// skipped an entry, has to fail somewhere; this is where.
+ENABLED_ENTRIES :: 20

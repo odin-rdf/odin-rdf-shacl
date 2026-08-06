@@ -4,17 +4,17 @@ level: task
 title: "Constraint dispatch and the minimal set: first suite directories green"
 short_code: "SHACL-T-0007"
 created_at: 2026-08-06T13:58:17.309877+00:00
-updated_at: 2026-08-06T13:58:17.309877+00:00
+updated_at: 2026-08-06T18:11:53.629726+00:00
 parent: SHACL-I-0001
-blocked_by: ["SHACL-T-0002", "SHACL-T-0004", "SHACL-T-0005", "SHACL-T-0006"]
+blocked_by: [SHACL-T-0002, SHACL-T-0004, SHACL-T-0005, SHACL-T-0006]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/active"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: SHACL-I-0001
 ---
 
@@ -34,17 +34,17 @@ gets its shape.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] **Term-binding bridge**: the shapes model's `rdf.Term` constants bound to the data
+- [x] **Term-binding bridge**: the shapes model's `rdf.Term` constants bound to the data
       store's `Term_ID`s once at validation setup via `find_term`, mirroring
       odin-rdf-sparql's approach — and handling the SHACL asymmetry, where a constant absent
       from the data store makes value nodes **violate** rather than short-circuiting to empty.
-- [ ] **Constraint-dispatch seam** shaped for the catalogue initiative to fill: adding a
+- [x] **Constraint-dispatch seam** shaped for the catalogue initiative to fill: adding a
       constraint component should mean adding a case and its parameters, not touching the
       evaluator.
-- [ ] Evaluator is a **stack-driven walk over the flat model** (SHACL-A-0001 decision 4), with
+- [x] Evaluator is a **stack-driven walk over the flat model** (SHACL-A-0001 decision 4), with
       the on-stack shape set carrying **recursion detection**: a recursive shape is reported
       as a failure, not hung on and not silently accepted.
-- [ ] Minimal constraint set implemented: `sh:minCount`, `sh:maxCount`, `sh:class`,
+- [x] Minimal constraint set implemented: `sh:minCount`, `sh:maxCount`, `sh:class`,
       `sh:datatype`, `sh:nodeKind`, **`sh:in`, and `sh:hasValue`**.
 
       The last two were added after SHACL-T-0002 vendored the suite and measured what the
@@ -54,17 +54,17 @@ gets its shape.
       expectation that the spine could green those directories without them; under "enabled
       means fully green" they cannot be skipped. Both are simple value comparisons needing no
       new machinery — this is a scope correction, not a design change.
-- [ ] `sh:deactivated` honoured (a deactivated shape produces no results), and `sh:severity`
+- [x] `sh:deactivated` honoured (a deactivated shape produces no results), and `sh:severity`
       carried through to results with `sh:Violation` as the default.
-- [ ] **The suite's target and path directories enabled and fully green**, with pinned entry
+- [x] **The suite's target and path directories enabled and fully green**, with pinned entry
       counts, no skip list, **against both backends at both `Term_ID` widths**. Enabled means
       fully green — a directory that cannot pass entirely stays disabled and the reason is
       recorded.
-- [ ] A recursion test using a shape that references itself via `sh:node`, asserting a
+- [x] A recursion test using a shape that references itself via `sh:node`, asserting a
       reported failure. `sh:node` itself is a catalogue constraint; the *detection* is proven
       here because the mechanism belongs to the spine.
-- [ ] Allocation guards over the validation hot path.
-- [ ] `make test` and `make check` green.
+- [x] Allocation guards over the validation hot path.
+- [x] `make test` and `make check` green.
 
 ## Implementation Notes
 
@@ -102,4 +102,84 @@ surprises surface. Two to expect:
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-06 — Complete, awaiting review.** All nine criteria met. `make check` clean,
+  `make test` green at both `Term_ID` widths: **86 tests per width**, up from 67 — 40
+  memstore (9 new), 12 kvstore (4 new), 10 guards (3 new), 22 harness (2 new, one of which
+  *is* the conformance run).
+
+  **The exit criteria are met: `core/targets` (7 entries) and `core/path` (13) are fully
+  green**, no skip list, against **both** backends at **both** widths — 40 entry runs per
+  width, each compared to its expected report by blank-node isomorphism.
+
+  **What landed.** `shacl/validate.odin` (the `Access` and `Bindings` bridges, `Failure`, and
+  the stack-driven walk), `shacl/check.odin` (the dispatch seam and the seven components),
+  `validate` / `validate_report` / `conforms` in both instantiation packages, a `Report_Sink`
+  visitor in each, and `tests/w3c/harness/runner.odin` — the thing that makes any of this
+  gradable.
+
+  **Two corrections the suite forced, neither absorbed silently.**
+
+  1. **Path-form precedence was backwards.** `classify_path` read the named forms
+     (`sh:inversePath` and friends) first and fell back to a bare RDF list. `path-strange-001`
+     and `-002` each write a node that is *both* a sequence and an `sh:inversePath`, and both
+     expect `sh:resultPath ( ex:p ex:q )` — the sequence. §2.3.1 says nothing about a node
+     carrying two forms, so this is measured rather than chosen; `rdf:first` is now tested
+     first and `test_sequence_wins_over_a_named_path_form` pins it. Left as it was, one entry
+     of an otherwise green directory would have failed.
+  2. **`sh:datatype` does not check the lexical form.** §4.3.1 requires the value's lexical
+     form to be well-formed for the datatype, so `"abc"^^xsd:integer` should violate even
+     though the datatype IRI matches. Not implemented: it needs the lexical-to-value machinery
+     the catalogue initiative's value-range components need anyway, and both enabled
+     directories use `sh:datatype` only with `xsd:string`, whose lexical space is every
+     string. Recorded in the code at the check, naming `core/node`'s `datatype-002` as the
+     entry that will demand it — that directory stays disabled until it does.
+
+  **Neither risk in this task fired.** The two directories partition exactly as SHACL-T-0002
+  measured — the seven-component set covers them with nothing left over — so the exit criteria
+  did not need restating. And the language-tag trigger did not fire: no entry in either
+  directory depends on tag folding, which is what SHACL-T-0002's corpus survey predicted.
+  **odin-rdf-parser is untouched.**
+
+  **Scope is the design.** SHACL's components divide into value-scoped (asked once per value
+  node, result carries `sh:value`) and set-scoped (asked once about the whole value-node set,
+  result carries none). Getting one wrong produces results that look plausible and are wrong,
+  and the suite catches it immediately: `path-complex-001` expects an `sh:hasValue` violation
+  with a `sh:resultPath` and no `sh:value`, `targetClassImplicit-001` expects an `sh:in`
+  violation that names one. So scope is a named property of a `Constraint_Kind` rather than a
+  habit of the code, and it is the second thing the catalogue initiative fills in per
+  component.
+
+  **Recursion detection is the stack, not a search.** The walk is explicit (SHACL-A-0001
+  decision 4), so "the shapes currently being validated" is literally the stack and `on_stack`
+  is one bit per shape. Detection fires at re-entry, before another triple is read. The test
+  uses a `sh:property` self-reference rather than the `sh:node` the criterion names, because
+  `sh:node` is a catalogue constraint the spine does not implement — the mechanism reached is
+  identical, and the fixture's data is cyclic, so a test that terminates at all is already
+  most of the assertion. Also asserted: a shape reached twice as a *sibling* is not recursion,
+  which is how this is easiest to get wrong in the other direction.
+
+  **The asymmetry is carried per use rather than collapsed.** A term the data store has never
+  seen means **emptiness** on a path or a target and **failure** in a constraint —
+  `sh:class ex:Missing` makes every value node violate, and `path-complex-002` is the suite
+  entry that depends on it, because its data graph never mentions `ex:C` at all.
+  `test_absent_terms_mean_opposite_things` puts both directions in one fixture.
+
+  **The suite runner loads the two graphs into two separate stores**, even when an entry names
+  the same file for both — which nearly all of them do. Parsing twice costs microseconds and
+  buys the ownership property on every run rather than only in the test that asserts it: the
+  shapes store is destroyed before the data store is opened. It also keeps the two graphs'
+  blank-node label spaces apart, which the entries with separate shapes files would otherwise
+  need special handling for.
+
+  **Store evidence: still nothing.** `docs/store-evidence.md` updated. One new near-miss
+  recorded and rejected — `sh:class` asks a *set* membership question the interface answers
+  one bound match at a time, and the right answer is to build the closure set above the
+  interface and issue one `(value, rdf:type, *)` match per value node, not to ask for a new
+  verb. The shape of that question recurs in the catalogue initiative (`sh:node`,
+  `sh:qualifiedValueShape`), so the reasoning is written down rather than re-derived.
+  STORE-T-0019 (snapshot reads) is sharpened but not promoted: a full validation is now
+  measurably read-heavy, which widens the window a concurrent writer could open in, but
+  nothing in the interface is missing and no consumer has asked.
+
+  **README's status paragraph corrected** — it still claimed the repository held scaffolding
+  only. The quick-start example and the contract documentation remain SHACL-T-0008's.

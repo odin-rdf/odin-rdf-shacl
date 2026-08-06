@@ -357,6 +357,35 @@ README-as-contract test; the two review-gated write-ups delivered.
 
 ## Status Updates
 
+- **2026-08-06 — SHACL-T-0007 met the initiative's suite exit criteria.** `core/targets` and
+  `core/path` are fully green with pinned entry counts and no skip list, against both backends
+  at both `Term_ID` widths; reports are compared by blank-node isomorphism; the data graph is
+  read through the published match interface alone; and nothing in this repository depends on
+  odin-rdf-sparql. What remains of the initiative is SHACL-T-0008: the public API documented
+  to the family contract standard, the README-as-contract test, and the two review-gated
+  write-ups.
+
+  Three things this document should carry forward rather than leave in a task:
+
+  1. **`sh:datatype` is implemented as datatype-IRI equality only.** §4.3.1 also requires the
+     lexical form to be well-formed, which is not done — it needs the lexical-to-value
+     machinery the catalogue initiative's value-range components need anyway, and both
+     enabled directories use `sh:datatype` with `xsd:string` alone. **This is a known debt the
+     catalogue initiative inherits**, and `core/node`'s `datatype-002` is the entry that
+     forces it.
+  2. **The suite pinned a path-precedence question the spec leaves open.** A node carrying two
+     path forms at once (a bare RDF list *and* an `sh:inversePath`) is ill-formed and §2.3.1
+     says nothing about it; `path-strange-001` and `-002` both expect the **sequence** to win.
+     Compilation now tests `rdf:first` before the named forms, with a unit test pinning it.
+     Measured, not chosen.
+  3. **The two risks this task carried did not fire.** The exit-criteria directories partition
+     exactly as SHACL-T-0002 measured — the seven-component set covers them with nothing left
+     over — and no entry depends on language-tag folding. **odin-rdf-parser stays untouched
+     for the whole initiative**, as the corpus survey predicted.
+
+  The store-evidence log still records no capability gap, now against a complete validation
+  path rather than target resolution alone.
+
 - **2026-08-06 — SHACL-T-0002 corrects two things in this document.** Both come from
   measuring the vendored suite rather than predicting it; neither is absorbed silently.
 

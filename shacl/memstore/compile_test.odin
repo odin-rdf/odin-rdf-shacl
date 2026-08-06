@@ -289,6 +289,46 @@ test_compile_path_forms :: proc(t: ^testing.T) {
 	}
 }
 
+// A node carrying two path forms at once is ill-formed and §2.3.1 says nothing
+// about it, but the suite does: `path-strange-001` writes a node that is both a
+// sequence and an `sh:inversePath`, and its expected report carries
+// `sh:resultPath ( ex:p ex:q )` — the sequence. So the precedence is measured
+// rather than chosen, and this pins it, because the natural reading order (the
+// named forms first, the bare list as a fallback) gets it backwards and would
+// fail one entry of an otherwise green directory.
+@(test)
+test_sequence_wins_over_a_named_path_form :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX +
+		`
+		@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+		ex:S a sh:PropertyShape ; sh:targetNode ex:n ;
+			sh:path [ rdf:first ex:p ; rdf:rest ( ex:q ) ; sh:inversePath ex:p ] .
+		`,
+	) {
+		return
+	}
+
+	sh, found := find_shape(&s, "http://example.org/S")
+	if !testing.expect(t, found) {
+		return
+	}
+	node := s.paths[sh.path]
+	if !testing.expect_value(t, node.kind, shacl.Path_Kind.Sequence) {
+		return
+	}
+	operands := shacl.path_operands(&s, node)
+	if !testing.expect_value(t, len(operands), 2) {
+		return
+	}
+	testing.expect_value(t, s.paths[operands[0]].predicate, rdf.Term(rdf.IRI("http://example.org/p")))
+	testing.expect_value(t, s.paths[operands[1]].predicate, rdf.Term(rdf.IRI("http://example.org/q")))
+}
+
 @(test)
 test_compile_constraint_components :: proc(t: ^testing.T) {
 	s: shacl.Shapes

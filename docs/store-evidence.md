@@ -9,13 +9,18 @@ odin-rdf-store's Metis from this repository, and nothing here is worked around
 with a backend-specific shortcut. Upstream repositories are read-only from this
 project; findings go to review as a proposal.
 
-Started SHACL-T-0005. Status below is as of that task.
+Started SHACL-T-0005. Status below is as of **SHACL-T-0007**, the task that
+joined the spine into a working validator and greened `core/targets` and
+`core/path` against both backends — so the log now reflects a complete
+validation path, not only target resolution.
 
 ## Summary so far
 
 **Nothing yet.** No capability gap has been found. That is a result rather than
 an absence of work: the vision predicted this project would pull two specific
 store backlog items, and neither prediction has survived contact with the code.
+A whole validator — targets, paths, seven constraint components, and report
+emission — reaches the store through `match` and `find_term` and nothing else.
 
 | Predicted by the vision | Status |
 | --- | --- |
@@ -80,6 +85,31 @@ The case is only reachable when the shapes graph and the data graph are
 different stores, which is why the split-store fixture in
 `shacl/memstore/target_test.odin` exists.
 
+## Considered and rejected as a gap: "does this node have a type in this set?"
+
+The one question constraint evaluation asks that the interface does not answer
+directly. `sh:class ex:C` holds of a value node when the node carries an
+`rdf:type` somewhere in `ex:C`'s downward `rdfs:subClassOf*` closure — a *set*
+membership test, where the interface offers one bound-object match at a time.
+
+Two shapes of workaround suggest themselves and both are worse than what the
+engine does. Asking the store once per class in the closure is |closure| matches
+per value node. Asking for a set match would be a new interface verb, which is a
+capability request built on one component's convenience rather than on evidence.
+
+What the engine does instead: compute the closure once per class per validation,
+into a `map[Term_ID]bool`, and then issue **one** match per value node —
+`(value, rdf:type, *)` — stopping at the first type in the set. That is one
+store call per value node, which is the same cost as any other value-scoped
+component, and the closure is a walk the interface already serves. The cache
+lives in `Validation` and is a linear scan over the handful of classes a shapes
+graph names.
+
+Recorded because the shape of the question recurs: `sh:node` and
+`sh:qualifiedValueShape` in the catalogue initiative will want membership tests
+too, and the answer will be the same one — build the set above the interface,
+ask the interface for one bound match.
+
 ## Not yet exercised
 
 Recorded so the log's silence is legible rather than ambiguous:
@@ -94,3 +124,12 @@ Recorded so the log's silence is legible rather than ambiguous:
   suites run single-threaded so nothing observes it, and the engine is correct
   over per-operation reads; this is an API-shape question rather than a bug,
   and it is the one item here most likely to become real evidence.
+
+  **SHACL-T-0007 sharpens it without changing the verdict.** A full validation
+  is now measurably read-heavy — one scan per target declaration, one match per
+  path step per focus node, one match per value node per `sh:class` — so the
+  window a concurrent writer could open in is wide rather than theoretical. It
+  is still not a *gap*: nothing in the interface is missing, and the question is
+  whether a caller can pin a read view. Left as it is because no consumer has
+  asked, and inventing the requirement here would be the opposite of
+  evidence-driven.
