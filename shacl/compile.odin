@@ -84,6 +84,12 @@ VOCAB_TERMS := []string {
 	NODE_KIND,
 	HAS_VALUE,
 	IN,
+	NODE,
+	NOT,
+	AND,
+	OR,
+	XONE,
+	QUALIFIED_VALUE_SHAPE,
 	IRI_KIND,
 	BLANK_NODE_KIND,
 	LITERAL_KIND,
@@ -108,6 +114,29 @@ TARGET_PREDICATES := [4]struct {
 	{TARGET_CLASS, .Class},
 	{TARGET_SUBJECTS_OF, .Subjects_Of},
 	{TARGET_OBJECTS_OF, .Objects_Of},
+}
+
+// The shape-expecting parameters of §2.1.1, with how the shapes are reached:
+// `sh:and`, `sh:or`, and `sh:xone` name an RDF list whose *members* are shapes,
+// the other three name one directly.
+//
+// This table is discovery's, not the evaluator's. None of these six validates
+// anything yet — that is SHACL-T-0017 and SHACL-T-0018 — and until then a
+// shapes graph using one is reported through `shapes_ignored`. What lands here
+// in SHACL-T-0010 is only the §2.1.1 rule that their values *are shapes*, which
+// every one of those later components depends on and none of them should have
+// to introduce.
+@(private)
+SHAPE_EXPECTING_PARAMETERS := [6]struct {
+	iri:     string,
+	is_list: bool,
+} {
+	{NODE, false},
+	{NOT, false},
+	{QUALIFIED_VALUE_SHAPE, false},
+	{AND, true},
+	{OR, true},
+	{XONE, true},
 }
 
 // compile builds a shapes model from the shapes graph in `dataset` at
@@ -162,12 +191,28 @@ compile :: proc(
 
 	// ---- Discovery: which nodes are shapes, and of which kind. -----------
 	//
-	// §2.1.1 defines a shape broadly. The spine implements the three cases the
-	// exit-criteria directories need: a node typed sh:NodeShape or
-	// sh:PropertyShape, a node carrying a target declaration, and a value of
-	// sh:property. The catalogue initiative widens this when sh:node and the
-	// logical combinators arrive, which is the other way a node becomes a
-	// shape.
+	// §2.1.1 defines a shape broadly. Four of its cases are implemented: a node
+	// typed sh:NodeShape or sh:PropertyShape, a node carrying a target
+	// declaration, a value of sh:property, and — since SHACL-T-0010 — a value of
+	// a shape-expecting parameter (sh:node, sh:not, sh:and, sh:or, sh:xone,
+	// sh:qualifiedValueShape).
+	//
+	// **Discovery is reachability, not a global scan**, and the last two cases
+	// are why that has to be said. §2.1.1 reads globally — a node is a shape if
+	// it is the object of *any* sh:node triple — while this enqueues the values
+	// of a shape's parameters as it compiles that shape, so a shape nobody
+	// references is never found. The spine already made this choice for
+	// sh:property and the suite has been green on it, and the reason to keep it
+	// is sharper here: in the W3C corpus the shapes graph, the data graph, the
+	// manifest, and the *expected validation report* are usually one document,
+	// so a global scan would compile parts of a test fixture as shapes. A shapes
+	// graph whose shapes are unreachable from any target has nothing to validate
+	// anyway.
+	//
+	// §2.1.1's remaining case — a node is a shape by being the subject of a
+	// triple whose predicate is a parameter — is deliberately not implemented:
+	// it would make every node carrying sh:minCount a root-less shape, and
+	// nothing needs it.
 
 	pending: [dynamic]store.Term_ID
 	pending_kind: [dynamic]Shape_Kind
@@ -346,6 +391,8 @@ compile :: proc(
 		}
 		sh.constraints.count = len(s.constraints) - sh.constraints.start
 
+		record_ignored_parameters(s, r, shape_id, load, load_data, MATCH, NEXT, DESTROY)
+
 		compiled[shape_id] = len(s.shapes)
 		append(&s.shapes, sh)
 
@@ -359,6 +406,47 @@ compile :: proc(
 					return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(PROPERTY))}
 				}
 				enqueue(&pending, &pending_kind, &queued, id, .Property)
+			}
+		}
+
+		// The shape-expecting parameters. Their values are shapes too, and they
+		// are queued as node shapes: the guess costs nothing, because a value
+		// carrying sh:path is reclassified as a property shape when it is
+		// compiled, exactly as sh:property's values are.
+		//
+		// Termination is `enqueue`'s dedupe by ID, which is what makes a
+		// self-referencing `ex:S sh:node ex:S` — and any longer cycle — compile
+		// once rather than forever.
+		for entry in SHAPE_EXPECTING_PARAMETERS {
+			if !v.found[entry.iri] {
+				continue
+			}
+			vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+			defer delete(vals)
+			for id in vals {
+				if !entry.is_list {
+					if store.id_kind(id) == .Literal {
+						return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(entry.iri))}
+					}
+					enqueue(&pending, &pending_kind, &queued, id, .Node)
+					continue
+				}
+				// A malformed list is not rejected here. Whether `sh:and ( )`
+				// with a broken list is an ill-formed shapes graph is the
+				// logical combinators' question (SHACL-T-0017), and answering it
+				// from discovery would reject graphs whose sh:and this engine
+				// does not yet enforce at all.
+				items, list_ok := list_items(r, id, MATCH, NEXT, DESTROY)
+				defer delete(items)
+				if !list_ok {
+					continue
+				}
+				for member in items {
+					if store.id_kind(member) == .Literal {
+						return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(entry.iri))}
+					}
+					enqueue(&pending, &pending_kind, &queued, member, .Node)
+				}
 			}
 		}
 	}
@@ -404,5 +492,6 @@ shapes_init :: proc(s: ^Shapes, allocator: runtime.Allocator) {
 	s.path_children = make([dynamic]int, allocator)
 	s.values = make([dynamic]rdf.Term, allocator)
 	s.roots = make([dynamic]int, allocator)
+	s.ignored = make([dynamic]rdf.Term, allocator)
 	term_table_init(&s.terms, allocator)
 }

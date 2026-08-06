@@ -183,6 +183,11 @@ Shapes :: struct {
 	// one target, which is where validation starts.
 	roots:          [dynamic]int,
 
+	// `ignored` is every `sh:`-namespace predicate this compile saw on a shape
+	// and does not implement, deduplicated and interned like every other term.
+	// See `shapes_ignored` for what it is for.
+	ignored:        [dynamic]rdf.Term,
+
 	// Everything the model owns. Terms and message strings live here, and
 	// every rdf.Term above borrows from it.
 	terms:          Term_Table,
@@ -203,6 +208,7 @@ shapes_destroy :: proc(s: ^Shapes) {
 	delete(s.path_children)
 	delete(s.values)
 	delete(s.roots)
+	delete(s.ignored)
 	term_table_destroy(&s.terms)
 	s^ = {}
 }
@@ -230,6 +236,33 @@ shape_messages :: proc(s: ^Shapes, sh: Shape) -> []Message {
 // path_operands returns the operand path indices of a compound path node.
 path_operands :: proc(s: ^Shapes, p: Path_Node) -> []int {
 	return s.path_children[p.children.start:][:p.children.count]
+}
+
+// shapes_ignored returns the `sh:`-namespace predicates this compile found on a
+// shape and does not implement — deduplicated, in first-seen order, owned by
+// the model like every other term.
+//
+// **This is how an incomplete engine says so.** Validation ignores a parameter
+// it does not recognise, which is the only workable policy: erroring would
+// reject the spec's own non-validating annotations (`sh:name`,
+// `sh:description`, `sh:order`, `sh:group`, `sh:defaultValue` — all in this
+// package's inert list and never reported here) and every vendor extension a
+// real shapes graph carries. But ignoring *silently* is what lets an engine
+// implementing a third of SHACL Core produce a conforming report and look
+// complete. So the compile records what it passed over, and a caller that wants
+// to know whether a `sh:conforms true` means anything can ask.
+//
+// It is a property of the **compile**, not of a shape: the question it answers
+// is "did this shapes graph use anything this engine does not enforce". The
+// suite harness asserts it is empty for every enabled directory, which is what
+// keeps "enabled means fully green" from quietly meaning "green because we did
+// nothing".
+//
+// A parameter listed here was *seen and skipped*. A parameter absent from a
+// shapes graph entirely is not listed, and neither is one this engine
+// implements.
+shapes_ignored :: proc(s: ^Shapes) -> []rdf.Term {
+	return s.ignored[:]
 }
 
 // constraint_values returns the member terms of an sh:in constraint.

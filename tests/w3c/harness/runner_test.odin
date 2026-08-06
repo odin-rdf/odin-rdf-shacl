@@ -117,7 +117,30 @@ run_one :: proc(t: ^testing.T, suite: Suite, backend: Backend, tf: ^Test_File, e
 	defer shacl.report_destroy(&report)
 
 	run := run_entry(&report, suite.dir, e, backend, e.id)
+	defer run_destroy(&run)
 	if !testing.expectf(t, run.ok, "%s: could not be validated — %s", origin, run.detail) {
+		return false
+	}
+
+	// **An enabled directory may not compile a shapes graph this engine only
+	// partly understands.** The report can match while a `sh:` parameter went
+	// unread — an entry expecting `sh:conforms true` matches whether it was
+	// validated or ignored — and that is the one way "enabled means fully
+	// green" could quietly come to mean "green because we did nothing". So the
+	// scoreboard asserts it directly rather than trusting the comparison.
+	//
+	// A failure here is not necessarily a wrong result. It is a green whose
+	// meaning is unclear, and the fix is to implement the parameter or to
+	// disable the directory until something does.
+	if !testing.expectf(
+		t,
+		run.ignored == "",
+		"%s: report matched, but the shapes graph uses sh: parameters this engine "+
+		"does not implement (%s) — an enabled directory's green must not depend on "+
+		"a parameter nobody read",
+		origin,
+		run.ignored,
+	) {
 		return false
 	}
 

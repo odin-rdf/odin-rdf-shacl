@@ -586,3 +586,255 @@ test_compilation_does_not_intern :: proc(t: ^testing.T) {
 	testing.expect_value(t, memstore.count(&dataset), quads_before)
 	testing.expect_value(t, store.id_kind(after), store.Term_Kind.IRI)
 }
+
+// §2.1.1: a node is a shape by being the value of a shape-expecting parameter.
+// Six of them, three naming a shape directly and three naming a list whose
+// members are shapes — and the list forms are where an implementation that
+// enqueued the value instead of its members would compile the list head as a
+// shape and never find the branches.
+//
+// None of the six validates anything yet (SHACL-T-0017, SHACL-T-0018). This is
+// the discovery half, and it is deliberately first: every one of those
+// components is unreachable until its operands are compiled shapes.
+@(test)
+test_shape_expecting_parameters_are_shapes :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX +
+		`
+		ex:Root a sh:NodeShape ;
+			sh:targetNode ex:n ;
+			sh:node ex:ViaNode ;
+			sh:not ex:ViaNot ;
+			sh:qualifiedValueShape ex:ViaQualified ;
+			sh:and ( ex:ViaAnd1 ex:ViaAnd2 ) ;
+			sh:or ( ex:ViaOr ) ;
+			sh:xone ( ex:ViaXone ) .
+		`,
+	) {
+		return
+	}
+
+	for iri in ([]string {
+			"http://example.org/ViaNode",
+			"http://example.org/ViaNot",
+			"http://example.org/ViaQualified",
+			"http://example.org/ViaAnd1",
+			"http://example.org/ViaAnd2",
+			"http://example.org/ViaOr",
+			"http://example.org/ViaXone",
+		}) {
+		_, found := find_shape(&s, iri)
+		testing.expectf(t, found, "%s is the value of a shape-expecting parameter but was not compiled", iri)
+	}
+
+	// The root plus the seven it reaches, and nothing else: the list cells are
+	// not shapes, and neither is anything the parameters do not name.
+	testing.expect_value(t, len(s.shapes), 8)
+
+	// Only the root carries a target, so only the root is a root. A discovered
+	// shape validates when something references it, not on its own.
+	testing.expect_value(t, len(s.roots), 1)
+}
+
+// A discovered shape is classified by its own sh:path, not by the parameter
+// that found it: discovery guesses node shape, and a value carrying a path is
+// a property shape regardless.
+@(test)
+test_a_discovered_shape_with_a_path_is_a_property_shape :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX +
+		`
+		ex:Root a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:Child .
+		ex:Child sh:path ex:p ; sh:minCount 1 .
+		`,
+	) {
+		return
+	}
+	child, found := find_shape(&s, "http://example.org/Child")
+	if !testing.expect(t, found, "ex:Child was not compiled") {
+		return
+	}
+	testing.expect_value(t, child.kind, shacl.Shape_Kind.Property)
+	testing.expect(t, child.path >= 0, "a property shape must have a compiled path")
+}
+
+// Shape references may form a cycle, and widening discovery is what makes that
+// reachable: `sh:property` alone could only nest downwards through fresh blank
+// nodes, while `ex:S sh:node ex:S` is a shapes graph anyone might write.
+// Compilation must terminate and compile each shape once — the worklist's
+// dedupe by Term_ID is what does it.
+//
+// This is compilation, not validation. A shape that reaches itself is still
+// reported as Failure.Recursive_Shape when it is *validated* (§3.4); nothing
+// here changes that.
+@(test)
+test_shape_reference_cycles_terminate :: proc(t: ^testing.T) {
+	{
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		if !compile_source(
+			t,
+			&s,
+			PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:S .`,
+		) {
+			return
+		}
+		testing.expect_value(t, len(s.shapes), 1)
+	}
+	{
+		// Mutual, and through two different parameters, so a dedupe that keyed
+		// on the parameter rather than the node would loop.
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		if !compile_source(
+			t,
+			&s,
+			PREFIX +
+			`
+			ex:A a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:B .
+			ex:B sh:not ex:A ; sh:or ( ex:A ex:B ) .
+			`,
+		) {
+			return
+		}
+		testing.expect_value(t, len(s.shapes), 2)
+	}
+}
+
+// A literal cannot be a shape (§2.1.1), and the six parameters are held to the
+// rule sh:property already was.
+@(test)
+test_a_literal_is_not_a_shape :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node "not a shape" .`
+	err, load_err := compile_turtle(&s, transmute([]byte)source)
+	testing.expectf(t, load_err.message == "", "fixture did not parse: %s", load_err.message)
+	testing.expect_value(t, err.kind, shacl.Error_Kind.Shape_Expected)
+}
+
+// The ignored-parameter record: what an incomplete engine says about itself.
+//
+// Three groups have to come apart correctly, and getting any of them wrong
+// makes the record worse than useless — a record that cried wolf would be
+// switched off, and one that stayed silent would certify an engine that did
+// nothing.
+@(test)
+test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX +
+		`
+		ex:S a sh:NodeShape ;
+			sh:targetNode ex:n ;
+			sh:name "a name" ;
+			sh:description "inert" ;
+			sh:order 1 ;
+			rdfs:label "not a sh: predicate at all" ;
+			sh:minCount 1 ;
+			sh:minInclusive 2 ;
+			sh:pattern "^a" ;
+			sh:property [ sh:path ex:p ; sh:maxLength 5 ; sh:minInclusive 2 ] .
+		`,
+	) {
+		return
+	}
+
+	ignored := shacl.shapes_ignored(&s)
+	got: map[string]bool
+	defer delete(got)
+	for term in ignored {
+		iri, is_iri := term.(rdf.IRI)
+		if testing.expect(t, is_iri, "an ignored parameter must be an IRI") {
+			got[string(iri)] = true
+		}
+	}
+
+	// Unimplemented components are recorded, from every shape and not only the
+	// root — sh:maxLength is on the property shape.
+	for iri in ([]string{shacl.NS + "minInclusive", shacl.NS + "pattern", shacl.NS + "maxLength"}) {
+		testing.expectf(t, got[iri], "%s is not implemented and should have been recorded", iri)
+	}
+
+	// Implemented components and the spec's inert annotations are not, nor is a
+	// predicate outside the SHACL namespace.
+	for iri in ([]string {
+			shacl.NS + "minCount",
+			shacl.NS + "targetNode",
+			shacl.NS + "property",
+			shacl.NS + "path",
+			shacl.NAME,
+			shacl.DESCRIPTION,
+			shacl.ORDER,
+			"http://www.w3.org/2000/01/rdf-schema#label",
+		}) {
+		testing.expectf(t, !got[iri], "%s should not be recorded as ignored", iri)
+	}
+
+	// sh:minInclusive appears on two shapes and is recorded once: the record is
+	// a property of the compile, not a list of occurrences.
+	testing.expect_value(t, len(ignored), len(got))
+	testing.expect_value(t, len(got), 3)
+}
+
+// A shape-expecting parameter is recognised by discovery and still recorded as
+// unimplemented, because nothing validates against it yet. This is the case the
+// record exists for: the engine understood the graph well enough to compile
+// six more shapes and would still have reported `sh:conforms true` for a node
+// violating every one of them.
+@(test)
+test_shape_expecting_parameters_are_recorded_as_unimplemented :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:C . ex:C sh:minCount 1 .`,
+	) {
+		return
+	}
+	ignored := shacl.shapes_ignored(&s)
+	if !testing.expect_value(t, len(ignored), 1) {
+		return
+	}
+	testing.expect_value(t, ignored[0], rdf.Term(rdf.IRI(shacl.NODE)))
+}
+
+// A shapes graph using nothing unimplemented records nothing. Stated as its own
+// test because "empty" is what every enabled suite directory has to produce,
+// and an always-non-empty record would have been caught here first.
+@(test)
+test_a_fully_implemented_shapes_graph_records_nothing :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !compile_source(
+		t,
+		&s,
+		PREFIX +
+		`
+		ex:S a sh:NodeShape ;
+			sh:targetClass ex:C ;
+			sh:severity sh:Warning ;
+			sh:message "m" ;
+			sh:property [ sh:path ex:p ; sh:minCount 1 ; sh:maxCount 2 ; sh:datatype xsd:string ] ;
+			sh:nodeKind sh:IRI ;
+			sh:in ( ex:a ex:b ) ;
+			sh:hasValue ex:a ;
+			sh:class ex:C .
+		`,
+	) {
+		return
+	}
+	testing.expect_value(t, len(shacl.shapes_ignored(&s)), 0)
+}

@@ -23,6 +23,15 @@ the shape-based constraints (`sh:node`, `sh:qualifiedValueShape`) are the
 second initiative, and the remaining suite directories stay disabled until they
 land. See `.metis/` for the vision, the initiative, and SHACL-A-0001.
 
+**A constraint this engine does not implement is ignored, and the compile says
+so.** Erroring instead would reject the spec's own non-validating annotations
+(`sh:name`, `sh:description`, `sh:order`, `sh:group`, `sh:defaultValue`) and
+every vendor extension a real shapes graph carries. But ignoring silently is
+how a partial engine comes to look complete, so `shapes_ignored(&shapes)`
+returns every `sh:` parameter the compile saw on a shape and skipped. **Check it
+before trusting a `sh:conforms true`** while the catalogue is incomplete: a
+report with no results and a non-empty ignored list is not a validated graph.
+
 This is a peer of [odin-rdf-sparql](../odin-rdf-sparql) on the same
 foundation, not a layer above it. **SHACL Core has no dependency on the query
 engine at all** — not at runtime, and not at link time: the `sparql:`

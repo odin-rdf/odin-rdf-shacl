@@ -54,10 +54,28 @@ backend_name :: proc(b: Backend) -> string {
 // that would not parse, an ill-formed shapes graph, or a validation failure.
 // None of those may be quietly treated as "no violations", which is exactly the
 // shape of bug a suite runner is supposed to catch rather than commit.
+//
+// `ignored` is the entry's shapes graph read back through `shapes_ignored`: the
+// `sh:` parameters this engine saw and does not implement, rendered for a
+// failure message. It is **owned** — `run_destroy` frees it — and it is on Run
+// rather than left in the model because the model is destroyed inside the run,
+// while the question it answers belongs to the caller: an entry that passes
+// with an unimplemented parameter in its shapes graph passed for a reason
+// nobody checked.
 Run :: struct {
 	ok:      bool,
 	detail:  string, // static description; "" when ok
 	failure: shacl.Failure,
+	ignored: string, // owned; "" when the shapes graph used nothing unimplemented
+}
+
+// run_destroy frees what a Run owns. Every caller of run_entry must call it,
+// including on the failure paths.
+run_destroy :: proc(run: ^Run) {
+	if run.ignored != "" {
+		delete(run.ignored)
+	}
+	run^ = {}
 }
 
 // run_entry validates one entry and folds the results into `r`, which the
@@ -94,8 +112,16 @@ run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry, backend: Backend, tag
 	return Run{detail = "unknown backend"}
 }
 
+// The two backend runs use a named result rather than composing a Run at each
+// return: from the moment the shapes graph compiles, the result owns a string,
+// and a `return Run{...}` that forgot to carry it would leak silently.
 @(private = "file")
-run_memstore :: proc(r: ^shacl.Report, shapes_src, shapes_base, data_src, data_base: string) -> Run {
+run_memstore :: proc(
+	r: ^shacl.Report,
+	shapes_src, shapes_base, data_src, data_base: string,
+) -> (
+	run: Run,
+) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 
@@ -123,11 +149,14 @@ run_memstore :: proc(r: ^shacl.Report, shapes_src, shapes_base, data_src, data_b
 		}
 	}
 	if !shapes_parsed {
-		return Run{detail = "shapes graph failed to parse"}
+		run.detail = "shapes graph failed to parse"
+		return
 	}
 	if compile_err.kind != .None {
-		return Run{detail = shacl.error_message(compile_err.kind)}
+		run.detail = shacl.error_message(compile_err.kind)
+		return
 	}
+	run.ignored = ignored_text(&model)
 
 	dictionary: memstore.Dictionary
 	memstore.dictionary_init(&dictionary)
@@ -138,7 +167,8 @@ run_memstore :: proc(r: ^shacl.Report, shapes_src, shapes_base, data_src, data_b
 
 	if _, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)data_src, data_base);
 	   load_err.message != "" {
-		return Run{detail = "data graph failed to parse"}
+		run.detail = "data graph failed to parse"
+		return
 	}
 
 	bindings: shacl.Bindings
@@ -147,9 +177,12 @@ run_memstore :: proc(r: ^shacl.Report, shapes_src, shapes_base, data_src, data_b
 
 	failure := shacl_memstore.validate_report(r, &model, &bindings, &dictionary, &dataset)
 	if failure != .None {
-		return Run{failure = failure, detail = shacl.failure_message(failure)}
+		run.failure = failure
+		run.detail = shacl.failure_message(failure)
+		return
 	}
-	return Run{ok = true}
+	run.ok = true
+	return
 }
 
 @(private = "file")
@@ -157,7 +190,9 @@ run_kvstore :: proc(
 	r: ^shacl.Report,
 	shapes_src, shapes_base, data_src, data_base: string,
 	tag: string,
-) -> Run {
+) -> (
+	run: Run,
+) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 
@@ -169,13 +204,15 @@ run_kvstore :: proc(
 		defer remove_temp_store(path)
 		db, open_err := kvstore.open(path)
 		if open_err != nil {
-			return Run{detail = "shapes store could not be opened"}
+			run.detail = "shapes store could not be opened"
+			return
 		}
 		defer kvstore.close(db)
 
 		_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)shapes_src, shapes_base)
 		if load_err != nil {
-			return Run{detail = "shapes graph could not be loaded"}
+			run.detail = "shapes graph could not be loaded"
+			return
 		}
 		shapes_parsed = parse_err.message == ""
 		if shapes_parsed {
@@ -186,29 +223,36 @@ run_kvstore :: proc(
 		}
 	}
 	if !shapes_parsed {
-		return Run{detail = "shapes graph failed to parse"}
+		run.detail = "shapes graph failed to parse"
+		return
 	}
 	if shapes_store_err != nil {
-		return Run{detail = "a store read failed while compiling the shapes graph"}
+		run.detail = "a store read failed while compiling the shapes graph"
+		return
 	}
 	if compile_err.kind != .None {
-		return Run{detail = shacl.error_message(compile_err.kind)}
+		run.detail = shacl.error_message(compile_err.kind)
+		return
 	}
+	run.ignored = ignored_text(&model)
 
 	path := temp_store_path(tag, "data")
 	defer remove_temp_store(path)
 	db, open_err := kvstore.open(path)
 	if open_err != nil {
-		return Run{detail = "data store could not be opened"}
+		run.detail = "data store could not be opened"
+		return
 	}
 	defer kvstore.close(db)
 
 	_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)data_src, data_base)
 	if load_err != nil {
-		return Run{detail = "data graph could not be loaded"}
+		run.detail = "data graph could not be loaded"
+		return
 	}
 	if parse_err.message != "" {
-		return Run{detail = "data graph failed to parse"}
+		run.detail = "data graph failed to parse"
+		return
 	}
 
 	session: shacl_kvstore.Session
@@ -220,15 +264,40 @@ run_kvstore :: proc(
 
 	failure := shacl_kvstore.validate_report(r, &model, &bindings, &session)
 	if failure != .None {
-		return Run{failure = failure, detail = shacl.failure_message(failure)}
+		run.failure = failure
+		run.detail = shacl.failure_message(failure)
+		return
 	}
 	// An LMDB read that failed yields no value nodes, which is exactly what a
 	// conforming graph looks like. Reporting the report without this check
 	// would turn a broken store into a green suite.
 	if shacl_kvstore.session_error(&session) != nil {
-		return Run{detail = "a store read failed during validation"}
+		run.detail = "a store read failed during validation"
+		return
 	}
-	return Run{ok = true}
+	run.ok = true
+	return
+}
+
+// ignored_text renders `shapes_ignored` for a failure message. Empty when the
+// shapes graph used nothing this engine skips, which is the answer every
+// enabled directory has to give.
+@(private = "file")
+ignored_text :: proc(model: ^shacl.Shapes) -> string {
+	ignored := shacl.shapes_ignored(model)
+	if len(ignored) == 0 {
+		return ""
+	}
+	sb := strings.builder_make()
+	for term, i in ignored {
+		if i > 0 {
+			strings.write_string(&sb, ", ")
+		}
+		if iri, is_iri := term.(rdf.IRI); is_iri {
+			strings.write_string(&sb, string(iri))
+		}
+	}
+	return strings.to_string(sb)
 }
 
 @(private = "file")

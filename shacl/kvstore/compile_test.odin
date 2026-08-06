@@ -221,3 +221,56 @@ test_kvstore_compilation_does_not_write :: proc(t: ^testing.T) {
 	_, found := find_shape(&s, "http://example.org/S")
 	testing.expect(t, found, "shape not compiled from a read-only environment")
 }
+
+// Widened discovery and the ignored-parameter record, against the persistent
+// backend. Both are in this file rather than only the memstore one because of
+// the property that differs by backend: kvstore's load_adapter answers
+// `owned = true`, so every predicate the record inspects is a term built from
+// database bytes that the compiler has to free. A leak there is invisible in
+// memory, where nothing is owned, and this file runs under
+// ODIN_TEST_FAIL_ON_BAD_MEMORY like the rest.
+@(test)
+test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	if !with_shapes(
+		t,
+		"discovery",
+		PREFIX +
+		`
+		ex:Root a sh:NodeShape ;
+			sh:targetNode ex:n ;
+			sh:node ex:ViaNode ;
+			sh:xone ( ex:ViaXone ) ;
+			sh:name "inert" ;
+			sh:minInclusive 2 .
+		`,
+		&s,
+	) {
+		return
+	}
+
+	for iri in ([]string{"http://example.org/ViaNode", "http://example.org/ViaXone"}) {
+		_, found := find_shape(&s, iri)
+		testing.expectf(t, found, "%s is the value of a shape-expecting parameter but was not compiled", iri)
+	}
+	testing.expect_value(t, len(s.shapes), 3)
+
+	// sh:minInclusive and the two shape-expecting parameters, which discovery
+	// reads but nothing validates yet. sh:name is inert and sh:targetNode is
+	// implemented, so neither appears.
+	ignored: map[string]bool
+	defer delete(ignored)
+	for term in shacl.shapes_ignored(&s) {
+		if iri, is_iri := term.(rdf.IRI); is_iri {
+			ignored[string(iri)] = true
+		}
+	}
+	testing.expect_value(t, len(ignored), 3)
+	for iri in ([]string{shacl.NS + "minInclusive", shacl.NODE, shacl.XONE}) {
+		testing.expectf(t, ignored[iri], "%s should have been recorded as unimplemented", iri)
+	}
+	for iri in ([]string{shacl.NAME, shacl.TARGET_NODE}) {
+		testing.expectf(t, !ignored[iri], "%s should not be recorded as ignored", iri)
+	}
+}

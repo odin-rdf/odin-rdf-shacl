@@ -90,10 +90,21 @@
 // the violation count — it is a graph, and that is what it is for.
 //
 //
-// # Four contracts a caller should know
+// # Five contracts a caller should know
 //
-// The first two are SHACL-A-0001 decisions and the other two are the spec's;
-// each surprises someone otherwise.
+// The first two are SHACL-A-0001 decisions, the next three are the spec's, and
+// the last is this engine's answer to being incomplete; each surprises someone
+// otherwise.
+//
+// **An unimplemented constraint parameter is ignored, and `shapes_ignored`
+// says which.** Erroring on an unrecognised `sh:` parameter would reject the
+// spec's own non-validating annotations — `sh:name`, `sh:description`,
+// `sh:order`, `sh:group`, `sh:defaultValue` — and every vendor extension a real
+// shapes graph carries, so ignoring is the only workable policy. Ignoring
+// *silently* is what lets an engine implementing part of SHACL Core produce a
+// conforming report and look complete, so compilation records what it passed
+// over. While the constraint catalogue is incomplete, **a `sh:conforms true`
+// means what it says only if `shapes_ignored` is empty**.
 //
 // **One data graph.** SHACL is specified against a single RDF graph;
 // odin-rdf-store holds a quad dataset. Validation reads one caller-named

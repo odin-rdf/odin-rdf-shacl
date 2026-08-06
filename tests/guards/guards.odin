@@ -78,7 +78,19 @@ ex:PersonShape a sh:NodeShape, rdfs:Class ;
 		sh:nodeKind sh:BlankNodeOrIRI ;
 		sh:hasValue ex:v ;
 		sh:in ( ex:one ex:two "three"@en ) ;
-	] .
+	] ;
+	# SHACL-T-0010's two additions, both of which allocate: the shape-expecting
+	# parameters discover further shapes (through a list and directly), and the
+	# ignored-parameter record interns a term per unimplemented parameter it
+	# finds. sh:minInclusive is unimplemented and sh:name is inert, so the
+	# record has to distinguish them without leaking either.
+	sh:node ex:Nested ;
+	sh:and ( ex:Nested ex:AlsoNested ) ;
+	sh:name "an annotation" ;
+	sh:minInclusive 2 .
+
+ex:Nested sh:path ex:p ; sh:minCount 1 ; sh:maxLength 5 .
+ex:AlsoNested sh:not ex:Nested .
 `
 
 // track runs body under a tracking allocator and reports what it leaked.

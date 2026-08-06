@@ -4,14 +4,14 @@ level: task
 title: "Widened shape discovery, and the ignored-parameter record"
 short_code: "SHACL-T-0010"
 created_at: 2026-08-06T19:26:45.111936+00:00
-updated_at: 2026-08-06T19:26:45.111936+00:00
+updated_at: 2026-08-06T21:54:00.646086+00:00
 parent: SHACL-I-0002
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -32,27 +32,29 @@ in this initiative is unreachable until a node that is the value of `sh:node` or
 counts as a shape, and the ignored-parameter record is what stops an incomplete engine from
 looking complete while the rest of the catalogue lands.
 
+## Acceptance Criteria
+
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] A node is compiled as a shape when it is the value of any shape-expecting parameter —
+- [x] A node is compiled as a shape when it is the value of any shape-expecting parameter —
       `sh:node`, `sh:not`, `sh:and`, `sh:or`, `sh:xone`, `sh:qualifiedValueShape` — in addition
       to the spine's three cases (typed `sh:NodeShape`/`sh:PropertyShape`, carrying a target,
       value of `sh:property`).
-- [ ] Discovery still terminates on a shapes graph whose shape references form a cycle. The
+- [x] Discovery still terminates on a shapes graph whose shape references form a cycle. The
       compiler's worklist already dedupes by ID; assert it with a self-referencing `sh:node`.
-- [ ] **The compiled model records every `sh:`-namespace predicate it saw on a shape and did
+- [x] **The compiled model records every `sh:`-namespace predicate it saw on a shape and did
       not implement**, readable from `Shapes`, owned by it like every other term.
-- [ ] That record distinguishes **not implemented** from **recognised but non-validating**.
+- [x] That record distinguishes **not implemented** from **recognised but non-validating**.
       `sh:name`, `sh:description`, `sh:order`, `sh:group`, and `sh:defaultValue` are
       spec-defined annotations no engine acts on; a record that flagged them would cry wolf on
       every real shapes graph, and `core/property` uses `sh:name`.
-- [ ] The suite harness asserts the record is empty for every **enabled** directory. A green
+- [x] The suite harness asserts the record is empty for every **enabled** directory. A green
       directory whose entries compiled with unimplemented parameters is a green whose meaning
       is unclear, and this is what makes that visible.
-- [ ] Compiling a shapes graph still never writes to the store it reads (the existing
+- [x] Compiling a shapes graph still never writes to the store it reads (the existing
       read-only-environment test still passes).
-- [ ] Allocation guards hold: the record is owned and freed with the model.
-- [ ] Tests at both widths against both backends; `make test` and `make check` green.
+- [x] Allocation guards hold: the record is owned and freed with the model.
+- [x] Tests at both widths against both backends; `make test` and `make check` green.
 
 ## Implementation Notes
 
@@ -87,4 +89,53 @@ properties. Keep the list short, spec-cited, and in one place.
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-06 — Implemented; awaiting review.** `make test` green at both `Term_ID` widths,
+  `make check` green. Core: `vocab.odin` (six shape-expecting parameters, five inert
+  annotations), `compile.odin` (`SHAPE_EXPECTING_PARAMETERS`, discovery, the record call),
+  `constraints.odin` (the two classification lists and `record_ignored_parameters`),
+  `query.odin` (`predicates_of`), `model.odin` (`Shapes.ignored`, `shapes_ignored`). Tests:
+  seven new in `shacl/memstore`, one parity test in `shacl/kvstore`, the enabled-directory
+  assertion in the harness, and the guards fixture extended.
+
+  **The risk the task named did not materialise.** Widening discovery broke nothing:
+  `core/path`'s `path-unused-001` and its deliberately ill-formed path nodes stay unreachable,
+  and all four enabled directories are still green on both backends. The floor is unchanged at
+  7 / 11 / 18, which is correct — discovery compiles more shapes but nothing new validates.
+
+  **Discovery is reachability, not §2.1.1's global reading — the one judgement here.** The
+  spec makes a node a shape by being the object of *any* `sh:node` triple; this enqueues a
+  shape's parameters as that shape is compiled, so an unreferenced shape is never found. The
+  spine already made this choice for `sh:property`, and the reason is sharper now: in this
+  corpus the shapes graph, the data graph, the manifest, and the expected report are usually
+  one document, so a global scan would compile parts of a test fixture as shapes. §2.1.1's
+  "subject of a triple with a parameter as predicate" case is also deliberately not
+  implemented — it would make every node carrying `sh:minCount` a rootless shape. Both
+  recorded in the discovery comment.
+
+  **The six parameters are recorded as unimplemented, deliberately.** Discovery reads
+  `sh:node` and the rest, but nothing validates against them until T-0017 and T-0018, so
+  `IMPLEMENTED_PARAMETERS` does not list them and a shapes graph using one says so through
+  `shapes_ignored`. A component moves onto that list **when it starts validating**, not when
+  the compiler learns to read it — the rule is stated above the list, because getting it
+  backwards is how the record would come to certify an engine that does nothing.
+
+  **The harness assertion was verified to fire**, by temporarily enabling `core/node`:
+  `and-001` reports "report matched, but the shapes graph uses sh: parameters this engine does
+  not implement (sh:and)". That is the mechanism working exactly as intended — an entry whose
+  report matches while its constraint went unread, named. Reverted.
+
+  Two smaller notes. `Run` in the harness now owns a string and gained `run_destroy`; both
+  backend runners were rewritten to a **named result** so a `return Run{...}` that forgot to
+  carry it cannot leak silently. And `record_ignored_parameters` lives in a generic procedure,
+  which is why the namespace test sits in a plain `parameter_is_ignored` — Odin does not count
+  uses inside an uninstantiated generic, so `core:strings` read as an unused import until the
+  decision moved out. The classification is clearer there anyway.
+
+  **Not built, worth recording:** the floor test could now report how many of its passing
+  entries compiled with unimplemented parameters — turning "19 of 72 pass" into "of which N
+  are hollow". It is five lines and directly serves the initiative's stated worry, but it is
+  outside this task's criteria; T-0019 is the natural place.
+
+  Documentation: the README's status section and the package doc (`shacl.odin`, now "Five
+  contracts a caller should know") both state the policy — **a `sh:conforms true` means what
+  it says only if `shapes_ignored` is empty** while the catalogue is incomplete.

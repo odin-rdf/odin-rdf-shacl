@@ -82,6 +82,32 @@ first_object :: proc(
 	return q[store.QUAD_O], true
 }
 
+// predicates_of returns the predicates of (subject, *, *) in the graph, with
+// duplicates: a predicate with three objects appears three times. The one
+// caller — the ignored-parameter record — deduplicates as it interns, and
+// filtering here would cost a set to save a handful of comparisons on a graph
+// this small.
+@(private)
+predicates_of :: proc(
+	r: Reader($D, $It),
+	subject: store.Term_ID,
+	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
+	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
+	$DESTROY: proc(it: ^It),
+) -> [dynamic]store.Term_ID {
+	out: [dynamic]store.Term_ID
+	it := MATCH(r.dataset, store.Match_Pattern{subject, store.WILDCARD, store.WILDCARD, r.graph})
+	defer DESTROY(&it)
+	for {
+		q, ok := NEXT(&it)
+		if !ok {
+			break
+		}
+		append(&out, q[store.QUAD_P])
+	}
+	return out
+}
+
 // subjects_matching returns the subjects of (*, predicate, object).
 @(private)
 subjects_matching :: proc(

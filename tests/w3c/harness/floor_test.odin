@@ -231,7 +231,13 @@ entry_matches :: proc(dir: string, backend: Backend, tf: ^Test_File, e: Entry) -
 	tag := strings.concatenate({"floor-", e.id})
 	defer delete(tag)
 
+	// The ignored-parameter record is read but not asserted on: these
+	// directories are disabled precisely because they use parameters this
+	// engine does not implement yet, so a non-empty record here is the expected
+	// state rather than a finding. `test_enabled_suites_are_green` is where it
+	// has to be empty.
 	run := run_entry(&report, dir, e, backend, tag)
+	defer run_destroy(&run)
 	if !run.ok {
 		return false
 	}

@@ -57,6 +57,36 @@ NODE_KIND :: NS + "nodeKind"
 HAS_VALUE :: NS + "hasValue"
 IN :: NS + "in"
 
+// The shape-expecting parameters (§2.1.1). A node that is the value of one of
+// these **is a shape**, which is why they land here in SHACL-T-0010 — before
+// the constraint components that read them (SHACL-T-0017 and SHACL-T-0018).
+// Discovery has to know them first: nothing nests until the values that nest
+// are compiled as shapes.
+//
+// `sh:and`, `sh:or`, and `sh:xone` take an RDF list and the *members* are the
+// shapes; the other three name a shape directly.
+NODE :: NS + "node"
+NOT :: NS + "not"
+AND :: NS + "and"
+OR :: NS + "or"
+XONE :: NS + "xone"
+QUALIFIED_VALUE_SHAPE :: NS + "qualifiedValueShape"
+
+// The non-validating annotation properties (§2.3.2, §2.3.3). No conforming
+// engine acts on these, so seeing one is not evidence of an unimplemented
+// component — which is exactly why they are named rather than left to fall into
+// the ignored-parameter record. `core/property` uses `sh:name`, so a record
+// that flagged them would cry wolf on a directory that is already green.
+//
+// Keep this list short and spec-cited. Every SHACL revision adds annotations,
+// and the failure mode of a too-generous list is silence about a component that
+// really is missing.
+NAME :: NS + "name"
+DESCRIPTION :: NS + "description"
+ORDER :: NS + "order"
+GROUP :: NS + "group"
+DEFAULT_VALUE :: NS + "defaultValue"
+
 // Node kinds (§4.4.2).
 IRI_KIND :: NS + "IRI"
 BLANK_NODE_KIND :: NS + "BlankNode"
