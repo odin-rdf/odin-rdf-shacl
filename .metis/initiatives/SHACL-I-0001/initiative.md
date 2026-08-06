@@ -4,17 +4,17 @@ level: initiative
 title: "SHACL Core spine: shapes model, targets, paths, and the validation report"
 short_code: "SHACL-I-0001"
 created_at: 2026-08-06T13:15:22.298190+00:00
-updated_at: 2026-08-06T14:13:26.963161+00:00
+updated_at: 2026-08-06T19:00:16.553096+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 estimated_complexity: L
 initiative_id: shacl-core-spine-shapes-model
 ---
@@ -406,7 +406,10 @@ README-as-contract test; the two review-gated write-ups delivered.
   entries, 72 of which remain.** Review trigger recorded in `tests/w3c/README.md`: SHACL 1.2
   reaching Proposed Recommendation, or a consumer needing something only 1.2 defines.
 
-  Awaiting human review before transition to completed.
+  **Reviewed and accepted (Greger, 2026-08-06); transitioned to completed.** The two
+  write-ups are accepted as delivered — neither asks anything of an upstream repository, and
+  odin-rdf-parser was never touched. The vision's Current State is rewritten against what was
+  actually built, including the two predictions this initiative retired.
 
 - **2026-08-06 — SHACL-T-0007 met the initiative's suite exit criteria.** `core/targets` and
   `core/path` are fully green with pinned entry counts and no skip list, against both backends
