@@ -71,9 +71,10 @@ validate_report :: proc(
 	return failure
 }
 
-// conforms answers "does this graph conform?" and stops at the first
-// `sh:Violation`, which is what early exit is for. A warning does not break
-// conformance (§3.1.2) and does not stop it.
+// conforms answers "does this graph conform?" and stops at the first result of
+// **any severity**, which is what early exit is for. Severity does not enter
+// into it (§3.1): a warning breaks conformance exactly as a violation does, and
+// `misc/severity-001` is the entry that settles it.
 //
 // The boolean is meaningless when the Failure is not `.None`, or when
 // `session_error` is set.

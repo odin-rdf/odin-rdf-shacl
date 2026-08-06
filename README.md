@@ -180,8 +180,9 @@ The result stream is the primitive. The other two forms are ordinary consumers
 of it, and each is one call:
 
 ```odin
-// Just the answer. Stops at the first sh:Violation rather than finding them
-// all — which at ~200 processes per machine is the difference worth having.
+// Just the answer. Stops at the first result of any severity rather than
+// finding them all — which at ~200 processes per machine is the difference
+// worth having. A warning breaks conformance exactly as a violation does (§3.1).
 ok, failure := shacl_memstore.conforms(&shapes, &bindings, &dictionary, &dataset)
 
 // The sh:ValidationReport graph, finished and ready to serialise. Emitting it

@@ -93,10 +93,12 @@ validate_report :: proc(
 // conforms answers the one question that admits early exit: does this graph
 // conform?
 //
-// It stops at the first `sh:Violation` — no further focus nodes resolved, no
-// further paths walked — which on badly broken data is the difference between
-// reading one triple and reading the graph. A warning does not break
-// conformance (§3.1.2) and does not stop it.
+// It stops at the **first result of any severity** — no further focus nodes
+// resolved, no further paths walked — which on badly broken data is the
+// difference between reading one triple and reading the graph. Severity does
+// not enter into it: §3.1 makes `sh:conforms` a question about whether there
+// are results at all, and `misc/severity-001` settles it by producing exactly
+// one `sh:Warning` and expecting `sh:conforms false`.
 //
 // The boolean is meaningless when the Failure is not `.None`: a failure means
 // the processor could not answer, which is not the same as "no".
