@@ -4,14 +4,14 @@ level: task
 title: "Constraint dispatch and the minimal set: first suite directories green"
 short_code: "SHACL-T-0007"
 created_at: 2026-08-06T13:58:17.309877+00:00
-updated_at: 2026-08-06T18:11:53.629726+00:00
+updated_at: 2026-08-06T18:53:39.924073+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0002, SHACL-T-0004, SHACL-T-0005, SHACL-T-0006]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: true

@@ -4,14 +4,14 @@ level: task
 title: "Public API, documentation, and the evidence write-ups"
 short_code: "SHACL-T-0008"
 created_at: 2026-08-06T13:58:18.020873+00:00
-updated_at: 2026-08-06T18:39:22.607114+00:00
+updated_at: 2026-08-06T18:53:44.008827+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0007]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: true
@@ -31,8 +31,6 @@ exit criteria with a full run rather than an assertion, and deliver the two revi
 write-ups. Nothing here is optional polish — the documentation standard is a stated success
 criterion of the vision, and the write-ups are the whole output of the upstream boundary this
 project works under.
-
-## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

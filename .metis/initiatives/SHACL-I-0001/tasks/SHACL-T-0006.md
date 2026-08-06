@@ -31,8 +31,6 @@ they are found, and the `sh:ValidationReport` graph emitted over it. This is wha
 initiative measurable — the W3C suite compares report graphs, so without this nothing can be
 scored.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] Result type carrying the spec's `sh:ValidationResult` properties: focus node, result
