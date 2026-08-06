@@ -4,14 +4,14 @@ level: initiative
 title: "SHACL Core spine: shapes model, targets, paths, and the validation report"
 short_code: "SHACL-I-0001"
 created_at: 2026-08-06T13:15:22.298190+00:00
-updated_at: 2026-08-06T13:54:53.187435+00:00
+updated_at: 2026-08-06T13:58:01.879894+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/ready"
+  - "#phase/decompose"
 
 
 exit_criteria_met: false
@@ -356,6 +356,38 @@ odin-rdf-sparql; public API documented to the family contract standard with a
 README-as-contract test; the two review-gated write-ups delivered.
 
 ## Status Updates
+
+- **2026-08-06 — Decomposed into 8 tasks** (SHACL-T-0001 … SHACL-T-0008): scaffolding →
+  suite vendoring + harness → shapes model + SHACL-A-0001 → paths → targets → results and
+  report → constraint dispatch and first green directories → API, docs, and evidence
+  write-ups.
+
+  **Dependency shape.** T-0001 gates everything. T-0002 (suite) and T-0003 (model) are
+  independent of each other and can run in parallel. T-0004, T-0005, and T-0006 all depend
+  only on T-0003 and can run in parallel with one another. T-0007 is the join point — it
+  needs T-0002, T-0004, T-0005, and T-0006 — and is where the exit criteria are actually
+  tested. T-0008 closes.
+
+  **Two refinements found during decomposition, recorded rather than silently absorbed:**
+
+  1. **"Position-carrying error style" does not transfer to shapes.** The Goals section
+     inherits that phrase from the family's parsers, where an error has a byte offset, line,
+     and column. A shapes graph arrives as triples in a store — the text is gone, and may
+     never have existed if the graph was built programmatically. The equivalent precision is
+     graph-shaped: name the shape node, the parameter at fault, and the spec section
+     violated, keeping the family's other error conventions (flat `Error_Kind`, no message
+     string in the struct, static allocation-free `error_message`). Carried in SHACL-T-0003.
+  2. **Recursion detection is proven in T-0007, not deferred with `sh:node`.** `sh:node` is
+     a catalogue constraint, but the detection mechanism belongs to the spine's evaluator, so
+     the spine tests it with a self-referencing shape even though the constraint that reaches
+     it lands later.
+
+  Both review-gated items are acceptance criteria rather than closing notes: the
+  store-evidence write-up and the language-tag status are checkboxes in SHACL-T-0008, and
+  T-0005 starts the evidence log that feeds the first. SHACL-A-0001 is finalised inside
+  SHACL-T-0003, alongside the model it describes, rather than after it.
+
+  Awaiting human review before transition to active.
 
 - **2026-08-06 — Design decisions resolved with Greger; transitioned to design.** Seven
   decisions settled, written into Detailed Design:

@@ -1,1 +1,4 @@
 build/
+
+# Metis Ralph loop state -- per-session runtime state, not source
+.claude/
