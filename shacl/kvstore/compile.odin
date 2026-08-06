@@ -23,13 +23,21 @@ import shacl ".."
 //
 // The same shape odin-rdf-sparql arrived at in SPARQL-T-0011, for the same
 // reason.
+//
+// `graph` is the graph every read binds in its pattern — the shapes graph
+// when compiling, the data graph when evaluating (SHACL-A-0001 decision 5).
+// A caller whose shapes and data live in different graphs of one store uses
+// two Sessions over the same store, which is a struct rather than a handle
+// and costs nothing.
 Session :: struct {
-	store: ^kvstore.Store,
+	db:    ^kvstore.Store,
+	graph: store.Term_ID,
 	err:   kvstore.Error,
 }
 
-session_init :: proc(s: ^Session, st: ^kvstore.Store) {
-	s.store = st
+session_init :: proc(s: ^Session, st: ^kvstore.Store, graph: store.Term_ID = store.DEFAULT_GRAPH) {
+	s.db = st
+	s.graph = graph
 	s.err = nil
 }
 
@@ -42,7 +50,7 @@ session_error :: proc(s: ^Session) -> kvstore.Error {
 
 @(private)
 match_adapter :: proc(session: ^Session, pattern: store.Match_Pattern) -> kvstore.Match_Iterator {
-	it, err := kvstore.match(session.store, pattern)
+	it, err := kvstore.match(session.db, pattern)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -79,7 +87,7 @@ load_adapter :: proc(
 	owned: bool,
 ) {
 	session := cast(^Session)data
-	loaded, err := kvstore.lookup_term(session.store, id, allocator)
+	loaded, err := kvstore.lookup_term(session.db, id, allocator)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -92,7 +100,7 @@ load_adapter :: proc(
 @(private)
 find_adapter :: proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, found: bool) {
 	session := cast(^Session)data
-	got, ok, err := kvstore.find_term(session.store, term)
+	got, ok, err := kvstore.find_term(session.db, term)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -104,24 +112,19 @@ find_adapter :: proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, found:
 
 // compile builds a shapes model from a shapes graph in a persistent store.
 //
-// `graph` names the graph to read — `store.DEFAULT_GRAPH` for the default
-// graph. The returned model owns everything it holds, so the store may be
+// The graph read is the session's. The returned model owns everything it
+// holds, so the store may be
 // closed immediately afterwards; on kvstore that is not a nicety but the only
 // workable rule, since every term it hands out is built from database bytes
 // that the close invalidates.
 //
 // Check `session_error(session)` as well as the returned Error: a store
 // failure means the model was compiled from an incomplete read.
-compile :: proc(
-	s: ^shacl.Shapes,
-	session: ^Session,
-	graph: store.Term_ID = store.DEFAULT_GRAPH,
-	allocator := context.allocator,
-) -> shacl.Error {
+compile :: proc(s: ^shacl.Shapes, session: ^Session, allocator := context.allocator) -> shacl.Error {
 	return shacl.compile(
 		s,
 		session,
-		graph,
+		session.graph,
 		load_adapter,
 		session,
 		find_adapter,

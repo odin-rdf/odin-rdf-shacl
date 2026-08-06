@@ -16,8 +16,26 @@ import "core:log"
 import "core:mem"
 import "core:testing"
 
+import rdf "rdf:rdf"
+import store "store:store"
+import memstore "store:store/memstore"
+
 import shacl "../../shacl"
 import shacl_memstore "../../shacl/memstore"
+
+// A cyclic graph with every path form over it, for the evaluation guard.
+PATHS :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:a . ex:b ex:q ex:y .
+ex:P1 a sh:PropertyShape ; sh:path ex:p .
+ex:P2 a sh:PropertyShape ; sh:path [ sh:inversePath ex:p ] .
+ex:P3 a sh:PropertyShape ; sh:path ( ex:p ex:q ) .
+ex:P4 a sh:PropertyShape ; sh:path [ sh:alternativePath ( ex:p ex:q ) ] .
+ex:P5 a sh:PropertyShape ; sh:path [ sh:zeroOrMorePath ex:p ] .
+ex:P6 a sh:PropertyShape ; sh:path [ sh:oneOrMorePath ex:p ] .
+ex:P7 a sh:PropertyShape ; sh:path [ sh:zeroOrOnePath ex:p ] .
+`
 
 SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -108,6 +126,55 @@ test_failed_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 		s: shacl.Shapes
 		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(BAD), "", allocator)
 		shacl.shapes_destroy(&s)
+	})
+}
+
+// Path evaluation is the innermost thing validation does — once per focus
+// node per property shape — so what it must not do is strand memory per call.
+// The cyclic fixture matters here beyond correctness: a reachability walk that
+// leaked its frontier would leak once per cycle traversal rather than once per
+// call, which is the difference between a slow leak and a fast one.
+@(test)
+test_path_evaluation_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "path evaluation", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+
+		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(PATHS), "", nil, allocator)
+
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+
+		b: shacl.Path_Bindings
+		defer shacl.path_bindings_destroy(&b)
+		shacl_memstore.bind_paths(&b, &s, &dictionary, allocator)
+
+		focus, _ := memstore.find_term(&dictionary, rdf.IRI("http://example.org/a"))
+		for sh in s.shapes {
+			if sh.path < 0 {
+				continue
+			}
+			for _ in 0 ..< 4 {
+				nodes := shacl_memstore.value_nodes(
+					&s,
+					&b,
+					&dictionary,
+					&dataset,
+					sh.path,
+					focus,
+					store.DEFAULT_GRAPH,
+					allocator,
+				)
+				delete(nodes)
+			}
+		}
 	})
 }
 

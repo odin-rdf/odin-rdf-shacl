@@ -1,0 +1,188 @@
+package shacl_kvstore
+
+import "core:slice"
+import "core:strings"
+import "core:testing"
+
+import rdf "rdf:rdf"
+import kvstore "store:store/kvstore"
+
+import shacl ".."
+
+// Path evaluation against the persistent backend. The memstore file is the
+// fuller suite; this asserts that the same paths over the same graph produce
+// the same value nodes through LMDB, and that a step failure is recorded
+// rather than read as an empty path.
+
+EVAL_GRAPH :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+
+ex:a ex:p ex:b .
+ex:b ex:p ex:c .
+ex:c ex:p ex:a .
+ex:a ex:q ex:x .
+ex:b ex:q ex:y .
+
+ex:P_predicate    a sh:PropertyShape ; sh:path ex:p .
+ex:P_inverse_seq  a sh:PropertyShape ; sh:path [ sh:inversePath ( ex:p ex:q ) ] .
+ex:P_zero_or_more a sh:PropertyShape ; sh:path [ sh:zeroOrMorePath ex:p ] .
+ex:P_alternative  a sh:PropertyShape ; sh:path [ sh:alternativePath ( ex:p ex:q ) ] .
+`
+
+EX :: "http://example.org/"
+
+@(private = "file")
+eval_set :: proc(
+	t: ^testing.T,
+	s: ^shacl.Shapes,
+	b: ^shacl.Path_Bindings,
+	session: ^Session,
+	shape_iri, focus_iri: string,
+) -> []string {
+	path := -1
+	for sh in s.shapes {
+		if got, is_iri := sh.node.(rdf.IRI); is_iri && string(got) == shape_iri {
+			path = sh.path
+			break
+		}
+	}
+	if !testing.expectf(t, path >= 0, "%s: no compiled path", shape_iri) {
+		return nil
+	}
+
+	focus, found, find_err := kvstore.find_term(session.db, rdf.IRI(focus_iri))
+	testing.expectf(t, find_err == nil, "find_term failed: %v", find_err)
+	if !testing.expectf(t, found, "focus node %s is not in the store", focus_iri) {
+		return nil
+	}
+
+	ids := value_nodes(s, b, session, path, focus)
+	defer delete(ids)
+
+	out := make([]string, len(ids))
+	for id, i in ids {
+		term, err := kvstore.lookup_term(session.db, id)
+		defer rdf.destroy_term(term)
+		testing.expectf(t, err == nil, "lookup_term failed: %v", err)
+		if iri, is_iri := term.(rdf.IRI); is_iri {
+			out[i] = strings.clone(string(iri))
+		} else {
+			out[i] = strings.clone("<not an IRI>")
+		}
+	}
+	slice.sort(out)
+	return out
+}
+
+@(private = "file")
+destroy_set :: proc(set: []string) {
+	for s in set {
+		delete(s)
+	}
+	delete(set)
+}
+
+@(private = "file")
+expect_set :: proc(t: ^testing.T, got: []string, want: []string, what: string) {
+	joined_got := strings.join(got, " ")
+	defer delete(joined_got)
+	joined_want := strings.join(want, " ")
+	defer delete(joined_want)
+	testing.expectf(t, joined_got == joined_want, "%s: got {%s}, want {%s}", what, joined_got, joined_want)
+}
+
+@(test)
+test_kvstore_path_evaluation_matches_memstore :: proc(t: ^testing.T) {
+	path := temp_path("eval-paths")
+	defer remove_store(path)
+
+	st, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
+		return
+	}
+	defer kvstore.close(st)
+
+	_, parse_err, load_err := kvstore.load_turtle(st, transmute([]byte)string(EVAL_GRAPH))
+	testing.expectf(t, parse_err.message == "", "parse failed: %s", parse_err.message)
+	testing.expectf(t, load_err == nil, "load failed: %v", load_err)
+
+	session: Session
+	session_init(&session, st)
+
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	err := compile(&s, &session)
+	testing.expect_value(t, err.kind, shacl.Error_Kind.None)
+
+	b: shacl.Path_Bindings
+	defer shacl.path_bindings_destroy(&b)
+	bind_paths(&b, &s, &session)
+
+	got := eval_set(t, &s, &b, &session, EX + "P_predicate", EX + "a")
+	defer destroy_set(got)
+	expect_set(t, got, []string{EX + "b"}, "ex:p from ex:a")
+
+	// The inverse of a sequence, which must evaluate right-to-left.
+	inv := eval_set(t, &s, &b, &session, EX + "P_inverse_seq", EX + "y")
+	defer destroy_set(inv)
+	expect_set(t, inv, []string{EX + "a"}, "^( ex:p ex:q ) from ex:y")
+
+	// Cycle-safe reachability, through LMDB cursors rather than sorted slices.
+	zom := eval_set(t, &s, &b, &session, EX + "P_zero_or_more", EX + "a")
+	defer destroy_set(zom)
+	expect_set(t, zom, []string{EX + "a", EX + "b", EX + "c"}, "ex:p* from ex:a")
+
+	alt := eval_set(t, &s, &b, &session, EX + "P_alternative", EX + "a")
+	defer destroy_set(alt)
+	expect_set(t, alt, []string{EX + "b", EX + "x"}, "ex:p | ex:q from ex:a")
+
+	testing.expectf(t, session_error(&session) == nil, "store error during evaluation: %v", session_error(&session))
+}
+
+// A path that reaches nothing and a store that failed to answer look
+// identical from the evaluator. This asserts the clean case really is clean —
+// so that a non-nil session error is a genuine signal rather than noise a
+// caller learns to ignore.
+@(test)
+test_kvstore_empty_path_is_not_an_error :: proc(t: ^testing.T) {
+	path := temp_path("eval-empty")
+	defer remove_store(path)
+
+	st, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
+		return
+	}
+	defer kvstore.close(st)
+
+	source := `
+	@prefix sh: <http://www.w3.org/ns/shacl#> .
+	@prefix ex: <http://example.org/> .
+	ex:lonely ex:other ex:thing .
+	ex:P a sh:PropertyShape ; sh:path ex:p .
+	`
+	_, parse_err, load_err := kvstore.load_turtle(st, transmute([]byte)source)
+	testing.expectf(t, parse_err.message == "", "parse failed: %s", parse_err.message)
+	testing.expectf(t, load_err == nil, "load failed: %v", load_err)
+
+	session: Session
+	session_init(&session, st)
+
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	testing.expect_value(t, compile(&s, &session).kind, shacl.Error_Kind.None)
+
+	b: shacl.Path_Bindings
+	defer shacl.path_bindings_destroy(&b)
+	bind_paths(&b, &s, &session)
+
+	got := eval_set(t, &s, &b, &session, EX + "P", EX + "lonely")
+	defer destroy_set(got)
+	expect_set(t, got, []string{}, "a path that reaches nothing")
+	testing.expectf(
+		t,
+		session_error(&session) == nil,
+		"an empty path recorded a store error: %v",
+		session_error(&session),
+	)
+}

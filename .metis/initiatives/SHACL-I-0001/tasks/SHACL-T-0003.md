@@ -4,14 +4,14 @@ level: task
 title: "Shapes model and compilation, and SHACL-A-0001"
 short_code: "SHACL-T-0003"
 created_at: 2026-08-06T13:58:08.147080+00:00
-updated_at: 2026-08-06T14:40:16.427055+00:00
+updated_at: 2026-08-06T17:20:01.889021+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0001]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -30,6 +30,8 @@ Build the contract every later initiative programs against: the compiled shapes 
 compiler that produces it from a shapes graph read through the match interface. This is the
 project's equivalent of odin-rdf-sparql's algebra, and SHACL-A-0001 exists to record it — the
 ADR is finalised here, alongside the code, not after it.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
