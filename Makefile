@@ -14,12 +14,19 @@ OUT   := build/$(NAME)
 # no query engine, so it stays out until there is something importing it.
 COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store
 
-# Every package with Odin sources, discovered rather than listed: the tree is
-# still empty, and a hand-written list would be stale before it was first read.
-# Pin this to an explicit list once the package layout settles, the way
-# odin-rdf-store does -- discovery cannot express intent about what belongs.
-SRC_DIRS := $(sort $(patsubst %/,%,$(dir $(shell find . -name '*.odin' -not -path './build/*'))))
-PKGS     := $(filter-out ./bench% ./vendor%,$(SRC_DIRS))
+# Every package with tests, listed rather than discovered (SHACL-T-0001).
+# `shacl` is the backend-independent core; the two instantiation packages bind
+# it to a backend each and are peers, so each carries its own tests; guards
+# holds the allocation assertions; readme compiles the README's examples so the
+# documentation cannot drift from the API. SHACL-T-0002 adds tests/w3c/harness.
+PKGS := shacl \
+				shacl/memstore \
+				shacl/kvstore \
+				tests/guards \
+				tests/readme
+
+# Packages that are built rather than tested, and so are vetted separately.
+BUILD_PKGS := tests/purity
 
 # STORE-A-0001 makes the store's Term_ID width a build-time choice, and this
 # project compiles the store's sources into its own binaries. Validation code
@@ -27,7 +34,7 @@ PKGS     := $(filter-out ./bench% ./vendor%,$(SRC_DIRS))
 # than once. This is what CI should invoke -- `make test`, the whole matrix.
 WIDTHS := 64 32
 
-.PHONY: all help test check bench build-bench clean
+.PHONY: all help test check purity bench build-bench clean
 
 all: test
 
@@ -42,8 +49,7 @@ help: ## Show available targets
 TEST_FLAGS := -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true $(COLL)
 
 test: ## Run the full suite at both Term_ID widths
-	@if [ -z "$(PKGS)" ]; then echo "no packages yet"; exit 0; fi; \
-	for width in $(WIDTHS); do \
+	@for width in $(WIDTHS); do \
 		echo "== Term_ID $$width-bit =="; \
 		for pkg in $(PKGS); do \
 			echo "-- $$pkg --"; \
@@ -52,15 +58,46 @@ test: ## Run the full suite at both Term_ID widths
 		done; \
 	done
 
-# Vets every package including the ones with no tests, so a package the suite
-# never instantiates still has to compile clean.
-check: ## Vet every package at the default Term_ID width
-	@if [ -z "$(SRC_DIRS)" ]; then echo "no packages yet"; exit 0; fi; \
-	for pkg in $(filter-out ./$(BENCH),$(SRC_DIRS)); do \
+# Vets every package including the ones the suite never instantiates, then runs
+# the linkage property check -- a vet-clean tree that quietly links LMDB into
+# the core would pass `check` without it.
+check: ## Vet every package at the default Term_ID width, then check core purity
+	@for pkg in $(PKGS); do \
 		echo "-- $$pkg --"; \
 		odin check $$pkg -no-entry-point -vet -strict-style $(COLL) || exit 1; \
 	done
+	@for pkg in $(BUILD_PKGS); do \
+		echo "-- $$pkg --"; \
+		odin check $$pkg -vet -strict-style $(COLL) || exit 1; \
+	done
 	@test -d $(BENCH) && odin check $(BENCH) -vet -strict-style $(COLL) || true
+	@$(MAKE) --no-print-directory purity
+
+# SHACL-A-0001's linkage property, asserted rather than trusted: a consumer of
+# the SHACL core and the in-memory backend must not carry LMDB. The core is
+# what protects this -- one convenience import of `store:store/kvstore` inside
+# `shacl` would put a static archive into every consumer's link, including the
+# ones that only ever want an in-memory store, and nothing else in the build
+# would complain.
+#
+# `nm` is not available everywhere (notably on the Windows runner), so its
+# absence skips the check with a message rather than failing the build. The
+# property is platform-independent, so checking it on the platforms that can is
+# enough.
+purity: ## Assert the core links no LMDB (builds tests/purity and inspects it)
+	@mkdir -p build
+	@odin build tests/purity -out:build/purity $(COLL) || exit 1
+	@if ! command -v nm >/dev/null 2>&1; then \
+		echo "purity: nm unavailable, skipping symbol check"; \
+		exit 0; \
+	fi; \
+	if nm build/purity 2>/dev/null | grep -qi 'mdb_'; then \
+		echo "purity: FAIL -- LMDB symbols found in a core+memstore consumer."; \
+		echo "         Something under package shacl imports store:store/kvstore."; \
+		nm build/purity | grep -i 'mdb_' | head; \
+		exit 1; \
+	fi; \
+	echo "purity: ok -- no LMDB symbols in a core+memstore consumer"
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.

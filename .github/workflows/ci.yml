@@ -1,0 +1,77 @@
+# `make test` runs the whole matrix (both Term_ID widths) and `make check`
+# vets every package and asserts the core-purity property, so this workflow's
+# only real job is arranging the checkout the way the Makefile's collections
+# expect.
+#
+# Two checkouts, not one. This repo reaches its dependencies through
+# -collection:rdf=../odin-rdf-parser and -collection:store=../odin-rdf-store,
+# both relative to this repo, so all three go into sibling directories under
+# the workspace rather than the default layout. Both collections are needed
+# even though SHACL Core only names the store: the store's own sources import
+# `rdf:`, and a collection resolves in the importing compilation.
+#
+# The platform matrix is odin-rdf-store's, and it is load-bearing here rather
+# than inherited decoration. `shacl/kvstore` links the LMDB archives vendored
+# in odin-rdf-store (STORE-A-0004), which exist for darwin arm64/amd64, linux
+# arm64/amd64, and windows amd64 — anything else falls back to a system
+# library that will not be there. The three runners below are all covered
+# platforms, and `shacl/kvstore`'s linkage test is what proves the archive
+# actually resolves and runs on each rather than merely compiling.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      # One platform failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: odin-rdf-shacl
+
+      # Both track their main. Once the family publishes tags on these, pin
+      # them with `ref:` so an upstream change cannot break this repo's CI
+      # without a deliberate bump.
+      - uses: actions/checkout@v5
+        with:
+          repository: odin-rdf/odin-rdf-parser
+          path: odin-rdf-parser
+
+      - uses: actions/checkout@v5
+        with:
+          repository: odin-rdf/odin-rdf-store
+          path: odin-rdf-store
+
+      - uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Odin version
+        run: odin version
+
+      # `check` ends by building tests/purity and inspecting it for LMDB
+      # symbols. On Windows `nm` is absent and the symbol check skips itself
+      # with a message — the property is platform-independent, so proving it
+      # on the runners that can is enough.
+      - name: Vet every package and check core purity
+        working-directory: odin-rdf-shacl
+        run: make check
+
+      - name: Test at both Term_ID widths
+        working-directory: odin-rdf-shacl
+        run: make test

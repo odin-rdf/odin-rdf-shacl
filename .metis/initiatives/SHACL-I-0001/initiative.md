@@ -4,14 +4,14 @@ level: initiative
 title: "SHACL Core spine: shapes model, targets, paths, and the validation report"
 short_code: "SHACL-I-0001"
 created_at: 2026-08-06T13:15:22.298190+00:00
-updated_at: 2026-08-06T13:58:01.879894+00:00
+updated_at: 2026-08-06T14:13:26.963161+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false
