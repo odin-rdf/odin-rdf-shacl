@@ -1,5 +1,7 @@
 package shacl_kvstore
 
+import rdf "rdf:rdf"
+
 import shacl ".."
 
 // The kvstore instantiation of validation — the persistent twin of
@@ -91,4 +93,40 @@ conforms :: proc(
 	shacl.conformance_init(&c)
 	failure := validate(s, b, session, shacl.conformance_visitor, &c, allocator)
 	return c.conforms, failure
+}
+
+// conforms_node answers the conformance question for one node against one
+// shape: does `node` conform to `s.shapes[shape_index]` and every property
+// shape below it (§3.4)? No results are produced — the question is the boolean.
+//
+// The persistent twin of `shacl/memstore`'s, and the same caveat as every other
+// entry point here: check `session_error(session)` as well as the Failure. A
+// failed read reaches nothing, and reaching nothing is what conforming looks
+// like.
+conforms_node :: proc(
+	s: ^shacl.Shapes,
+	b: ^shacl.Bindings,
+	session: ^Session,
+	node: rdf.Term,
+	shape_index: int,
+	allocator := context.allocator,
+) -> (
+	bool,
+	shacl.Failure,
+) {
+	access := shacl.Access {
+		scan      = scan_adapter,
+		step      = step_adapter,
+		load      = load_adapter,
+		data      = session,
+		load_data = session,
+	}
+	focus := shacl.Focus_Node {
+		term = node,
+	}
+	if id, found := find_adapter(session, node); found {
+		focus.id = id
+		focus.bound = true
+	}
+	return shacl.conforms_node(s, b, access, shape_index, focus, allocator)
 }

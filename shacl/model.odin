@@ -238,6 +238,28 @@ path_operands :: proc(s: ^Shapes, p: Path_Node) -> []int {
 	return s.path_children[p.children.start:][:p.children.count]
 }
 
+// shape_index_of finds a shape by its node, which is how a caller names one to
+// `conforms_node` and how a `Result` reports one.
+//
+// **Shapes are named by index, not by term**, and this is the bridge rather
+// than an admission that the index was the wrong choice. Most shapes in a real
+// shapes graph have no name to be found by: every `sh:property [ ... ]` is a
+// blank node, and its label is the parser's business, not the author's. The
+// index names all of them, and a `Result` already carries it. What this
+// procedure serves is the other case — a shape the author gave an IRI, which
+// the author can therefore ask about.
+//
+// A linear scan, deliberately: a shapes graph holds a handful of shapes, and an
+// index keyed by term would cost more to build than every lookup it saves.
+shape_index_of :: proc(s: ^Shapes, node: rdf.Term) -> (index: int, found: bool) {
+	for sh, i in s.shapes {
+		if rdf.equal_term(sh.node, node) {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
 // shapes_ignored returns the `sh:`-namespace predicates this compile found on a
 // shape and does not implement — deduplicated, in first-seen order, owned by
 // the model like every other term.

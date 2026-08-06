@@ -176,18 +176,8 @@ validate :: proc(
 		visit_data = visit_data,
 		allocator  = allocator,
 	}
-	v.on_stack = make([]bool, len(s.shapes), allocator)
-	defer delete(v.on_stack, allocator)
-	v.classes.allocator = allocator
-	v.classes.class = make([dynamic]store.Term_ID, allocator)
-	v.classes.member = make([dynamic]map[store.Term_ID]bool, allocator)
-	defer {
-		for &m in v.classes.member {
-			delete(m)
-		}
-		delete(v.classes.member)
-		delete(v.classes.class)
-	}
+	validation_init(&v, allocator)
+	defer validation_destroy(&v)
 
 	for root in s.roots {
 		if v.stopped || v.failure != .None {
@@ -200,6 +190,31 @@ validate :: proc(
 		resolve_targets(s, &b.targets, root, access.scan, access.data, visit_focus, &state, allocator)
 	}
 	return v.failure
+}
+
+// validation_init prepares the two pieces of per-validation state that outlive
+// a single frame: the recursion set and the subclass-closure cache. Split out
+// of `validate` because a suppressed sub-run needs them too — and needs to
+// *share* them rather than build its own; see `node_conforms`.
+@(private)
+validation_init :: proc(v: ^Validation, allocator := context.allocator) {
+	v.allocator = allocator
+	v.on_stack = make([]bool, len(v.s.shapes), allocator)
+	v.classes.allocator = allocator
+	v.classes.class = make([dynamic]store.Term_ID, allocator)
+	v.classes.member = make([dynamic]map[store.Term_ID]bool, allocator)
+}
+
+@(private)
+validation_destroy :: proc(v: ^Validation) {
+	delete(v.on_stack, v.allocator)
+	for &m in v.classes.member {
+		delete(m)
+	}
+	delete(v.classes.member)
+	delete(v.classes.class)
+	v.on_stack = nil
+	v.classes = {}
 }
 
 @(private)
@@ -282,7 +297,12 @@ frame_values :: proc(f: Frame) -> Value_Set {
 
 // validate_focus is the stack-driven walk: one focus node of one shape, and
 // everything that hangs off it.
-@(private = "file")
+//
+// Package-visible rather than file-private because it is also the whole of a
+// suppressed run (`suppress.odin`): asking whether a node conforms to a shape
+// is this walk with the visitor swapped, which is what stops suppression from
+// being a second evaluator.
+@(private)
 validate_focus :: proc(v: ^Validation, shape_index: int, focus: Focus_Node) {
 	stack := make([dynamic]Frame, v.allocator)
 	defer delete(stack)

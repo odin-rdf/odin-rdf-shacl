@@ -1,5 +1,6 @@
 package shacl_memstore
 
+import rdf "rdf:rdf"
 import store "store:store"
 import memstore "store:store/memstore"
 
@@ -117,4 +118,55 @@ conforms :: proc(
 	shacl.conformance_init(&c)
 	failure := validate(s, b, dictionary, dataset, shacl.conformance_visitor, &c, graph, allocator)
 	return c.conforms, failure
+}
+
+// conforms_node answers the conformance question for one node against one
+// shape: does `node` conform to `s.shapes[shape_index]` and every property
+// shape below it (§3.4)?
+//
+// This is the narrower sibling of `conforms`, which asks it of the whole graph
+// through the shapes that carry targets. Here the caller names both the node
+// and the shape, and **no results are produced** — the question is the boolean.
+// `shape_index` indexes the compiled model, which is how every other part of
+// the API names a shape (`Result.shape` is the same index); `shape_index_of`
+// finds it for a shape the author gave an IRI.
+//
+// The node need not be in the data graph. A term the store has never seen is
+// resolved through the non-interning lookup and validated as an unbound focus
+// node, exactly as an absent `sh:targetNode` is: a path from it reaches
+// nothing, which is emptiness and is meaningful.
+//
+// The boolean is meaningless when the Failure is not `.None`.
+conforms_node :: proc(
+	s: ^shacl.Shapes,
+	b: ^shacl.Bindings,
+	dictionary: ^memstore.Dictionary,
+	dataset: ^memstore.Dataset,
+	node: rdf.Term,
+	shape_index: int,
+	graph: store.Term_ID = store.DEFAULT_GRAPH,
+	allocator := context.allocator,
+) -> (
+	bool,
+	shacl.Failure,
+) {
+	data := Data {
+		dataset = dataset,
+		graph   = graph,
+	}
+	access := shacl.Access {
+		scan      = scan_adapter,
+		step      = step_adapter,
+		load      = load_adapter,
+		data      = &data,
+		load_data = dictionary,
+	}
+	focus := shacl.Focus_Node {
+		term = node,
+	}
+	if id, found := memstore.find_term(dictionary, node); found {
+		focus.id = id
+		focus.bound = true
+	}
+	return shacl.conforms_node(s, b, access, shape_index, focus, allocator)
 }

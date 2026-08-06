@@ -198,8 +198,26 @@ not a result: `.None` means the traversal completed or your visitor stopped it,
 and anything else means the processor could not answer — which is not the same
 as "no".
 
-`shacl/kvstore` has the same four entry points against the persistent backend,
-taking a `Session` where these take a dictionary and a dataset.
+There is a fourth, narrower question: **does one node conform to one shape?**
+
+```odin
+// shape_index names a shape by its position in the compiled model — the same
+// index a Result carries in `result.shape`.
+ok, failure := shacl_memstore.conforms_node(
+	&shapes, &bindings, &dictionary, &dataset,
+	rdf.IRI("http://example.org/alice"), shape_index,
+)
+```
+
+It produces no results — the question is the boolean — and it validates the
+named shape and every `sh:property` shape below it (§3.4). Unlike `conforms`, it
+does not care what the shapes graph targets: the caller names both the node and
+the shape. This is also the mechanism `sh:not`, `sh:or`, `sh:xone`, `sh:node`,
+and `sh:qualifiedValueShape` are built on, which is why it exists before they do
+(SHACL-A-0002).
+
+`shacl/kvstore` has the same entry points against the persistent backend, taking
+a `Session` where these take a dictionary and a dataset.
 
 ## Memory contract
 

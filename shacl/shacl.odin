@@ -34,6 +34,12 @@
 // graph, and a conformance boolean — are also there, as `validate`,
 // `validate_report`, and `conforms`.
 //
+// A fourth entry point answers a narrower question: `conforms_node` asks whether
+// one node conforms to one *named* shape, producing no results at all. It is the
+// public face of suppressed validation (SHACL-A-0002), which is also what
+// `sh:not`, `sh:or`, `sh:xone`, `sh:node`, and `sh:qualifiedValueShape` are built
+// on — the reason it exists before they do.
+//
 //
 // # Memory contract
 //
@@ -92,8 +98,8 @@
 //
 // # Five contracts a caller should know
 //
-// The first two are SHACL-A-0001 decisions, the next three are the spec's, and
-// the last is this engine's answer to being incomplete; each surprises someone
+// The first is this engine's answer to being incomplete, the next two are
+// SHACL-A-0001 decisions, and the rest are the spec's; each surprises someone
 // otherwise.
 //
 // **An unimplemented constraint parameter is ignored, and `shapes_ignored`

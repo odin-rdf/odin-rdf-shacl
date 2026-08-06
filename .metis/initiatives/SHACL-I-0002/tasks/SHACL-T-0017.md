@@ -43,7 +43,15 @@ entries rather than hand-built models.
 - [ ] Nesting works: a combinator inside a combinator, which is where a suppression mechanism
       that leaks state fails first.
 - [ ] The recursion behaviour SHACL-A-0002 decided is exercised by a real shapes graph here,
-      whichever way it was decided.
+      whichever way it was decided. Shared `on_stack` was the decision, so
+      `ex:S sh:not [ sh:node ex:S ]` must report `Failure.Recursive_Shape`.
+- [ ] **`shacl/suppress_test.odin`'s hand-built model reviewed once the real consumers exist**
+      (Greger, 2026-08-06). It was written as scaffolding: the leakage and stop-restoration
+      properties were unreachable through any public entry point at SHACL-T-0011, so they are
+      asserted against a `Shapes` built field by field and a fake `Access`. Re-assert both
+      through `sh:not` on a real shapes graph here, then decide whether the hand-built version
+      still earns its place or is deleted. The risk it carries is drift: nothing checks that
+      hand-built model against what `compile` actually produces.
 - [ ] The progress floor moves substantially and the new figure is pinned.
 - [ ] Tests at both widths against both backends; `make test` and `make check` green.
 

@@ -594,3 +594,158 @@ test_conforming_graph_reports_only_its_head :: proc(t: ^testing.T) {
 	// rdf:type sh:ValidationReport, and sh:conforms true. Nothing else.
 	testing.expect_value(t, len(shacl.report_triples(&report)), 2)
 }
+
+// ---- conforms_node: §3.4's question about one node and one shape ----------
+//
+// The public face of suppressed validation (SHACL-A-0002). The mechanism's own
+// properties — that nothing leaks into a caller's stream, that an inner stop
+// does not stop an outer traversal — are asserted in `shacl/suppress_test.odin`
+// against a hand-built model, because they are about an in-flight `Validation`
+// that no public entry point exposes. What is asserted here is that the entry
+// point answers correctly over a real store, at both `Term_ID` widths, and that
+// asking does not disturb an ordinary validation of the same model.
+
+@(private = "file")
+SUPPRESS_SHAPES :: PREFIX + `
+# Targeted, so it is a root and an ordinary validation reports on it.
+ex:Targeted a sh:NodeShape ; sh:targetNode ex:a ; sh:nodeKind sh:Literal .
+
+# Not targeted: reachable only by naming it, which is what conforms_node is for.
+ex:KindShape a sh:NodeShape ; sh:nodeKind sh:IRI .
+ex:Nested a sh:NodeShape ;
+	sh:property [ sh:path ex:p ; sh:minCount 1 ; sh:datatype xsd:string ] .
+`
+
+@(private = "file")
+SUPPRESS_DATA :: PREFIX + `
+ex:a ex:p "x" .
+ex:b ex:q "y" .
+`
+
+@(private = "file")
+shape_index :: proc(s: ^shacl.Shapes, iri: string) -> int {
+	i, _ := shacl.shape_index_of(s, rdf.IRI(iri))
+	return i
+}
+
+@(test)
+test_conforms_node_answers_for_a_named_shape :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, SUPPRESS_SHAPES, SUPPRESS_DATA) {
+		return
+	}
+
+	kind := shape_index(&f.shapes, "http://example.org/KindShape")
+	nested := shape_index(&f.shapes, "http://example.org/Nested")
+	if !testing.expect(t, kind >= 0 && nested >= 0, "fixture: both shapes must compile") {
+		return
+	}
+
+	a := rdf.Term(rdf.IRI("http://example.org/a"))
+	b := rdf.Term(rdf.IRI("http://example.org/b"))
+
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, a, kind)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, conforms, "ex:a is an IRI and satisfies sh:nodeKind sh:IRI")
+
+	// The nested case: conformance counts the sh:property shapes below the
+	// named shape, not only its own constraints. ex:a has an ex:p, ex:b does
+	// not.
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, a, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, conforms, "ex:a has one ex:p string value")
+
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, b, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms, "ex:b has no ex:p at all, so sh:minCount 1 violates")
+
+	// A node the data graph never mentions is still a focus node: unbound, and
+	// its path reaches nothing, which is emptiness and violates the cardinality.
+	absent := rdf.Term(rdf.IRI("http://example.org/never_mentioned"))
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, absent, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms, "an absent node reaches nothing through ex:p")
+
+	// An out-of-range index answers "does not conform" rather than reading
+	// memory it has no business reading.
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, a, len(f.shapes.shapes))
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms, "an out-of-range shape index is not a conformance")
+}
+
+// Asking does not disturb: an ordinary validation of the same model produces
+// exactly the same results before and after a suppressed run, and the
+// suppressed runs contribute none of their own.
+@(test)
+test_conforms_node_does_not_disturb_a_validation :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, SUPPRESS_SHAPES, SUPPRESS_DATA) {
+		return
+	}
+
+	nested := shape_index(&f.shapes, "http://example.org/Nested")
+	b := rdf.Term(rdf.IRI("http://example.org/b"))
+
+	before: Seen
+	before.fixture = &f
+	defer seen_destroy(&before)
+	testing.expect_value(
+		t,
+		validate(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, record, &before),
+		shacl.Failure.None,
+	)
+
+	// This produces results internally — ex:b fails the nested shape — and none
+	// of them may show up anywhere.
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, b, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms, "fixture: ex:b must fail the nested shape")
+
+	after: Seen
+	after.fixture = &f
+	defer seen_destroy(&after)
+	testing.expect_value(
+		t,
+		validate(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, record, &after),
+		shacl.Failure.None,
+	)
+
+	if !testing.expect_value(t, len(after.lines), len(before.lines)) {
+		return
+	}
+	for line, i in after.lines {
+		testing.expect_value(t, line, before.lines[i])
+	}
+	// One result, from the one targeted shape: ex:a is an IRI, not a literal.
+	testing.expect_value(t, len(after.lines), 1)
+	testing.expect_value(t, after.lines[0], "Targeted|NodeKindConstraintComponent|a|a")
+}
+
+@(private = "file")
+RECURSIVE_SHAPES :: PREFIX + `
+ex:P a sh:PropertyShape ; sh:targetNode ex:a ; sh:path ex:p ; sh:property ex:P .
+`
+
+// A shape that reaches itself is a failure, and the suppressed entry point
+// reports it as one rather than answering a conformance it never established.
+// The boolean is meaningless when the Failure is set — this is the test that
+// says so out loud.
+@(test)
+test_conforms_node_reports_recursion_as_a_failure :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, RECURSIVE_SHAPES, SUPPRESS_DATA) {
+		return
+	}
+
+	p := shape_index(&f.shapes, "http://example.org/P")
+	if !testing.expect(t, p >= 0, "fixture: ex:P must compile") {
+		return
+	}
+	a := rdf.Term(rdf.IRI("http://example.org/a"))
+
+	_, failure := conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, a, p)
+	testing.expect_value(t, failure, shacl.Failure.Recursive_Shape)
+}

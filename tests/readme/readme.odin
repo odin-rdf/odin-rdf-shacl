@@ -184,3 +184,46 @@ test_readme_report_example :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, results, 1)
 }
+
+// The narrow form: does one node conform to one shape? The README's fourth
+// example, and the public face of suppressed validation (SHACL-A-0002) — it
+// produces no results, and it does not care what the shapes graph targets.
+conforms_node_example :: proc() -> (bool, shacl.Failure) {
+	shapes: shacl.Shapes
+	defer shacl.shapes_destroy(&shapes)
+	shacl_memstore.compile_turtle(&shapes, transmute([]byte)string(SHAPES))
+
+	dictionary: memstore.Dictionary
+	memstore.dictionary_init(&dictionary)
+	defer memstore.dictionary_destroy(&dictionary)
+	dataset: memstore.Dataset
+	memstore.dataset_init(&dataset)
+	defer memstore.dataset_destroy(&dataset)
+	memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(DATA))
+
+	bindings: shacl.Bindings
+	shacl_memstore.bind(&bindings, &shapes, &dictionary)
+	defer shacl.bindings_destroy(&bindings)
+
+	// A shape is named by its index in the compiled model, the same index a
+	// Result carries. Shapes with an IRI can be found by it.
+	shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
+
+	return shacl_memstore.conforms_node(
+		&shapes,
+		&bindings,
+		&dictionary,
+		&dataset,
+		rdf.IRI("http://example.org/alice"),
+		shape_index,
+	)
+}
+
+@(test)
+test_readme_conforms_node_example :: proc(t: ^testing.T) {
+	ok, failure := conforms_node_example()
+	testing.expect_value(t, failure, shacl.Failure.None)
+	// ex:alice has an ex:name, so she conforms to ex:PersonShape — while the
+	// graph as a whole does not, because ex:bob does not.
+	testing.expect(t, ok)
+}

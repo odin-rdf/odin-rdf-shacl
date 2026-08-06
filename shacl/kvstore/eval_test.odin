@@ -41,11 +41,8 @@ eval_set :: proc(
 	shape_iri, focus_iri: string,
 ) -> []string {
 	path := -1
-	for sh in s.shapes {
-		if got, is_iri := sh.node.(rdf.IRI); is_iri && string(got) == shape_iri {
-			path = sh.path
-			break
-		}
+	if i, ok := shacl.shape_index_of(s, rdf.IRI(shape_iri)); ok {
+		path = s.shapes[i].path
 	}
 	if !testing.expectf(t, path >= 0, "%s: no compiled path", shape_iri) {
 		return nil
@@ -253,13 +250,7 @@ test_kvstore_target_resolution :: proc(t: ^testing.T) {
 	bind_targets(&b, &s, &session)
 
 	expect :: proc(t: ^testing.T, s: ^shacl.Shapes, b: ^shacl.Target_Bindings, session: ^Session, iri: string, want: []string) {
-		index := -1
-		for sh, i in s.shapes {
-			if got, is_iri := sh.node.(rdf.IRI); is_iri && string(got) == iri {
-				index = i
-				break
-			}
-		}
+		index, _ := shacl.shape_index_of(s, rdf.IRI(iri))
 		if !testing.expectf(t, index >= 0, "%s not compiled", iri) {
 			return
 		}

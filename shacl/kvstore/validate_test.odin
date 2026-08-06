@@ -324,3 +324,69 @@ test_kvstore_recursive_shape_is_a_reported_failure :: proc(t: ^testing.T) {
 		shacl.Failure.Recursive_Shape,
 	)
 }
+
+// conforms_node against the persistent backend: the parity half of
+// `shacl/memstore/validate_test.odin`'s suppressed-validation tests. The
+// mechanism is backend-independent by construction — it is the same walk with
+// the visitor swapped — so what this checks is that it answers the same over a
+// store whose adapters can fail and whose loader owns what it hands back.
+
+@(private = "file")
+SUPPRESS_SHAPES :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex: <http://example.org/> .
+
+ex:Targeted a sh:NodeShape ; sh:targetNode ex:a ; sh:nodeKind sh:Literal .
+ex:KindShape a sh:NodeShape ; sh:nodeKind sh:IRI .
+ex:Nested a sh:NodeShape ;
+	sh:property [ sh:path ex:p ; sh:minCount 1 ; sh:datatype xsd:string ] .
+`
+
+@(private = "file")
+SUPPRESS_DATA :: `
+@prefix ex: <http://example.org/> .
+
+ex:a ex:p "x" .
+ex:b ex:q "y" .
+`
+
+@(private = "file")
+shape_index :: proc(s: ^shacl.Shapes, iri: string) -> int {
+	i, _ := shacl.shape_index_of(s, rdf.IRI(iri))
+	return i
+}
+
+@(test)
+test_kvstore_conforms_node :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, "conforms-node", SUPPRESS_SHAPES, SUPPRESS_DATA) {
+		return
+	}
+
+	kind := shape_index(&f.shapes, "http://example.org/KindShape")
+	nested := shape_index(&f.shapes, "http://example.org/Nested")
+	if !testing.expect(t, kind >= 0 && nested >= 0, "fixture: both shapes must compile") {
+		return
+	}
+	a := rdf.Term(rdf.IRI("http://example.org/a"))
+	b := rdf.Term(rdf.IRI("http://example.org/b"))
+
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.session, a, kind)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, conforms, "ex:a is an IRI")
+
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, a, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, conforms, "ex:a has one ex:p string value")
+
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, b, nested)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms, "ex:b has no ex:p, so sh:minCount 1 violates")
+
+	// The backend's own error channel: a suppressed run reads the store like
+	// any other, and a read that failed would make a violating node look
+	// conforming, so the session is checked here as everywhere else.
+	testing.expectf(t, session_error(&f.session) == nil, "store error: %v", session_error(&f.session))
+}

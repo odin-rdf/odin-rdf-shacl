@@ -520,3 +520,69 @@ test_repeated_compiles_do_not_accumulate :: proc(t: ^testing.T) {
 		}
 	})
 }
+
+// Suppressed validation is the newest machinery and the easiest place in the
+// engine to strand memory: every ask builds a fresh frame stack and a value-node
+// set per shape it enters, and the runs that matter are the ones that end
+// abnormally — the probe stops at its first result, which unwinds by hand, and
+// a recursive shape abandons the walk mid-flight.
+//
+// It is also the machinery with no suite entry behind it until SHACL-T-0017, so
+// this guard and `shacl/suppress_test.odin` are the whole of its cover.
+// Repeated asks rather than one: a leak of a stack per ask is what would
+// otherwise hide inside a single call's noise.
+@(test)
+test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "suppressed validation", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		SUPPRESS :: `
+		@prefix sh: <http://www.w3.org/ns/shacl#> .
+		@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+		@prefix ex: <http://example.org/> .
+		ex:Nested a sh:NodeShape ;
+			sh:property [ sh:path ex:p ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+			sh:property [ sh:path [ sh:zeroOrMorePath ex:p ] ; sh:nodeKind sh:IRI ] .
+		# A shape that reaches itself: the ask cannot answer and unwinds mid-walk.
+		ex:R a sh:PropertyShape ; sh:path ex:p ; sh:property ex:R .
+		`
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(SUPPRESS), "", allocator)
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+		_, _ = memstore.load_turtle(
+			&dictionary,
+			&dataset,
+			transmute([]byte)string(VALIDATION_DATA),
+			"",
+			nil,
+			allocator,
+		)
+
+		b: shacl.Bindings
+		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		defer shacl.bindings_destroy(&b)
+
+		node := rdf.Term(rdf.IRI("http://example.org/a"))
+		for shape_index in 0 ..< len(s.shapes) {
+			for _ in 0 ..< 4 {
+				_, _ = shacl_memstore.conforms_node(
+					&s,
+					&b,
+					&dictionary,
+					&dataset,
+					node,
+					shape_index,
+					store.DEFAULT_GRAPH,
+					allocator,
+				)
+			}
+		}
+	})
+}

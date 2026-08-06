@@ -59,10 +59,8 @@ with_shapes :: proc(t: ^testing.T, name, source: string, s: ^shacl.Shapes) -> bo
 
 @(private = "file")
 find_shape :: proc(s: ^shacl.Shapes, iri: string) -> (shacl.Shape, bool) {
-	for sh in s.shapes {
-		if got, is_iri := sh.node.(rdf.IRI); is_iri && string(got) == iri {
-			return sh, true
-		}
+	if i, ok := shacl.shape_index_of(s, rdf.IRI(iri)); ok {
+		return s.shapes[i], true
 	}
 	return {}, false
 }
