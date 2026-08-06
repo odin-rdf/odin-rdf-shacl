@@ -51,6 +51,12 @@ CLASS :: NS + "class"
 DATATYPE :: NS + "datatype"
 NODE_KIND :: NS + "nodeKind"
 
+// Added after SHACL-T-0002 measured what core/targets and core/path actually
+// exercise: both were listed as catalogue non-goals, and both are needed to
+// green the spine's exit-criteria directories.
+HAS_VALUE :: NS + "hasValue"
+IN :: NS + "in"
+
 // Node kinds (§4.4.2).
 IRI_KIND :: NS + "IRI"
 BLANK_NODE_KIND :: NS + "BlankNode"

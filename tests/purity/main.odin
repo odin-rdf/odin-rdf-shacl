@@ -12,22 +12,32 @@
 // SHACL core and the in-memory backend and nothing else. `make purity` builds
 // it and asserts the resulting binary carries no LMDB symbols.
 //
-// It imports `store:store/memstore` directly rather than `shacl/memstore`
-// because that package has no exported symbols yet. Switch the import when
-// SHACL-T-0003 fills it — the property under test is the same either way, and
-// going through the instantiation package tests slightly more of it.
+// It goes through `shacl/memstore` rather than naming the store directly
+// (SHACL-T-0003 filled that package, discharging the note this file used to
+// carry), which tests slightly more of the property: the instantiation
+// package is where a stray `store:store/kvstore` import would be most tempting
+// and least visible.
 package main
 
 import "core:fmt"
 
 import shacl "../../shacl"
-import memstore "store:store/memstore"
+import shacl_memstore "../../shacl/memstore"
+
+SHAPES :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+ex:S a sh:NodeShape ; sh:targetClass ex:C ; sh:property [ sh:path ex:p ; sh:minCount 1 ] .
+`
 
 main :: proc() {
-	ds: memstore.Dataset
-	memstore.dataset_init(&ds)
-	defer memstore.dataset_destroy(&ds)
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
 
-	fmt.printf("shacl namespace: %s\n", shacl.NS)
-	fmt.printf("quads in empty dataset: %d\n", memstore.count(&ds))
+	err, load_err := shacl_memstore.compile_turtle(&s, transmute([]byte)string(SHAPES))
+	fmt.printf("shacl namespace:  %s\n", shacl.NS)
+	fmt.printf("load error:       %q\n", load_err.message)
+	fmt.printf("compile error:    %s\n", shacl.error_message(err.kind))
+	fmt.printf("shapes compiled:  %d\n", len(s.shapes))
+	fmt.printf("root shapes:      %d\n", len(s.roots))
 }

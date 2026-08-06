@@ -4,14 +4,14 @@ level: task
 title: "Vendor the W3C SHACL test suite and build the manifest-driven harness"
 short_code: "SHACL-T-0002"
 created_at: 2026-08-06T13:58:06.773159+00:00
-updated_at: 2026-08-06T14:27:44.449792+00:00
+updated_at: 2026-08-06T14:40:15.698414+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0001]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -36,6 +36,8 @@ Deliverable is a harness that reads manifests, pins entry counts per directory, 
 report graphs — with **zero directories enabled**, since nothing can validate yet. It also
 produces two survey findings the initiative depends on: the real directory inventory, and the
 language-tag exposure.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

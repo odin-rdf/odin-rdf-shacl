@@ -5,7 +5,7 @@ title: "The shapes model: representation, term ownership, and graph scoping"
 number: 1
 short_code: "SHACL-A-0001"
 created_at: 2026-08-06T13:50:14.567908+00:00
-updated_at: 2026-08-06T13:51:36.032991+00:00
+updated_at: 2026-08-06T14:54:42.042733+00:00
 decision_date: 
 decision_maker: Greger Olsson
 parent: 
@@ -13,7 +13,7 @@ archived: false
 
 tags:
   - "#adr"
-  - "#phase/discussion"
+  - "#phase/decided"
 
 
 exit_criteria_met: false
@@ -162,6 +162,45 @@ evidence-backed upstream proposals rather than local workarounds.
   Intended, spec-sanctioned, and documented — but it will be met as a limitation.
 - **The flat-array representation is less readable than a pointer tree** and its index-named
   children need care in review. The alternative does not compile.
+
+## As Built (SHACL-T-0003, 2026-08-06)
+
+Every decision above is implemented as written. Three things the design phase did not
+anticipate are recorded here rather than left for rediscovery.
+
+**1. The compiler-hang constraint has a second, sharper face.** Decision 4 was taken
+against the failure SPARQL-T-0011 documented: a generic procedure over `$`-procedure
+constants that calls itself hangs the compiler. The constraint that actually bit first
+was different and fails loudly rather than hanging — a generic procedure **cannot forward
+its `$MATCH` constant to another generic procedure**, because the callee would be
+introducing `$It` in the return type of a procedure-typed parameter and the compiler
+reports *"cannot determine complete type of partial polymorphic procedure"*.
+
+The fix is the one odin-rdf-sparql already uses without naming it: bind `$D` and `$It` on
+an earlier *value* parameter, which is why its helpers take `e: ^Exec($D, $It)` first.
+This repo's equivalent is `Reader($D, $It)` in `shacl/query.odin`, carrying the dataset,
+the graph, and the RDF-list vocabulary that nearly every read needs anyway. Decision 4 is
+unchanged; it now has two independent reasons rather than one.
+
+**2. Shape discovery is narrower than §2.1.1, deliberately.** The spec defines a shape
+broadly — including any node that is the value of a shape-expecting parameter such as
+`sh:node`. The spine implements three cases: a node typed `sh:NodeShape` or
+`sh:PropertyShape`, a node carrying a target declaration, and a value of `sh:property`.
+That covers the exit-criteria directories. The catalogue initiative widens it when
+`sh:node` and the logical combinators arrive, which is the case this omits.
+
+**3. Decision 6 is designed but not yet realised.** Recursion detection belongs to the
+evaluator's stack, and there is no evaluator until SHACL-T-0007. The model and the
+compiler are structured for it — the flat array and the explicit walk are in place — but
+nothing detects a recursive shape today, because nothing yet follows one.
+
+Two properties are asserted rather than assumed. The model's independence from its store
+is tested on both backends by destroying the store before reading the model, which matters
+far more on kvstore, where every term is built from database bytes that closing
+invalidates. And compilation's read-only nature is tested by compiling from a **read-only
+LMDB environment**: `find_term` never assigns, so a shapes graph can be compiled from a
+store opened without write access — the strongest available form of "compiling never
+writes".
 
 ## Review Triggers
 
