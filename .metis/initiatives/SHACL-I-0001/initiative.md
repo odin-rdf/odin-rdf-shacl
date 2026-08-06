@@ -395,9 +395,16 @@ README-as-contract test; the two review-gated write-ups delivered.
   proposal proposes no change and retires both predicted backlog items with reasons; the
   language-tag trigger did not fire and cannot on this corpus. Both go to review.
 
-  **Handover:** `docs/handover-catalogue.md`. The one item it flags as needing a decision
-  before the catalogue initiative is scoped is the SHACL 1.0-vs-1.2 suite question, which
-  SHACL-T-0002 raised and this initiative did not settle.
+  **Handover:** `docs/handover-catalogue.md`.
+
+  **The one item it flagged as needing a decision is now decided: the project targets SHACL
+  1.0** (Greger, 2026-08-06). SHACL-T-0002 raised it on the reasoning that the family ships
+  RDF 1.2 and SPARQL 1.2, so 1.2 looked like the consistent long-run target. The answer is
+  that the difference is maturity rather than consistency — SHACL 1.2 is still moving in the
+  W3C, and a suite that goes green against a specification that can change under it is worth
+  less than it looks. **The catalogue initiative is scoped against the 1.0 corpus's 98
+  entries, 72 of which remain.** Review trigger recorded in `tests/w3c/README.md`: SHACL 1.2
+  reaching Proposed Recommendation, or a consumer needing something only 1.2 defines.
 
   Awaiting human review before transition to completed.
 
@@ -452,7 +459,8 @@ README-as-contract test; the two review-gated write-ups delivered.
      untouched for the whole initiative and, on current evidence, the catalogue one too. The
      recorded decision stands as the family's answer; this project has no evidence forcing it.
 
-  Also raised and **not** decided: the upstream repository carries a **SHACL 1.2 test suite**
+  Also raised and, at the time, **not** decided — **settled as 1.0 at the initiative's
+  close**, see the entry above: the upstream repository carries a **SHACL 1.2 test suite**
   (138 core entries against 1.0's 98, plus `node-expr/` and `rules/`). The family ships RDF
   1.2 and SPARQL 1.2, so 1.2 is plausibly the consistent long-run target. 1.0 was vendored
   because it is the Recommendation and this initiative's exit criteria are stated against it,

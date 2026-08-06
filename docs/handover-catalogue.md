@@ -74,12 +74,14 @@ not the catalogue's. Do not size the catalogue initiative around it: the
 catalogue's real target is `core/node` (32) and `core/property` (38), 70 entries
 between them.
 
-**A live question the catalogue initiative must answer before it is scoped:** the
-upstream repository also carries a **SHACL 1.2 test suite** — 138 core entries
-against 1.0's 98, plus `node-expr/` and `rules/`. The family ships RDF 1.2 and
-SPARQL 1.2, so 1.2 is plausibly the consistent long-run target. 1.0 was vendored
-because it is the Recommendation and this initiative's exit criteria were stated
-against it. Recorded in `tests/w3c/README.md` and still undecided.
+**The SHACL 1.0-vs-1.2 question is settled: 1.0** (Greger, 2026-08-06). The
+upstream repository also carries a SHACL 1.2 suite — 138 core entries against
+1.0's 98, plus `node-expr/` and `rules/` — and the family shipping RDF 1.2 and
+SPARQL 1.2 made 1.2 look like the consistent long-run target. It is not, yet:
+SHACL 1.2 is still moving in the W3C, and a green suite against a moving
+specification is worth less than it looks. **Scope the catalogue initiative
+against the 1.0 corpus's 98 entries**, of which 72 remain. Review trigger and
+full reasoning in `tests/w3c/README.md`.
 
 ## Things the spine left deliberately open
 

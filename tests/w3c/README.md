@@ -41,12 +41,23 @@ fully green, no skip list, no expected-failure file.
   where the `sparql:` collection gets added.
 - **`shacl12-test-suite/`** — the SHACL 1.2 suite, which exists at this commit
   and is substantially larger (138 core entries against 1.0's 98, plus
-  `node-expr/` and `rules/` directories). Not vendored, and **this is a live
-  question rather than a settled exclusion**: the family ships RDF 1.2 and
-  SPARQL 1.2 support, so the consistent long-run target is 1.2. SHACL 1.0 is
-  vendored first because it is the Recommendation and the spine's exit
-  criteria are stated against it — the same order odin-rdf-sparql used, 1.1
-  suites first and 1.2 as a later task.
+  `node-expr/` and `rules/` directories). Not vendored, and **this is now a
+  settled exclusion rather than a live question** (Greger, 2026-08-06): SHACL
+  1.2 is still moving in the W3C, so targeting it would mean chasing a
+  specification that can change under a green suite. **This project sits at
+  SHACL 1.0 for the foreseeable future.**
+
+  It is worth recording why the question was raised at all, so the decision is
+  not mistaken for inattention: the family ships RDF 1.2 and SPARQL 1.2, which
+  makes 1.2 look like the consistent long-run target. The difference is
+  maturity, not consistency — RDF 1.2 and SPARQL 1.2 were stable enough to
+  implement against; SHACL 1.2 is not yet. odin-rdf-sparql took the same shape
+  from the other side, vendoring 1.1 first and adding 1.2 once it was worth
+  pinning.
+
+  **Review trigger:** SHACL 1.2 reaching Proposed Recommendation, or a consumer
+  needing something only 1.2 defines. Until then the 1.0 corpus is the whole
+  scoreboard, and the catalogue initiative is scoped against its 98 entries.
 - Everything else in the upstream repository: specification sources,
   `data-shapes-ucr/`, `shacl-af/`, `shacl-js/`, `shacl-compact-syntax/`,
   `unmaintained/`.
