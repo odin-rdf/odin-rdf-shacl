@@ -37,6 +37,23 @@ ex:P6 a sh:PropertyShape ; sh:path [ sh:oneOrMorePath ex:p ] .
 ex:P7 a sh:PropertyShape ; sh:path [ sh:zeroOrOnePath ex:p ] .
 `
 
+// A class hierarchy with a cycle in it, plus every target form, for the
+// resolution guard. The cycle makes the closure allocate more than one round.
+TARGETS :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ex: <http://example.org/> .
+ex:Sub rdfs:subClassOf ex:Super . ex:SubSub rdfs:subClassOf ex:Sub .
+ex:A rdfs:subClassOf ex:B . ex:B rdfs:subClassOf ex:A .
+ex:n1 a ex:Super . ex:n2 a ex:SubSub . ex:n3 a ex:B .
+ex:s1 ex:knows ex:o1 .
+ex:T1 a sh:NodeShape ; sh:targetClass ex:Super .
+ex:T2 a sh:NodeShape ; sh:targetClass ex:A .
+ex:T3 a sh:NodeShape ; sh:targetSubjectsOf ex:knows ; sh:targetObjectsOf ex:knows .
+ex:T4 a sh:NodeShape ; sh:targetNode ex:n1, ex:never_mentioned_elsewhere .
+ex:T5 a sh:NodeShape, rdfs:Class .
+`
+
 SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -173,6 +190,54 @@ test_path_evaluation_is_net_zero :: proc(t: ^testing.T) {
 					allocator,
 				)
 				delete(nodes)
+			}
+		}
+	})
+}
+
+// Target resolution keeps a set of the focus nodes it has yielded, which is
+// unavoidable — §2.1.3 makes them a union — but it must not keep anything
+// else. The subclass closure in particular allocates a frontier per round.
+@(test)
+test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "target resolution", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary, allocator)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset, allocator)
+		defer memstore.dataset_destroy(&dataset)
+
+		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(TARGETS), "", nil, allocator)
+
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+
+		b: shacl.Target_Bindings
+		defer shacl.target_bindings_destroy(&b)
+		shacl_memstore.bind_targets(&b, &s, &dictionary, allocator)
+
+		count := 0
+		visit :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
+			n := cast(^int)data
+			n^ += 1
+			return true
+		}
+		for _, i in s.shapes {
+			for _ in 0 ..< 4 {
+				shacl_memstore.resolve_targets(
+					&s,
+					&b,
+					i,
+					&dataset,
+					visit,
+					&count,
+					store.DEFAULT_GRAPH,
+					allocator,
+				)
 			}
 		}
 	})

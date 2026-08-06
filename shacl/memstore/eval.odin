@@ -84,3 +84,58 @@ bind_paths :: proc(
 ) {
 	shacl.path_bindings_init(b, s, find_adapter, dictionary, allocator)
 }
+
+// scan_adapter streams one match. The graph comes from the adapter's own Data
+// rather than from the caller, which is what makes it structurally impossible
+// for target resolution to leave the graph position wildcard and widen a
+// validation to the whole dataset (SHACL-A-0001 decision 5).
+@(private)
+scan_adapter :: proc(
+	data: rawptr,
+	subject, predicate, object: store.Term_ID,
+	position: int,
+	visit: proc(data: rawptr, id: store.Term_ID) -> bool,
+	visit_data: rawptr,
+) -> bool {
+	d := cast(^Data)data
+	it := memstore.match(d.dataset, store.Match_Pattern{subject, predicate, object, d.graph})
+	defer memstore.match_destroy(&it)
+	for {
+		q, ok := memstore.match_next(&it)
+		if !ok {
+			return true
+		}
+		if !visit(visit_data, q[position]) {
+			return false
+		}
+	}
+}
+
+// resolve_targets streams a shape's focus nodes against a memstore data
+// graph. Returns false if the visitor asked to stop.
+resolve_targets :: proc(
+	s: ^shacl.Shapes,
+	bindings: ^shacl.Target_Bindings,
+	shape_index: int,
+	dataset: ^memstore.Dataset,
+	visit: shacl.Focus_Visitor,
+	visit_data: rawptr,
+	graph: store.Term_ID = store.DEFAULT_GRAPH,
+	allocator := context.allocator,
+) -> bool {
+	data := Data {
+		dataset = dataset,
+		graph   = graph,
+	}
+	return shacl.resolve_targets(s, bindings, shape_index, scan_adapter, &data, visit, visit_data, allocator)
+}
+
+// bind_targets resolves the compiled model's target terms to this store's IDs.
+bind_targets :: proc(
+	b: ^shacl.Target_Bindings,
+	s: ^shacl.Shapes,
+	dictionary: ^memstore.Dictionary,
+	allocator := context.allocator,
+) {
+	shacl.target_bindings_init(b, s, find_adapter, dictionary, allocator)
+}

@@ -186,3 +186,106 @@ test_kvstore_empty_path_is_not_an_error :: proc(t: ^testing.T) {
 		session_error(&session),
 	)
 }
+
+// Target resolution against the persistent backend. The memstore file is the
+// fuller suite; this asserts the forms whose answer could differ by backend —
+// the subclass closure, which walks the store repeatedly, and the two
+// predicate scans, which stream through LMDB cursors rather than sorted
+// slices.
+TARGET_GRAPH :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ex: <http://example.org/> .
+
+ex:Sub rdfs:subClassOf ex:Super .
+ex:n1 a ex:Super . ex:n2 a ex:Sub .
+ex:s1 ex:knows ex:o1 .
+
+ex:S_class    a sh:NodeShape ; sh:targetClass ex:Super .
+ex:S_subjects a sh:NodeShape ; sh:targetSubjectsOf ex:knows .
+ex:S_objects  a sh:NodeShape ; sh:targetObjectsOf ex:knows .
+`
+
+@(private = "file")
+Names :: struct {
+	session: ^Session,
+	names:   [dynamic]string,
+}
+
+@(private = "file")
+collect_name :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
+	c := cast(^Names)data
+	term, err := kvstore.lookup_term(c.session.db, focus.id)
+	defer rdf.destroy_term(term)
+	if err != nil {
+		return true
+	}
+	if iri, is_iri := term.(rdf.IRI); is_iri {
+		append(&c.names, strings.clone(string(iri)))
+	}
+	return true
+}
+
+@(test)
+test_kvstore_target_resolution :: proc(t: ^testing.T) {
+	path := temp_path("targets")
+	defer remove_store(path)
+
+	st, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
+		return
+	}
+	defer kvstore.close(st)
+
+	_, parse_err, load_err := kvstore.load_turtle(st, transmute([]byte)string(TARGET_GRAPH))
+	testing.expectf(t, parse_err.message == "", "parse failed: %s", parse_err.message)
+	testing.expectf(t, load_err == nil, "load failed: %v", load_err)
+
+	session: Session
+	session_init(&session, st)
+
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	testing.expect_value(t, compile(&s, &session).kind, shacl.Error_Kind.None)
+
+	b: shacl.Target_Bindings
+	defer shacl.target_bindings_destroy(&b)
+	bind_targets(&b, &s, &session)
+
+	expect :: proc(t: ^testing.T, s: ^shacl.Shapes, b: ^shacl.Target_Bindings, session: ^Session, iri: string, want: []string) {
+		index := -1
+		for sh, i in s.shapes {
+			if got, is_iri := sh.node.(rdf.IRI); is_iri && string(got) == iri {
+				index = i
+				break
+			}
+		}
+		if !testing.expectf(t, index >= 0, "%s not compiled", iri) {
+			return
+		}
+		c := Names {
+			session = session,
+			names   = make([dynamic]string),
+		}
+		defer {
+			for n in c.names {
+				delete(n)
+			}
+			delete(c.names)
+		}
+		resolve_targets(s, b, index, session, collect_name, &c)
+		slice.sort(c.names[:])
+		got := strings.join(c.names[:], " ")
+		defer delete(got)
+		joined := strings.join(want, " ")
+		defer delete(joined)
+		testing.expectf(t, got == joined, "%s: got {%s}, want {%s}", iri, got, joined)
+	}
+
+	// The closure reaches instances of the subclass as well as the class.
+	expect(t, &s, &b, &session, EX + "S_class", []string{EX + "n1", EX + "n2"})
+	expect(t, &s, &b, &session, EX + "S_subjects", []string{EX + "s1"})
+	expect(t, &s, &b, &session, EX + "S_objects", []string{EX + "o1"})
+
+	testing.expectf(t, session_error(&session) == nil, "store error: %v", session_error(&session))
+}

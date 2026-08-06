@@ -4,14 +4,14 @@ level: task
 title: "Property paths: compilation and value-node evaluation"
 short_code: "SHACL-T-0004"
 created_at: 2026-08-06T13:58:08.841199+00:00
-updated_at: 2026-08-06T17:20:02.490665+00:00
+updated_at: 2026-08-06T17:41:53.773742+00:00
 parent: SHACL-I-0001
 blocked_by: [SHACL-T-0003]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -30,6 +30,8 @@ Implement the value-node mechanism: given a focus node and a compiled path, prod
 nodes a property shape's constraints apply to. This is *the* property-shape primitive — every
 property constraint in this initiative and the catalogue one consumes it — and it reads the
 data graph through `match` alone.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

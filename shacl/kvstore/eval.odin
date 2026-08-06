@@ -78,3 +78,60 @@ bind_paths :: proc(
 ) {
 	shacl.path_bindings_init(b, s, find_adapter, session, allocator)
 }
+
+// scan_adapter streams one match, binding the graph from the session so the
+// core cannot widen a validation to the whole dataset. A failed read is
+// recorded rather than returned as an empty scan, for the reason at the top of
+// this file.
+@(private)
+scan_adapter :: proc(
+	data: rawptr,
+	subject, predicate, object: store.Term_ID,
+	position: int,
+	visit: proc(data: rawptr, id: store.Term_ID) -> bool,
+	visit_data: rawptr,
+) -> bool {
+	session := cast(^Session)data
+	it, err := kvstore.match(session.db, store.Match_Pattern{subject, predicate, object, session.graph})
+	if err != nil {
+		if session.err == nil {
+			session.err = err
+		}
+		return true
+	}
+	defer kvstore.match_destroy(&it)
+	for {
+		q, ok := kvstore.match_next(&it)
+		if !ok {
+			return true
+		}
+		if !visit(visit_data, q[position]) {
+			return false
+		}
+	}
+}
+
+// resolve_targets streams a shape's focus nodes against a persistent data
+// graph. Returns false if the visitor asked to stop; check `session_error`
+// before believing an empty result.
+resolve_targets :: proc(
+	s: ^shacl.Shapes,
+	bindings: ^shacl.Target_Bindings,
+	shape_index: int,
+	session: ^Session,
+	visit: shacl.Focus_Visitor,
+	visit_data: rawptr,
+	allocator := context.allocator,
+) -> bool {
+	return shacl.resolve_targets(s, bindings, shape_index, scan_adapter, session, visit, visit_data, allocator)
+}
+
+// bind_targets resolves the compiled model's target terms to this store's IDs.
+bind_targets :: proc(
+	b: ^shacl.Target_Bindings,
+	s: ^shacl.Shapes,
+	session: ^Session,
+	allocator := context.allocator,
+) {
+	shacl.target_bindings_init(b, s, find_adapter, session, allocator)
+}
