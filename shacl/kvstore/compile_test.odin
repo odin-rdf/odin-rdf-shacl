@@ -97,7 +97,7 @@ test_kvstore_compiles_the_same_model :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect_value(t, person.kind, shacl.Shape_Kind.Node)
-	testing.expect_value(t, person.severity, shacl.Severity.Warning)
+	testing.expect_value(t, person.severity, rdf.Term(rdf.IRI(shacl.WARNING)))
 	testing.expect_value(t, len(shacl.shape_targets(&s, person)), 1)
 	testing.expect_value(t, len(s.roots), 1)
 

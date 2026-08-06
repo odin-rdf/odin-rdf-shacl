@@ -37,18 +37,15 @@ Span :: struct {
 	count: int,
 }
 
+// Shape_Kind distinguishes the two kinds of shape (§2.1). The difference that
+// matters downstream is the value nodes: a node shape's are its focus node, a
+// property shape's are its path's result.
 Shape_Kind :: enum u8 {
 	Node,
 	Property,
 }
 
-// Severity is `sh:severity`, defaulting to `sh:Violation` (SHACL §2.1.4).
-Severity :: enum u8 {
-	Violation,
-	Warning,
-	Info,
-}
-
+// Target_Kind is which target declaration produced a Target (§2.1.3).
 Target_Kind :: enum u8 {
 	Node, // sh:targetNode
 	Class, // sh:targetClass
@@ -57,6 +54,8 @@ Target_Kind :: enum u8 {
 	Implicit_Class, // a shape that is also an rdfs:Class (§2.1.3.3)
 }
 
+// Target is one target declaration: how to find focus nodes, and the term it
+// finds them by.
 Target :: struct {
 	kind: Target_Kind,
 	// The class or predicate the target names; for Implicit_Class this is
@@ -65,6 +64,7 @@ Target :: struct {
 	term: rdf.Term,
 }
 
+// Path_Kind is the property-path grammar of §2.3.1, one case per form.
 Path_Kind :: enum u8 {
 	Predicate, // a bare IRI
 	Inverse, // sh:inversePath
@@ -107,6 +107,7 @@ Constraint_Kind :: enum u8 {
 // so the six spec values are one representation.
 Node_Kind :: distinct bit_set[Node_Kind_Bit;u8]
 
+// Node_Kind_Bit is one primitive node kind — the members of the Node_Kind set.
 Node_Kind_Bit :: enum u8 {
 	IRI,
 	Blank_Node,
@@ -148,7 +149,14 @@ Shape :: struct {
 	kind:        Shape_Kind,
 	path:        int,
 	deactivated: bool,
-	severity:    Severity,
+
+	// `sh:severity` (§2.1.4). **Any IRI**, not one of three: the spec names
+	// `sh:Violation`, `sh:Warning`, and `sh:Info` as the built-ins but does not
+	// close the set, and the suite depends on it — `misc/severity-002` declares
+	// `sh:severity ex:MySeverity` and expects it echoed into the report
+	// unchanged. Defaults to `sh:Violation`, interned like every other term the
+	// model holds.
+	severity:    rdf.Term,
 	targets:     Span, // into Shapes.targets
 	constraints: Span, // into Shapes.constraints
 	properties:  Span, // into Shapes.shape_children: indices into Shapes.shapes
@@ -181,6 +189,10 @@ Shapes :: struct {
 	allocator:      runtime.Allocator,
 }
 
+// shapes_destroy frees everything a compiled model owns, including every term
+// it interned. Safe on a zero-valued or partly-compiled model, which matters:
+// a failed compile still returns one, because the Error's terms borrow from
+// its table.
 shapes_destroy :: proc(s: ^Shapes) {
 	delete(s.shapes)
 	delete(s.targets)

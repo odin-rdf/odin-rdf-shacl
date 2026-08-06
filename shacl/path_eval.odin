@@ -64,6 +64,10 @@ Path_Bindings :: struct {
 	allocator: runtime.Allocator,
 }
 
+// path_bindings_init resolves every predicate path in the model against a data
+// store. `find` must be the non-interning lookup, so preparing an evaluation
+// never writes to the graph it is about to read. The bindings borrow nothing
+// from the model and are freed by `path_bindings_destroy`.
 path_bindings_init :: proc(
 	b: ^Path_Bindings,
 	s: ^Shapes,
@@ -84,6 +88,8 @@ path_bindings_init :: proc(
 	}
 }
 
+// path_bindings_destroy frees the bindings. The model and the store are
+// untouched.
 path_bindings_destroy :: proc(b: ^Path_Bindings) {
 	delete(b.predicate, b.allocator)
 	delete(b.bound, b.allocator)

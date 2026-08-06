@@ -28,19 +28,31 @@ Suite :: struct {
 // The inventory, pinned at the commit recorded in tests/w3c/README.md.
 //
 // `core/targets` and `core/path` are the spine's exit criteria, enabled in
-// SHACL-T-0007 when the validator that greens them landed. Every remaining
-// directory needs constraint components the spine deliberately does not
-// implement — the logical combinators, the value-range and string families,
-// `sh:node`, `sh:closed` — and belongs to the catalogue initiative, which turns
-// them on one at a time under the same rule.
+// SHACL-T-0007 when the validator that greens them landed.
+//
+// `core/misc` and `core/validation-reports` joined them in SHACL-T-0008.
+// Neither exercises a constraint component outside the spine's seven, and the
+// verification pass found both green — `core/misc` only after three bugs it
+// alone catches were fixed: `sh:resultMessage` (the report renames
+// `sh:message`), `sh:severity` accepting any IRI rather than three, and
+// `sh:conforms` being false for *any* result rather than only violations.
+// Leaving a green directory disabled would misstate the position as surely as
+// enabling a broken one, so they are on.
+//
+// The three that remain need constraint components the spine deliberately does
+// not implement — the logical combinators, the value-range and string families,
+// `sh:node`, `sh:closed` — and belong to the catalogue initiative, which turns
+// them on one at a time under the same rule. `core/complex` additionally needs
+// `sh:sparql`, so it belongs to the SHACL-SPARQL phase rather than to the
+// catalogue.
 SUITES := []Suite {
 	{"core/targets", 7, 7, true},
 	{"core/path", 13, 13, true},
 	{"core/node", 32, 32, false},
 	{"core/property", 38, 38, false},
-	{"core/misc", 5, 5, false},
+	{"core/misc", 5, 5, true},
 	{"core/complex", 2, 2, false},
-	{"core/validation-reports", 1, 1, false},
+	{"core/validation-reports", 1, 1, true},
 }
 
 // TOTAL_ENTRIES is asserted against the sum of the table above, so adding a
@@ -51,4 +63,4 @@ TOTAL_ENTRIES :: 98
 // asserted against both the table and the number the runner really executed.
 // A directory that quietly stopped being enabled, or a runner that quietly
 // skipped an entry, has to fail somewhere; this is where.
-ENABLED_ENTRIES :: 20
+ENABLED_ENTRIES :: 26

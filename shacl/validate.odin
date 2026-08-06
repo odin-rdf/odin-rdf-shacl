@@ -108,6 +108,8 @@ bindings_init :: proc(
 	}
 }
 
+// bindings_destroy frees every binding, including the target and path bindings
+// it contains. The model and the store are untouched.
 bindings_destroy :: proc(b: ^Bindings) {
 	target_bindings_destroy(&b.targets)
 	path_bindings_destroy(&b.paths)
@@ -133,6 +135,8 @@ Failure :: enum u8 {
 	Recursive_Shape,
 }
 
+// failure_message returns a static description of a failure. Allocation-free,
+// like `error_message`, and ending with the spec section that licenses it.
 failure_message :: proc(f: Failure) -> string {
 	switch f {
 	case .None:

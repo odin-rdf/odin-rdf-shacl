@@ -9,10 +9,11 @@ odin-rdf-store's Metis from this repository, and nothing here is worked around
 with a backend-specific shortcut. Upstream repositories are read-only from this
 project; findings go to review as a proposal.
 
-Started SHACL-T-0005. Status below is as of **SHACL-T-0007**, the task that
-joined the spine into a working validator and greened `core/targets` and
-`core/path` against both backends — so the log now reflects a complete
-validation path, not only target resolution.
+Started SHACL-T-0005. Status below is as of **SHACL-T-0008**, the task that
+closed the initiative. The validator is complete and four W3C suite directories
+are green against both backends, so the log reflects a whole validation path
+rather than target resolution alone. Consolidated for review in
+[`store-proposal.md`](store-proposal.md).
 
 ## Summary so far
 

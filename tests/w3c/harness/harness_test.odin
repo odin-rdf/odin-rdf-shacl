@@ -269,12 +269,12 @@ test_expected_report_extraction :: proc(t: ^testing.T) {
 	)
 }
 
-// Exactly the two directories the spine's exit criteria name are enabled, and
-// no others. Turning one on is a deliberate act with a task behind it, so it
-// has to be a visible change here as well as in the table.
+// Exactly the directories the spine can green are enabled, and no others.
+// Turning one on is a deliberate act with a task behind it, so it has to be a
+// visible change here as well as in the table.
 @(test)
 test_exactly_the_spine_directories_are_enabled :: proc(t: ^testing.T) {
-	SPINE :: []string{"core/targets", "core/path"}
+	SPINE :: []string{"core/targets", "core/path", "core/misc", "core/validation-reports"}
 
 	for suite in SUITES {
 		want := false
@@ -286,8 +286,8 @@ test_exactly_the_spine_directories_are_enabled :: proc(t: ^testing.T) {
 		testing.expectf(
 			t,
 			suite.enabled == want,
-			"%s: enabled = %v, but the spine enables core/targets and core/path only "+
-			"(the rest need catalogue constraint components)",
+			"%s: enabled = %v, but the spine enables the four directories its "+
+			"seven constraint components cover (the rest need catalogue ones)",
 			suite.dir,
 			suite.enabled,
 		)

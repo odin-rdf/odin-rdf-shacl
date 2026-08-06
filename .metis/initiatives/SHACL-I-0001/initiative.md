@@ -357,6 +357,50 @@ README-as-contract test; the two review-gated write-ups delivered.
 
 ## Status Updates
 
+- **2026-08-06 — SHACL-T-0008 closes the initiative; every exit criterion is met.** Each was
+  verified by a run rather than asserted, and the run found things.
+
+  | Exit criterion | Evidence |
+  | --- | --- |
+  | Target and path directories green, pinned counts, zero unexpected failures, both backends, both widths | `core/targets` (7) and `core/path` (13) green; `core/misc` (5) and `core/validation-reports` (1) additionally green — **26 entries, 52 entry runs per width** |
+  | Data graph read exclusively through the published match interface | `Access` is four procedure pointers; `docs/store-proposal.md` |
+  | Reports verified by blank-node isomorphism against the suite's expected graphs | `report_isomorphic`, used by every entry run |
+  | Zero dependency on odin-rdf-sparql | no `sparql:` collection in the `Makefile` or `ols.json`; `make check` asserts the LMDB half of the same property |
+  | Public API documented to the family contract standard, README-as-contract test | `shacl/shacl.odin` package contract; `tests/readme`, 3 compiled examples |
+  | The two review-gated write-ups delivered | `docs/store-proposal.md`, `docs/language-tag-status.md` |
+
+  **Three bugs surfaced during verification**, all shipped by SHACL-T-0006/-0007 and all
+  invisible to the directories those tasks enabled. They are recorded here because two of
+  them changed the *model*, not just the code:
+
+  1. The report emitted `sh:message` where §3.1 requires `sh:resultMessage`.
+  2. **`sh:severity` is any IRI, not one of three.** §2.1.4 names three built-ins and does
+     not close the set. The enum did not merely mis-report a custom severity — it rejected
+     the shapes graph at compile time. `Shape.severity` and `Result.severity` are now
+     `rdf.Term`.
+  3. **`sh:conforms` is false for *any* result**, whatever its severity. The Detailed
+     Design's "results stream" bullet and SHACL-T-0006 both recorded the opposite reading
+     ("only `sh:Violation` breaks conformance, §3.1.2"), and asserted it in tests.
+     `misc/severity-001` settles it: one `sh:Warning` result, `sh:conforms false` expected.
+     **This document was wrong and is corrected here rather than quietly.**
+
+  **Scope change, flagged rather than slipped in:** two directories beyond the stated exit
+  criteria are enabled — `core/misc` and `core/validation-reports`. Neither exercises a
+  constraint component outside the spine's seven, so no catalogue work was pulled forward.
+  The exit criteria are met independently of them; they are enabled because the family's
+  rule cuts both ways, and leaving a green directory disabled misstates the position as
+  surely as enabling a broken one.
+
+  **Nothing upstream was touched, and neither write-up asks for anything.** The store
+  proposal proposes no change and retires both predicted backlog items with reasons; the
+  language-tag trigger did not fire and cannot on this corpus. Both go to review.
+
+  **Handover:** `docs/handover-catalogue.md`. The one item it flags as needing a decision
+  before the catalogue initiative is scoped is the SHACL 1.0-vs-1.2 suite question, which
+  SHACL-T-0002 raised and this initiative did not settle.
+
+  Awaiting human review before transition to completed.
+
 - **2026-08-06 — SHACL-T-0007 met the initiative's suite exit criteria.** `core/targets` and
   `core/path` are fully green with pinned entry counts and no skip list, against both backends
   at both `Term_ID` widths; reports are compared by blank-node isomorphism; the data graph is

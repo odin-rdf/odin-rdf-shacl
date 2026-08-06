@@ -202,6 +202,43 @@ LMDB environment**: `find_term` never assigns, so a shapes graph can be compiled
 store opened without write access — the strongest available form of "compiling never
 writes".
 
+## As Built (SHACL-T-0007, 2026-08-06)
+
+Decision 6 is now realised, and the two user-facing consequences above are documented rather
+than merely predicted. Three notes.
+
+**1. Recursion detection is the stack, not a search.** The evaluator is an explicit stack over
+the flat model, so "the shapes currently being validated" is literally the stack contents, and
+membership is one bit per shape in a `[]bool` sized by the model. Detection fires at the
+re-entry itself, before another triple is read, and `validate` returns
+`Failure.Recursive_Shape`. Cost: one bit per shape and one branch per shape entered.
+
+The distinction that has to reach users, and now does — package doc, README, and the test that
+pins it — is that **cycles in data are not recursion**. `ex:a ex:partOf ex:b ex:partOf ex:a`
+validates normally; every path form is separately cycle-safe by a visited set. What triggers a
+failure is a *shape* that reaches itself. Since `sh:node` is a catalogue constraint, the only
+way to write one today is a `sh:property` self-reference, which is what the spine's recursion
+test uses — the mechanism reached is identical.
+
+Also settled by the implementation: a shape reached twice as a **sibling** is not recursion.
+The on-stack set is what is currently being validated, not what has ever been validated, so a
+property shape shared by two parents is validated twice, correctly. Getting this backwards
+would have turned every reused shape into a spurious failure.
+
+**2. The `sh:class` consequence is documented where it will be met.** It appears in the package
+doc's contracts section, in the README's "three things to know", and beside the check itself.
+The framing that seems to land: `sh:targetClass` walks the same closure, so a target that
+unexpectedly finds nothing usually has the same cause as a `sh:class` that unexpectedly passes.
+
+**3. Term ownership paid for itself in an unplanned place.** Decision 3 was justified by the
+two backends disagreeing about `lookup_term`. The W3C suite runner turned out to depend on it
+for a different reason: it loads an entry's shapes graph and data graph into **two separate
+stores**, destroying the first before opening the second, even though nearly every entry names
+the same file for both. That is only possible because the model owns its terms — and it means
+the ownership property is exercised on all 40 entry runs per width rather than only in the two
+tests that name it. It also keeps the two graphs' blank-node label spaces apart, which the
+entries with separate shapes files would otherwise need a special case for.
+
 ## Review Triggers
 
 This decision should be revisited if any of the following occurs:

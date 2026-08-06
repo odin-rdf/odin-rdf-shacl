@@ -279,7 +279,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 						path = sh.path,
 						shape = i,
 						component = .Min_Count,
-						severity = .Violation,
+						severity = rdf.IRI(shacl.VIOLATION),
 					},
 					&dictionary,
 				)
@@ -298,7 +298,7 @@ test_conformance_consumer_allocates_nothing :: proc(t: ^testing.T) {
 		c: shacl.Conformance
 		shacl.conformance_init(&c)
 		result := shacl.Result {
-			severity = .Warning,
+			severity = rdf.IRI(shacl.WARNING),
 		}
 		for _ in 0 ..< 10_000 {
 			if !shacl.conformance_visitor(&c, result) {

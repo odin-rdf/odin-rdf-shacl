@@ -87,3 +87,10 @@ VALUE :: NS + "value"
 RESULT_SEVERITY :: NS + "resultSeverity"
 SOURCE_SHAPE :: NS + "sourceShape"
 SOURCE_CONSTRAINT_COMPONENT :: NS + "sourceConstraintComponent"
+
+// RESULT_MESSAGE is where a shape's `sh:message` lands in a result — the
+// report vocabulary renames it, and getting that wrong is invisible until a
+// suite entry with a message runs. `core/misc`'s `message-001` is that entry,
+// and it says so in a comment: "this test verifies that the sh:message is
+// copied into sh:resultMessage".
+RESULT_MESSAGE :: NS + "resultMessage"

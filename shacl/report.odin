@@ -38,6 +38,9 @@ Report :: struct {
 	allocator: runtime.Allocator,
 }
 
+// report_init prepares an empty report and writes its head node. Every
+// allocation the report makes comes from `allocator`, and `report_destroy`
+// returns all of it.
 report_init :: proc(r: ^Report, allocator := context.allocator) {
 	r.allocator = allocator
 	r.triples = make([dynamic]rdf.Triple, allocator)
@@ -49,6 +52,8 @@ report_init :: proc(r: ^Report, allocator := context.allocator) {
 	append(&r.triples, triple(r, r.node, rdf.IRI(rdf.RDF_TYPE), rdf.IRI(VALIDATION_REPORT)))
 }
 
+// report_destroy frees the graph and every term in it. The triples
+// `report_triples` handed out are invalid afterwards.
 report_destroy :: proc(r: ^Report) {
 	delete(r.triples)
 	term_table_destroy(&r.terms)
@@ -95,9 +100,9 @@ report_finish :: proc(r: ^Report) {
 // the data graph never mentions — carries its term already and needs no
 // lookup, which is the whole reason Node_Ref has that shape.
 report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, load_data: rawptr) {
-	if severity_breaks_conformance(result.severity) {
-		r.conforms = false
-	}
+	// Any result at all makes the graph non-conforming (§3.1); severity is
+	// carried into the report but has no say in `sh:conforms`.
+	r.conforms = false
 
 	node := fresh_blank(r)
 	append(&r.triples, triple(r, r.node, rdf.IRI(RESULT), node))
@@ -113,7 +118,7 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 		append(&r.triples, triple(r, node, rdf.IRI(RESULT_PATH), write_path(r, s, result.path)))
 	}
 
-	append(&r.triples, triple(r, node, rdf.IRI(RESULT_SEVERITY), rdf.IRI(severity_iri(result.severity))))
+	append(&r.triples, triple(r, node, rdf.IRI(RESULT_SEVERITY), result.severity))
 	append(
 		&r.triples,
 		triple(r, node, rdf.IRI(SOURCE_CONSTRAINT_COMPONENT), rdf.IRI(component_iri(result.component))),
@@ -121,13 +126,17 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 	append(&r.triples, triple(r, node, rdf.IRI(SOURCE_SHAPE), result_source_shape(s, result)))
 
 	// Only what the shape declared: no processor-generated messages, ever.
+	//
+	// The predicate changes on the way in: a shape declares `sh:message`, a
+	// result carries `sh:resultMessage` (§3.1). They are different properties
+	// and the report vocabulary means the second one.
 	for message in result_messages(s, result) {
 		append(
 			&r.triples,
 			triple(
 				r,
 				node,
-				rdf.IRI(MESSAGE),
+				rdf.IRI(RESULT_MESSAGE),
 				rdf.Literal {
 					lexical = message.text,
 					language = message.language,

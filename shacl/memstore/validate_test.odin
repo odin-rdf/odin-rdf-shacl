@@ -378,6 +378,8 @@ ex:Warns a sh:NodeShape ; sh:targetNode ex:n ; sh:severity sh:Warning ;
 	sh:class ex:NeverMentioned .
 ex:Informs a sh:NodeShape ; sh:targetNode ex:n ; sh:severity sh:Info ;
 	sh:class ex:NeverMentioned .
+ex:Custom a sh:NodeShape ; sh:targetNode ex:n ; sh:severity ex:Catastrophe ;
+	sh:class ex:NeverMentioned .
 `
 
 SEVERITY_DATA :: `
@@ -385,12 +387,19 @@ SEVERITY_DATA :: `
 ex:n ex:p ex:v .
 `
 
-// Severity reaches the result, and only `sh:Violation` breaks conformance
-// (§3.1.2). A graph can carry warnings and informational results and still
-// report `sh:conforms true` — easy to get wrong, and it changes what an
-// early-exit caller may stop on.
+// Severity reaches the result unchanged, **including one the SHACL vocabulary
+// never heard of**. §2.1.4 names `sh:Violation`, `sh:Warning`, and `sh:Info` as
+// the built-ins but does not close the set, and the suite depends on it:
+// `misc/severity-002` declares `sh:severity ex:MySeverity` and expects it
+// echoed into the report. So severity is an `rdf.Term`, not an enum — a
+// three-valued type would reject that shapes graph at compile time.
+//
+// And severity has **no say in conformance** (§3.1): `sh:conforms` is true if
+// and only if there are no results at all. The opposite reading is tempting —
+// a warning sounds like it should not count — and `misc/severity-001` settles
+// it, producing one `sh:Warning` result and expecting `sh:conforms false`.
 @(test)
-test_severity_reaches_results_without_breaking_conformance :: proc(t: ^testing.T) {
+test_severity_is_any_iri_and_always_breaks_conformance :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
 	if !fixture_init(t, &f, SEVERITY_SHAPES, SEVERITY_DATA) {
@@ -398,17 +407,19 @@ test_severity_reaches_results_without_breaking_conformance :: proc(t: ^testing.T
 	}
 
 	Severities :: struct {
-		warning, info, violation: int,
+		warning, info, custom, other: int,
 	}
 	count :: proc(data: rawptr, result: shacl.Result) -> bool {
 		c := cast(^Severities)data
-		switch result.severity {
-		case .Warning:
+		switch {
+		case shacl.severity_is(result.severity, shacl.WARNING):
 			c.warning += 1
-		case .Info:
+		case shacl.severity_is(result.severity, shacl.INFO):
 			c.info += 1
-		case .Violation:
-			c.violation += 1
+		case shacl.severity_is(result.severity, "http://example.org/Catastrophe"):
+			c.custom += 1
+		case:
+			c.other += 1
 		}
 		return true
 	}
@@ -421,11 +432,12 @@ test_severity_reaches_results_without_breaking_conformance :: proc(t: ^testing.T
 	)
 	testing.expect_value(t, counts.warning, 1)
 	testing.expect_value(t, counts.info, 1)
-	testing.expect_value(t, counts.violation, 0)
+	testing.expect_value(t, counts.custom, 1)
+	testing.expect_value(t, counts.other, 0)
 
 	got, failure := conforms(&f.shapes, &f.bindings, &f.dictionary, &f.dataset)
 	testing.expect_value(t, failure, shacl.Failure.None)
-	testing.expectf(t, got, "two non-violation results must leave the graph conforming (§3.1.2)")
+	testing.expectf(t, !got, "any result at all makes a graph non-conforming (§3.1)")
 }
 
 // ---- Early exit ----------------------------------------------------------

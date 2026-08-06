@@ -19,6 +19,8 @@ import rdf "rdf:rdf"
 // A caller that wants text positions wants them from the *parse* that produced
 // the graph, which is odin-rdf-parser's job and already does it.
 
+// Error_Kind is what is wrong with a shapes graph. Flat rather than nested,
+// per the family's convention, so a caller can switch on it exhaustively.
 Error_Kind :: enum {
 	None,
 	Path_Missing, // a property shape with no sh:path
@@ -29,7 +31,7 @@ Error_Kind :: enum {
 	Node_Kind_Unknown, // an sh:nodeKind that is not one of the six
 	Count_Not_Integer, // sh:minCount / sh:maxCount whose value is not an integer
 	Count_Negative, // a negative cardinality
-	Severity_Unknown, // an sh:severity that is not one of the three
+	Severity_Not_IRI, // an sh:severity whose value is not an IRI
 	Deactivated_Not_Boolean, // sh:deactivated whose value is not a boolean
 	In_Not_A_List, // sh:in whose value is not an RDF list
 	Shape_Expected, // a value where a shape was required
@@ -59,8 +61,8 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "cardinality parameter is not an xsd:integer (§4.2)"
 	case .Count_Negative:
 		return "cardinality parameter is negative (§4.2)"
-	case .Severity_Unknown:
-		return "sh:severity is not sh:Violation, sh:Warning, or sh:Info (§2.1.4)"
+	case .Severity_Not_IRI:
+		return "sh:severity value is not an IRI (§2.1.4)"
 	case .Deactivated_Not_Boolean:
 		return "sh:deactivated is not an xsd:boolean (§2.1.1.4)"
 	case .In_Not_A_List:

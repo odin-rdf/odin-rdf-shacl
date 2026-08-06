@@ -31,7 +31,11 @@ Result :: struct {
 	path:        int, // index into Shapes.paths, or -1
 	shape:       int, // index into Shapes.shapes
 	component:   Constraint_Kind,
-	severity:    Severity,
+
+	// The shape's `sh:severity`, borrowed from the compiled model's term table
+	// and valid as long as the model is. Any IRI, not one of three — see
+	// `Shape.severity`.
+	severity:    rdf.Term,
 }
 
 // Result_Visitor receives each result. Returning false stops validation.
@@ -58,26 +62,12 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 	return ""
 }
 
-// severity_iri is the `sh:resultSeverity` a result names.
-severity_iri :: proc(severity: Severity) -> string {
-	switch severity {
-	case .Violation:
-		return VIOLATION
-	case .Warning:
-		return WARNING
-	case .Info:
-		return INFO
-	}
-	return VIOLATION
-}
-
-// conforms reports whether a severity counts against conformance.
-//
-// Only `sh:Violation` does (§3.1.2): a report can carry warnings and
-// informational results and still say `sh:conforms true`. That asymmetry is
-// easy to miss and changes what an early-exit caller may stop on.
-severity_breaks_conformance :: proc(severity: Severity) -> bool {
-	return severity == .Violation
+// severity_is reports whether a result's severity is a given vocabulary IRI —
+// `severity_is(result.severity, shacl.WARNING)`. A convenience for callers
+// triaging results, and the reason `Severity` is not an enum: the set is open.
+severity_is :: proc(severity: rdf.Term, iri: string) -> bool {
+	got, is_iri := severity.(rdf.IRI)
+	return is_iri && string(got) == iri
 }
 
 // result_message_terms is what a result's messages are, per the shape that
@@ -101,19 +91,23 @@ result_source_shape :: proc(s: ^Shapes, result: Result) -> rdf.Term {
 // graph conform?" and nothing else.
 //
 // It exists here rather than in a caller because it is what early exit is
-// *for*. Its visitor returns false at the first violation, which stops
-// validation where it stands — no further focus nodes resolved, no further
-// paths walked. On data with many violations that is the difference between
-// reading one triple and reading the graph, and at ~200 processes per machine
-// it is the difference worth having.
+// *for*. Its visitor returns false at the **first result of any severity**,
+// which stops validation where it stands — no further focus nodes resolved, no
+// further paths walked. On data with many violations that is the difference
+// between reading one triple and reading the graph, and at ~200 processes per
+// machine it is the difference worth having.
 //
-// Note it stops on `sh:Violation` only. A warning does not break conformance
-// (§3.1.2), so stopping on one would both answer the wrong question and cut
-// the traversal short.
+// **Severity does not enter into it** (§3.1): `sh:conforms` is true if and only
+// if there are no results, whatever severity they carry. This is worth stating
+// because the opposite reading is tempting — a warning sounds like it should
+// not break conformance — and the suite settles it: `misc/severity-001`
+// produces exactly one `sh:Warning` result and expects `sh:conforms false`.
 Conformance :: struct {
 	conforms: bool,
 }
 
+// conformance_init starts a Conformance at "conforms", which is what an empty
+// result stream means. It allocates nothing and needs no destroy.
 conformance_init :: proc(c: ^Conformance) {
 	c.conforms = true
 }
@@ -122,9 +116,6 @@ conformance_init :: proc(c: ^Conformance) {
 // data.
 conformance_visitor :: proc(data: rawptr, result: Result) -> bool {
 	c := cast(^Conformance)data
-	if severity_breaks_conformance(result.severity) {
-		c.conforms = false
-		return false
-	}
-	return true
+	c.conforms = false
+	return false
 }

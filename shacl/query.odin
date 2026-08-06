@@ -229,23 +229,6 @@ integer_value :: proc(term: rdf.Term) -> (value: int, ok: bool) {
 }
 
 @(private)
-severity_value :: proc(term: rdf.Term) -> (value: Severity, ok: bool) {
-	iri, is_iri := term.(rdf.IRI)
-	if !is_iri {
-		return .Violation, false
-	}
-	switch string(iri) {
-	case VIOLATION:
-		return .Violation, true
-	case WARNING:
-		return .Warning, true
-	case INFO:
-		return .Info, true
-	}
-	return .Violation, false
-}
-
-@(private)
 node_kind_value :: proc(term: rdf.Term) -> (value: Node_Kind, ok: bool) {
 	iri, is_iri := term.(rdf.IRI)
 	if !is_iri {

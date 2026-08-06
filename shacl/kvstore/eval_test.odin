@@ -349,7 +349,7 @@ test_kvstore_report_owns_its_terms :: proc(t: ^testing.T) {
 			path = s.shapes[index].path,
 			shape = index,
 			component = .Min_Count,
-			severity = .Violation,
+			severity = rdf.IRI(shacl.VIOLATION),
 		},
 		&session,
 	)

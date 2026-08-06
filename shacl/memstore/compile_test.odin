@@ -75,7 +75,7 @@ test_compile_node_and_property_shape :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, person.kind, shacl.Shape_Kind.Node)
 	testing.expect_value(t, person.path, -1)
-	testing.expect_value(t, person.severity, shacl.Severity.Violation)
+	testing.expect_value(t, person.severity, rdf.Term(rdf.IRI(shacl.VIOLATION)))
 	testing.expect_value(t, person.deactivated, false)
 
 	targets := shacl.shape_targets(&s, person)
@@ -394,7 +394,7 @@ test_compile_severity_message_deactivated :: proc(t: ^testing.T) {
 	}
 
 	sh, _ := find_shape(&s, "http://example.org/S")
-	testing.expect_value(t, sh.severity, shacl.Severity.Warning)
+	testing.expect_value(t, sh.severity, rdf.Term(rdf.IRI(shacl.WARNING)))
 	testing.expect_value(t, sh.deactivated, true)
 	messages := shacl.shape_messages(&s, sh)
 	if testing.expect_value(t, len(messages), 1) {
@@ -404,7 +404,7 @@ test_compile_severity_message_deactivated :: proc(t: ^testing.T) {
 
 	// The defaults, asserted so a change to them is visible.
 	plain, _ := find_shape(&s, "http://example.org/Plain")
-	testing.expect_value(t, plain.severity, shacl.Severity.Violation)
+	testing.expect_value(t, plain.severity, rdf.Term(rdf.IRI(shacl.VIOLATION)))
 	testing.expect_value(t, plain.deactivated, false)
 	testing.expect_value(t, len(shacl.shape_messages(&s, plain)), 0)
 }
@@ -452,9 +452,10 @@ test_ill_formed_shapes :: proc(t: ^testing.T) {
 			shacl.MAX_COUNT,
 		},
 		{
-			"unknown severity",
-			`ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:severity ex:Catastrophe .`,
-			.Severity_Unknown,
+			// Not "unknown severity": any IRI is one. A *literal* is not.
+			"non-IRI severity",
+			`ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:severity "loud" .`,
+			.Severity_Not_IRI,
 			shacl.SEVERITY,
 		},
 		{

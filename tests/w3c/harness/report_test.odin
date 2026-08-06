@@ -150,7 +150,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 			path = f.shapes.shapes[email].path,
 			shape = email,
 			component = .Min_Count,
-			severity = .Violation,
+			severity = rdf.IRI(shacl.VIOLATION),
 		},
 		&f.dictionary,
 	)
@@ -169,7 +169,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 				sh:resultSeverity sh:Violation ;
 				sh:sourceConstraintComponent sh:MinCountConstraintComponent ;
 				sh:sourceShape ex:EmailShape ;
-				sh:message "needs an email"@en ;
+				sh:resultMessage "needs an email"@en ;
 			] .`,
 	)
 	defer destroy_graph(&expected)
@@ -215,9 +215,10 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 		)
 	}
 
-	// A warning does *not* break conformance — only sh:Violation does
-	// (§3.1.2), which is easy to get wrong and changes what an early-exit
-	// caller may stop on.
+	// A warning breaks conformance too. §3.1 makes `sh:conforms` true if and
+	// only if there are **no results**, whatever severity they carry — the
+	// opposite reading is tempting and wrong, and `misc/severity-001` settles
+	// it: one `sh:Warning` result, `sh:conforms false` expected.
 	{
 		r: shacl.Report
 		shacl.report_init(&r)
@@ -230,12 +231,12 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				path = f.shapes.shapes[email].path,
 				shape = email,
 				component = .Min_Count,
-				severity = .Warning,
+				severity = rdf.IRI(shacl.WARNING),
 			},
 			&f.dictionary,
 		)
 		shacl.report_finish(&r)
-		testing.expect(t, shacl.report_conforms(&r), "a warning must not break conformance")
+		testing.expect(t, !shacl.report_conforms(&r), "any result breaks conformance, warnings included")
 	}
 
 	// A violation does.
@@ -251,7 +252,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				path = f.shapes.shapes[email].path,
 				shape = email,
 				component = .Min_Count,
-				severity = .Violation,
+				severity = rdf.IRI(shacl.VIOLATION),
 			},
 			&f.dictionary,
 		)
@@ -299,7 +300,7 @@ test_result_path_serialisation :: proc(t: ^testing.T) {
 				path = f.shapes.shapes[index].path,
 				shape = index,
 				component = .Min_Count,
-				severity = .Violation,
+				severity = rdf.IRI(shacl.VIOLATION),
 			},
 			&f.dictionary,
 		)
@@ -361,7 +362,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 			path = f.shapes.shapes[quiet].path,
 			shape = quiet,
 			component = .Min_Count,
-			severity = .Violation,
+			severity = rdf.IRI(shacl.VIOLATION),
 		},
 		&f.dictionary,
 	)
@@ -371,7 +372,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 		if pred, is_iri := tr.predicate.(rdf.IRI); is_iri {
 			testing.expectf(
 				t,
-				string(pred) != shacl.MESSAGE,
+				string(pred) != shacl.RESULT_MESSAGE && string(pred) != shacl.MESSAGE,
 				"a shape with no sh:message produced one: %v",
 				tr.object,
 			)
@@ -405,7 +406,7 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 			path = f.shapes.shapes[alt].path,
 			shape = alt,
 			component = .Min_Count,
-			severity = .Violation,
+			severity = rdf.IRI(shacl.VIOLATION),
 		},
 		&f.dictionary,
 	)
@@ -434,12 +435,12 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 	)
 }
 
-// The conformance-only consumer: it stops at the first violation, which is
-// what early exit is for. Asserted here on a synthetic stream; SHACL-T-0007
-// asserts it end to end, when there is a validator whose traversal actually
-// stops.
+// The conformance-only consumer: it stops at the first result, which is what
+// early exit is for. Asserted here on a synthetic stream;
+// `shacl/memstore/validate_test.odin` asserts it end to end, on a traversal
+// that actually stops.
 @(test)
-test_conformance_consumer_stops_at_first_violation :: proc(t: ^testing.T) {
+test_conformance_consumer_stops_at_the_first_result :: proc(t: ^testing.T) {
 	f: Fixture
 	if !fixture_init(t, &f) {
 		fixture_destroy(&f)
@@ -455,37 +456,29 @@ test_conformance_consumer_stops_at_first_violation :: proc(t: ^testing.T) {
 		component = .Min_Count,
 	}
 
-	// A warning does not break conformance, so the stream continues.
-	{
+	// Every severity stops it, including one the vocabulary never heard of:
+	// §3.1 makes conformance a question about whether there are results, not
+	// about what they say.
+	severities := []string{shacl.VIOLATION, shacl.WARNING, shacl.INFO, EX_R + "Catastrophe"}
+	for severity in severities {
 		c: shacl.Conformance
 		shacl.conformance_init(&c)
-		warning := result
-		warning.severity = .Warning
+		one := result
+		one.severity = rdf.IRI(severity)
 		delivered := 0
 		for _ in 0 ..< 3 {
-			if !shacl.conformance_visitor(&c, warning) {
+			if !shacl.conformance_visitor(&c, one) {
 				break
 			}
 			delivered += 1
 		}
-		testing.expect(t, c.conforms, "warnings must not break conformance")
-		testing.expect_value(t, delivered, 3)
-	}
-
-	// A violation stops it at the first one.
-	{
-		c: shacl.Conformance
-		shacl.conformance_init(&c)
-		violation := result
-		violation.severity = .Violation
-		delivered := 0
-		for _ in 0 ..< 3 {
-			if !shacl.conformance_visitor(&c, violation) {
-				break
-			}
-			delivered += 1
-		}
-		testing.expect(t, !c.conforms, "a violation must break conformance")
-		testing.expectf(t, delivered == 0, "expected to stop before consuming any result, consumed %d", delivered)
+		testing.expectf(t, !c.conforms, "%s must break conformance", severity)
+		testing.expectf(
+			t,
+			delivered == 0,
+			"%s: expected to stop before consuming any result, consumed %d",
+			severity,
+			delivered,
+		)
 	}
 }

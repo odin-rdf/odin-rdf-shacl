@@ -35,6 +35,9 @@ Session :: struct {
 	err:   kvstore.Error,
 }
 
+// session_init binds a session to a store and a graph, with no error recorded
+// yet. It allocates nothing and needs no destroy; the session borrows the store
+// and is valid as long as it is open.
 session_init :: proc(s: ^Session, st: ^kvstore.Store, graph: store.Term_ID = store.DEFAULT_GRAPH) {
 	s.db = st
 	s.graph = graph

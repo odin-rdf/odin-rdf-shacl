@@ -9,6 +9,12 @@ import store "store:store"
 // Term_Table is the model's term storage: it owns a cloned copy of every term
 // the compiled shapes model holds, and frees them all at destroy.
 //
+// It is exported only because it is a field of `Shapes` and `Report`; every
+// procedure over it is package-private, and a caller has no reason to touch
+// one. What a caller needs to know is the lifetime rule it implements: every
+// term reachable from a compiled model or a produced report is owned by that
+// object and valid until it is destroyed.
+//
 // This is what makes a Shapes independent of the store it was compiled from
 // (SHACL-A-0001 decision 3). The alternative — borrowing from the shapes
 // store's dictionary — would have made the lifetime rule backend-dependent
@@ -27,6 +33,9 @@ Term_Table :: struct {
 	allocator: runtime.Allocator,
 }
 
+// term_table_init prepares an empty table. Internal: a caller never builds
+// one, it gets one inside a Shapes or a Report.
+@(private)
 term_table_init :: proc(tt: ^Term_Table, allocator := context.allocator) {
 	tt.allocator = allocator
 	tt.terms = make([dynamic]rdf.Term, allocator)
@@ -34,6 +43,9 @@ term_table_init :: proc(tt: ^Term_Table, allocator := context.allocator) {
 	tt.index = make(map[string]int, allocator)
 }
 
+// term_table_destroy frees every term and string the table owns. Called by
+// `shapes_destroy` and `report_destroy`; nothing else should.
+@(private)
 term_table_destroy :: proc(tt: ^Term_Table) {
 	context.allocator = tt.allocator
 	for t in tt.terms {
@@ -53,6 +65,7 @@ term_table_destroy :: proc(tt: ^Term_Table) {
 
 // intern returns the table's own copy of term, cloning it on first sight.
 // The returned term is valid until term_table_destroy.
+@(private)
 intern :: proc(tt: ^Term_Table, term: rdf.Term) -> rdf.Term {
 	if term == nil {
 		return nil
@@ -84,6 +97,7 @@ materialize_term :: proc(s: ^Shapes, load: Term_Loader, load_data: rawptr, id: s
 
 // intern_string returns the table's own copy of s. Used for message text and
 // language tags, which are not terms but have the same lifetime.
+@(private)
 intern_string :: proc(tt: ^Term_Table, s: string) -> string {
 	if s == "" {
 		return ""

@@ -230,7 +230,7 @@ compile :: proc(
 		sh.node = materialize_term(s, load, load_data, shape_id)
 		sh.kind = kind
 		sh.path = -1
-		sh.severity = .Violation
+		sh.severity = intern(&s.terms, rdf.IRI(VIOLATION))
 
 		// sh:path decides the kind regardless of what discovery guessed: a
 		// shape with a path is a property shape (§2.1.2).
@@ -266,16 +266,18 @@ compile :: proc(
 			}
 		}
 
+		// Any IRI is a severity. The three built-ins get no special treatment
+		// here, and a shapes graph declaring its own — which `misc/severity-002`
+		// does — compiles and reports under it.
 		if v.found[SEVERITY] {
 			vals := objects_of(r, shape_id, v.ids[SEVERITY], MATCH, NEXT, DESTROY)
 			defer delete(vals)
 			for id in vals {
 				term := materialize_term(s, load, load_data, id)
-				sev, ok := severity_value(term)
-				if !ok {
-					return Error{.Severity_Unknown, sh.node, intern(&s.terms, rdf.IRI(SEVERITY))}
+				if _, is_iri := term.(rdf.IRI); !is_iri {
+					return Error{.Severity_Not_IRI, sh.node, intern(&s.terms, rdf.IRI(SEVERITY))}
 				}
-				sh.severity = sev
+				sh.severity = term
 			}
 		}
 

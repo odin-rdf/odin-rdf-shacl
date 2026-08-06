@@ -32,6 +32,9 @@ Constraint_Scope :: enum u8 {
 	Node_Set,
 }
 
+// constraint_scope is a component's scope. Exported because it is part of the
+// seam: a catalogue component adds a case here as well as in `check_value` or
+// `check_node_set`, and getting it wrong is the failure mode described above.
 constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	switch kind {
 	case .Min_Count, .Max_Count, .Has_Value:

@@ -77,8 +77,13 @@ Target_Bindings :: struct {
 	allocator:    runtime.Allocator,
 }
 
+// RDFS_SUBCLASS_OF is the one RDFS term class targeting needs beyond rdf:type.
+// It lives here rather than in vocab.odin because it is not SHACL vocabulary.
 RDFS_SUBCLASS_OF :: "http://www.w3.org/2000/01/rdf-schema#subClassOf"
 
+// target_bindings_init resolves every target term in the model, plus rdf:type
+// and rdfs:subClassOf, against a data store. `find` must be the non-interning
+// lookup. Freed by `target_bindings_destroy`.
 target_bindings_init :: proc(
 	b: ^Target_Bindings,
 	s: ^Shapes,
@@ -98,6 +103,8 @@ target_bindings_init :: proc(
 	b.subclass_of, b.has_subclass = find(find_data, rdf.IRI(RDFS_SUBCLASS_OF))
 }
 
+// target_bindings_destroy frees the bindings, leaving the model and the store
+// untouched.
 target_bindings_destroy :: proc(b: ^Target_Bindings) {
 	delete(b.term, b.allocator)
 	delete(b.bound, b.allocator)

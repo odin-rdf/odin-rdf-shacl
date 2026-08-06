@@ -31,6 +31,9 @@ Report_Sink :: struct {
 	dictionary: ^memstore.Dictionary,
 }
 
+// report_sink_visitor is the Result_Visitor to pass with a `^Report_Sink` as
+// its data. `validate_report` wires it up for you; use it directly only to fold
+// results into a report while doing something else with them too.
 report_sink_visitor :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Report_Sink)data
 	shacl.report_add(sink.report, sink.shapes, result, load_adapter, sink.dictionary)
