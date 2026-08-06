@@ -31,8 +31,6 @@ nodes a property shape's constraints apply to. This is *the* property-shape prim
 property constraint in this initiative and the catalogue one consumes it — and it reads the
 data graph through `match` alone.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] The full SHACL Core path grammar compiled from the shapes graph: predicate paths,

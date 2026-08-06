@@ -33,8 +33,6 @@ the `tests/guards` and `tests/readme` conventions now rather than retrofitting t
 validation logic — this task's deliverable is a green, empty skeleton every later task hangs
 work on.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] Package layout established: `shacl` (backend-independent core), `shacl/memstore` and

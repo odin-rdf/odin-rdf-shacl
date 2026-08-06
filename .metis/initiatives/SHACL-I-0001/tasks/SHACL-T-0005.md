@@ -31,8 +31,6 @@ through `match` alone. This is also the initiative's designated evidence generat
 resolution is where the vision predicted this project would want store capabilities it does
 not have, and this task starts the log that tests that prediction.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] All SHACL Core target declarations resolved: `sh:targetNode`, `sh:targetClass`,

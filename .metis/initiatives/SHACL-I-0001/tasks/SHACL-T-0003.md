@@ -31,8 +31,6 @@ compiler that produces it from a shapes graph read through the match interface. 
 project's equivalent of odin-rdf-sparql's algebra, and SHACL-A-0001 exists to record it — the
 ADR is finalised here, alongside the code, not after it.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] Shapes model types covering node shapes and property shapes, target declarations, paths

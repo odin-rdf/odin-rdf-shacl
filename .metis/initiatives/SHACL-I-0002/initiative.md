@@ -4,14 +4,14 @@ level: initiative
 title: "The SHACL Core constraint catalogue: the rest of §4"
 short_code: "SHACL-I-0002"
 created_at: 2026-08-06T19:09:51.760962+00:00
-updated_at: 2026-08-06T19:09:51.760962+00:00
+updated_at: 2026-08-06T19:26:18.098465+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/discovery"
+  - "#phase/decompose"
 
 
 exit_criteria_met: false
@@ -137,8 +137,17 @@ engine is fast. This is a genuinely different kind of comparison and it is also 
 
 ## Detailed Design **[REQUIRED]**
 
-**Discovery phase: not yet designed.** What follows is the decision list the design phase
-should settle with Greger, in the pattern SHACL-I-0001 used.
+Resolved in the design phase (2026-08-06, decided with Greger). Two are settled below; the
+rest stay open for the tasks that reach them, and each says what would settle it.
+
+- **Task order is risk-first (2026-08-06, Greger).** The ADR and its implementation come
+  third, before the mechanical families, rather than at task eight. Nothing in value-range,
+  string, property-pair, or `sh:closed` needs suppressed validation, so deferring it would
+  have delivered entries sooner — the cost is that the architectural change would then arrive
+  with five more consumers built against assumptions about it, which is the exact shape this
+  document warns about. The visible cost of the choice: **the progress floor barely moves for
+  the first three tasks**, so early progress looks slow while the hard part is being retired.
+  That is expected, and saying so here is what stops it being read as a stall.
 
 - **How suppressed validation is expressed.** A nested `validate` with a null visitor? A
   `Conformance` sub-run sharing the outer stack? A flag on the frame? The constraint that
@@ -147,18 +156,42 @@ should settle with Greger, in the pattern SHACL-I-0001 used.
   question needs answering before the mechanism is chosen, because the two answers give
   different designs. **Wants an ADR** (SHACL-A-0002).
 
-- **Unrecognised constraint parameters: ignore, or ill-formed?** The spec is not loud about
-  this. Ignoring is what the spine does and what makes an incomplete engine look complete;
-  erroring is honest but rejects shapes graphs that carry vendor extensions, which real ones
-  do. A third option — ignore, but expose what was ignored — may be the useful one. Decide
-  before the components land, because the answer changes what "green" means.
+- **Unrecognised constraint parameters: ignore, but expose — decided.** Compilation records
+  every `sh:`-namespace predicate it saw on a shape and did not understand, readable from the
+  compiled model; validation continues to ignore them.
 
-- **The regex engine for `sh:pattern`.** Odin ships `core:text/regex`, so no external
-  dependency is needed and the family's constraint holds. But SHACL defines `sh:pattern` by
-  XPath `fn:matches` — XML Schema regex — and `sh:flags` are `i s m x q`. Odin's package
-  offers `m i x u`; `s` and `q` are absent and the dialect differs. Shim, documented subset,
-  or a small own implementation is a real decision with a real cost, and it should be taken
-  with the suite entries in front of it rather than in the abstract.
+  Erroring was rejected, and not narrowly: it would reject `sh:name`, `sh:description`,
+  `sh:order`, and `sh:group` — **non-validating annotation properties the spec itself
+  defines**, and `core/property` actually uses `sh:name`. Making that work needs a curated
+  allow-list of every annotation property, which is a maintenance burden bought for nothing.
+  Vendor extensions are the second reason: real shapes graphs carry them.
+
+  Ignoring silently was rejected because it is what makes an incomplete engine look complete.
+  Two of the eighteen entries that "already pass" expect a *conforming* report, and an engine
+  that does nothing produces one too — so they cannot distinguish validation from inaction.
+  Exposing what was ignored is cheap (a list on `Shapes`) and turns that from invisible into
+  checkable. **The suite harness should assert it**: an enabled directory whose entries
+  compiled with ignored `sh:` parameters is a directory whose green is suspect.
+
+  One nuance the implementation has to carry: the list must distinguish **not implemented**
+  from **known and non-validating**. `sh:name`, `sh:description`, `sh:order`, and `sh:group`
+  are spec-defined annotations that no engine acts on, and a list that flagged them would cry
+  wolf on every real shapes graph. They belong on a recognised-but-inert list, named as such.
+
+- **`sh:pattern` uses `core:text/regex`, with the dialect gap documented — decided by
+  measurement.** This looked like the initiative's expensive unknown: SHACL defines
+  `sh:pattern` by XPath `fn:matches` (XML Schema regex) with flags `i s m x q`, while Odin's
+  package offers `m i x u` — `s` and `q` absent, dialect different. Writing an XSD regex
+  engine is a task on its own.
+
+  Then the corpus was read. **The four `sh:pattern` entries use `^[2-8][0-9]*$`, `Aldi`,
+  `joh`, and `Joh`, with one `sh:flags "i"`** — anchors, one character class, `*`, and
+  case-insensitivity. Every one of those is in the common subset of any regex engine. So the
+  gap is real but unmeasured, and building for it would be speculation.
+
+  Ship `core:text/regex`, **document the divergence explicitly** (which flags are unsupported,
+  and that the dialect is not XSD), and let a user report or a future suite entry force more.
+  This keeps the family's no-external-dependencies constraint intact either way.
 
 - **Numeric comparison across datatypes.** `sh:minInclusive 2` against `"2.0"^^xsd:decimal`,
   `xsd:byte` versus `xsd:integer`, and what happens for non-numeric datatypes. The spec defers
@@ -166,22 +199,25 @@ should settle with Greger, in the pattern SHACL-I-0001 used.
   be read before anything is written — **without importing it**, since SHACL Core must keep
   zero dependency on the query engine.
 
-- **`sh:detail` in the report.** Shape-based constraints want to nest a child's results under
-  a parent's. That is a `Result` field and a `Report` change, not an evaluator change — but it
-  is a public API change, so it belongs in the design list.
+- **`sh:detail`: out of scope — decided by measurement.** Shape-based constraints would
+  naturally nest a child's results under a parent's, and it looked like a required `Result`
+  and `Report` change. It is not: **`sh:detail` appears nowhere in the vendored corpus**, in
+  any directory. Since the suite defines done, adding it would be building an unmeasurable
+  feature. Recorded as a known omission rather than an oversight; a consumer asking for
+  richer reports reopens it.
 
 - **Duplicate results.** A shape that is both a root and another shape's `sh:property` value
   is validated twice at the same focus node and reports twice. No enabled entry exercises it.
   §3.4 arguably makes results a set. If a catalogue entry disagrees, this is where to settle
   it; if none does, record that it stays open.
 
-- **One initiative or two.** Recorded as a decision rather than assumed: the mechanical
-  families (value-range, string, property-pair, `sh:closed`) need no evaluator change and are
-  wide and shallow; the structural ones (logical, shape-based) need widened discovery and
-  suppressed validation and are narrow and deep. Splitting gives each its own design phase and
-  keeps an XL initiative from hiding an ADR inside it. Not splitting keeps one suite goal and
-  one decomposition. **Greger's call at the design phase**; the goals above are written so
-  either reading works.
+- **One initiative, not two — decided.** The split was considered: the mechanical families
+  are wide and shallow, the structural ones narrow and deep, and separating them would give
+  the ADR its own design phase. Rejected for now because it buys process and costs coherence —
+  `core/node` and `core/property` are one suite goal, and splitting them across two
+  initiatives means neither goes green until the second closes anyway. The decomposition below
+  isolates the ADR as its own task instead, which is the thing the split was really protecting.
+  Reversible: tasks can be reassigned to a second initiative if this one proves unwieldy.
 
 ## Testing Strategy **[CONDITIONAL: Separate Testing Initiative]**
 
@@ -224,27 +260,35 @@ Inherited from the spine unchanged, which is the point of having built it:
 
 ## Implementation Plan **[REQUIRED]**
 
-Rough phasing for the discovery phase; proper decomposition happens at decompose. The shape
-below assumes one initiative; if the design phase splits it, the line falls after item 4.
+**Risk-first order** (Greger, 2026-08-06): the architectural change is retired before the
+mechanical families are built on assumptions about it. Eleven tasks.
 
-1. **Widened shape discovery** (§2.1.1) — prerequisite for everything shape-nesting. Small,
-   contained, and blocking.
-2. **Lexical-to-value conversion**, plus the `sh:datatype` well-formedness debt it discharges.
-3. **Value-range and string components** — `sh:minInclusive`/`maxInclusive`/`minExclusive`/
-   `maxExclusive`, `sh:minLength`/`maxLength`, `sh:pattern`/`sh:flags`, `sh:languageIn`,
-   `sh:uniqueLang`. Wide, shallow, greens entries steadily. Carries the regex decision.
-4. **Property-pair components** — `sh:equals`, `sh:disjoint`, `sh:lessThan`,
+1. **Suite progress instrumentation** — a non-gating per-entry floor for the disabled
+   directories. Harness work, not engine work, and it goes first because without it this
+   initiative has no incremental signal at all (see the Status Update below). Floor starts at
+   18 of 69.
+2. **Widened shape discovery** (§2.1.1), and the recognised-but-not-implemented parameter
+   record. Prerequisite for everything that nests shapes.
+3. **Suppressed validation, and SHACL-A-0002** — the one architectural change, designed and
+   guarded before any consumer of it exists.
+4. **Lexical-to-value conversion**, and the `sh:datatype` well-formedness debt it discharges.
+5. **Value-range components** — `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`,
+   `sh:maxExclusive`.
+6. **String components** — `sh:minLength`, `sh:maxLength`, `sh:pattern`/`sh:flags`,
+   `sh:languageIn`, `sh:uniqueLang`. Carries the regex divergence documentation.
+7. **Property-pair components** — `sh:equals`, `sh:disjoint`, `sh:lessThan`,
    `sh:lessThanOrEquals`. Needs a second path evaluation from the focus node.
-5. **`sh:closed` and `sh:ignoredProperties`** — and the store-evidence note that comes with it.
-6. **Suppressed validation, and SHACL-A-0002** — the architectural change, designed and
-   guarded before any consumer of it lands.
-7. **Logical combinators** — `sh:and`, `sh:or`, `sh:not`, `sh:xone`.
-8. **Shape-based constraints** — `sh:node`, `sh:qualifiedValueShape` and its three companions.
-   `sh:node` is what makes recursion detection reachable in practice, so the spine's failure
-   mode gets its first real exercise here.
-9. **Close** — `core/node` and `core/property` enabled and green, docs and README updated,
-   store-evidence and language-tag write-ups refreshed for review, handover notes for the
-   SHACL-SPARQL phase.
+8. **`sh:closed` and `sh:ignoredProperties`** — the one component that asks the store a
+   question the spine never asked, and so the likeliest source of new store evidence.
+9. **Logical combinators** — `sh:and`, `sh:or`, `sh:not`, `sh:xone`.
+10. **Shape-based constraints** — `sh:node`, `sh:qualifiedValueShape` and its three
+    companions. `sh:node` gives the spine's recursion failure its first real exercise.
+11. **Close** — `core/node` and `core/property` enabled and green, docs and README updated,
+    store-evidence and language-tag write-ups refreshed for review, handover notes for the
+    SHACL-SPARQL phase.
+
+Tasks 4–8 are independent of each other and of 3, so they can run in parallel once 2 is in.
+Tasks 9 and 10 both need 3. Task 11 needs everything.
 
 **Exit criteria:** `core/node` (32) and `core/property` (38) green with pinned entry counts
 and zero unexpected failures, against both backends at both `Term_ID` widths; every SHACL Core
@@ -254,6 +298,64 @@ odin-rdf-sparql; public API documented to the family contract standard; the stor
 language-tag write-ups brought to review.
 
 ## Status Updates
+
+- **2026-08-06 — Design decisions resolved with Greger; transitioned through design and ready
+  to decompose.** Both open decisions settled, written into Detailed Design:
+
+  1. **Unrecognised constraint parameters: ignore, but expose.** Compilation records the
+     `sh:`-namespace predicates it did not understand; validation still ignores them. Erroring
+     was rejected because it would reject the spec's own annotation properties — `sh:name` is
+     used by `core/property`. Silence was rejected because it is what lets an incomplete
+     engine look complete.
+  2. **One initiative, not two.** The ADR is isolated as its own task instead, which is what
+     the split was really protecting. Reversible by reassigning tasks later.
+
+  **One thing the decomposition had to solve that the spine did not have.** The family's
+  incrementality mechanism is per-suite-directory progression, and it does not work here: only
+  two directories remain, and under "enabled means fully green" **neither can be enabled until
+  nearly every component exists**. A ten-task initiative with no suite signal until task nine
+  is exactly the shape that goes wrong quietly.
+
+  So the first task is harness work rather than engine work: a **non-gating per-entry progress
+  floor** for the disabled directories — how many of their entries pass today, pinned, asserted
+  to only ever go up. It gates nothing and enables nothing, so the "enabled means fully green"
+  rule is untouched, but every task after it has a number that must move. The floor starts at
+  **18 of 69**, measured at SHACL-I-0001's close.
+
+- **2026-08-06 — Decomposed into 11 tasks** (SHACL-T-0009 … SHACL-T-0019), in the risk-first
+  order decided above.
+
+  **Dependency shape.** T-0009 (progress floor) and T-0010 (widened discovery) are independent
+  and gate nothing between them. T-0011 (suppressed validation + SHACL-A-0002) needs T-0010,
+  because nesting is unreachable until the parameters that nest make their values shapes.
+  T-0012 (lexical-to-value) is independent of all three and can run alongside them. Then four
+  families run in parallel — T-0013 value-range (needs T-0012), T-0014 string, T-0015
+  property-pair (needs T-0012 for the ordering pair), T-0016 `sh:closed`. T-0017 (logical) and
+  T-0018 (shape-based) both need T-0011. T-0019 closes and needs the six component tasks.
+
+  **Three things found during decomposition, recorded rather than absorbed:**
+
+  1. **`sh:detail` is not in the corpus at all**, so it is a non-goal rather than a design
+     item. It looked like a required `Result` and `Report` change for the shape-based
+     constraints; the suite says otherwise, and building it would be building something
+     unmeasurable.
+  2. **The regex question is far smaller than it looked.** The four `sh:pattern` entries use
+     `^[2-8][0-9]*$`, `Aldi`, `joh`, `Joh` and one `sh:flags "i"` — the common subset of any
+     engine. `core:text/regex` ships with Odin, so the no-external-dependencies constraint
+     holds, and what is left is documenting the dialect gap rather than closing it.
+  3. **T-0014 is the only task that can fire the language-tag trigger**, through
+     `sh:languageIn` and `sh:uniqueLang`. It is an acceptance criterion there rather than a
+     note, so it cannot be absorbed quietly. The corpus survey says it cannot fire; if it
+     does, that survey was wrong and work stops.
+
+  **Two tasks carry more risk than their size suggests.** T-0011 is the ADR and has no suite
+  entry exercising it until T-0017 — its unit tests over hand-built models carry unusual
+  weight, and the failure mode is silent leakage into a caller's report. T-0018's
+  `sh:qualifiedValueShapesDisjoint` is the most intricate thing in SHACL Core and should be
+  split out if it starts to swallow its task.
+
+  Awaiting human review before transition to active.
+
 
 - **2026-08-06 — Created in discovery.** Scope drafted from `docs/handover-catalogue.md` and
   the measurements taken at SHACL-I-0001's close: 51 entries of real work across `core/node`

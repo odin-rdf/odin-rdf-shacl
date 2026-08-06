@@ -37,8 +37,6 @@ report graphs — with **zero directories enabled**, since nothing can validate 
 produces two survey findings the initiative depends on: the real directory inventory, and the
 language-tag exposure.
 
-## Acceptance Criteria
-
 ## Acceptance Criteria **[REQUIRED]**
 
 - [x] W3C SHACL test suite vendored verbatim under `tests/w3c/` from `w3c/data-shapes` at a
