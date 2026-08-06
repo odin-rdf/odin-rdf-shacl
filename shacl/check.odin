@@ -203,8 +203,10 @@ class_check_visit :: proc(data: rawptr, id: store.Term_ID) -> bool {
 // initiative's value-range components, which need the same lexical-to-value
 // machinery; the spine's enabled directories exercise `sh:datatype` only with
 // `xsd:string`, whose lexical space is every string. Recorded rather than
-// forgotten: `core/node`'s `datatype-002` is the entry that will demand it, and
-// that directory stays disabled until it does.
+// forgotten: `core/property`'s `datatype-ill-formed` is the entry that demands
+// it — `"300"^^xsd:byte` is out of range and `"c"^^xsd:byte` is not a number,
+// and both must violate against `sh:datatype xsd:byte` even though the datatype
+// IRI matches exactly. That directory stays disabled until they do.
 @(private = "file")
 check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	want, is_iri := c.term.(rdf.IRI)

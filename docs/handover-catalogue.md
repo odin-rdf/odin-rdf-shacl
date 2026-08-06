@@ -47,7 +47,11 @@ lexical form to be well-formed for its datatype, so `"abc"^^xsd:integer` should
 violate even though the datatype IRI matches. The spine compares datatype IRIs
 only. This needs the same lexical-to-value machinery the value-range components
 (`sh:minInclusive` and friends) need, which is why it was left — build it once,
-use it in both. `core/node`'s `datatype-002` is the entry that forces it.
+use it in both. **`core/property/datatype-ill-formed` is the entry that forces
+it**: `"300"^^xsd:byte` is out of range and `"c"^^xsd:byte` is not a number, and
+both must violate against `sh:datatype xsd:byte`. (`core/node/datatype-002`,
+which an earlier draft of this document named, is a `rdf:langString` test and
+already passes.)
 
 **No `sh:detail`, `sh:sourceConstraint`, or `sh:resultMessage` beyond the
 shape's own.** `Result` carries what §3.1 needs for the components that exist.
@@ -58,6 +62,25 @@ evaluator change.
 ## Suite inventory: what is left
 
 98 entries total, **26 enabled**, 72 remaining.
+
+### How much of it is already done
+
+A diagnostic run with `core/node` and `core/property` temporarily enabled
+(SHACL-I-0001 close, 2026-08-06) says **18 of their 69 entries already pass** —
+they exercise only the spine's seven components. So the catalogue's real work is
+**51 entries**, not 69, and the spine's components are already validated more
+broadly than the 26 enabled entries prove.
+
+**Do not read that as 18 free entries.** Two of them (`property/minCount-002`,
+`property/uniqueLang-002`) expect a *conforming* report, and an engine that
+silently ignores a constraint it does not implement produces one too — so they
+cannot distinguish "validated correctly" from "did nothing". Which raises the
+thing to decide early: **unknown constraint components are currently ignored
+without comment.** For a spine that implements seven of thirty that was the only
+option; for an engine claiming SHACL Core it is a defect. Whether an
+unrecognised `sh:`-namespace parameter should be an ill-formed-shapes error is a
+real design question, and it is easier to answer while adding components than
+after.
 
 | Directory | Entries | State | What it needs |
 | --- | --- | ---: | --- |
