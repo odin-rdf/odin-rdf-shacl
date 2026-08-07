@@ -4,14 +4,14 @@ level: initiative
 title: "Performance evidence: a benchmark workload, and the memoisation decision"
 short_code: "SHACL-I-0003"
 created_at: 2026-08-07T10:48:30.161797+00:00
-updated_at: 2026-08-07T10:48:30.161797+00:00
+updated_at: 2026-08-07T11:30:43.132727+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/discovery"
+  - "#phase/ready"
 
 
 exit_criteria_met: false
@@ -118,60 +118,130 @@ duration. Recorded so that the departure is deliberate rather than unnoticed.
   baselines are this engine against itself over time.
 - **Not benchmarking the parser or the store.** Loading a shapes graph and loading data
   are upstream's measured business. What is measured here is compile, bind, and validate.
-- **No CI performance gate.** Hosted runners are too noisy for a threshold that would not
-  either flap or be set so loose it catches nothing. Baselines are recorded and compared
-  deliberately, the way the family compares them.
+- **No CI performance gate on timings.** Hosted runners are too noisy for a threshold that
+  would not either flap or be set so loose it catches nothing. Timing baselines are
+  recorded and compared deliberately, the way the family compares them.
+
+  **Narrowed from an absolute once store-read counting was decided** (2026-08-07). A read
+  count for a fixed workload and seed is an exact integer and does not vary with the
+  machine, so the noise argument does not reach it. Gating one is not in scope here, but
+  it is no longer excluded by this document — see Detailed Design.
 - **Not the v0.1.0 release.** Tagging, the CI pins, and the vision refresh are backlog
   items ([[SHACL-T-0020]], [[SHACL-T-0021]], [[SHACL-T-0022]]), independent of this and of
   each other.
 
 ## Detailed Design **[REQUIRED]**
 
-Nothing is settled yet — this initiative is in discovery, and the list below is what the
-design phase has to answer. Each says what would settle it.
+**All four design questions are settled** (2026-08-07, with Greger). Each is recorded below
+with what it buys, what it gives up, and the consequence that was not obvious when the
+question was asked — those consequences are the reason this had a design phase rather than
+being improvised inside the first task.
 
-- **What the workload is.** The central question. Three shapes suggest themselves and they
-  are not exclusive:
+The fifth entry is not a decision but a framing: the memoisation question, stated so that
+the measurement is capable of answering it either way.
 
-  - **A synthetic generator with knobs** — shape count, nesting depth, data size, target
-    selectivity, path form. Most controllable, most defensible as a regression baseline,
-    and the easiest to accuse of measuring something nobody writes.
-  - **A real shapes graph, and there is one already vendored.**
-    `tests/w3c/core/complex/shacl-shacl-data-shapes.ttl` is SHACL's own shapes for
-    validating SHACL shapes graphs: four hundred lines, genuinely nested, using the
-    logical combinators, the qualified family, property paths, and `sh:closed`. It is the
-    most realistic shapes graph in the tree and it is already there under a known licence.
-    What it lacks is *data* at any scale — it validates one document.
-  - **Replicating the corpus** to manufacture size. Cheapest, and probably the least
-    informative: a thousand copies of a twelve-triple graph is a thousand small
-    validations, which measures start-up rather than validation.
+- **The workload is a synthetic generator with knobs — decided (Greger, 2026-08-07).**
+  The two alternatives set aside were the vendored SHACL-SHACL shapes graph over generated
+  data, and replicating the corpus to manufacture size.
 
-  **What would settle it:** deciding what question the baseline is meant to answer. A
-  regression tripwire wants the generator; a claim about real-world cost wants the real
-  shapes graph over generated data. They may both be worth having, and the honest answer
-  may be one of each.
+  **What this buys and what it gives up.** A generator is controllable, reproducible, and
+  the only one of the three that can hold every dimension fixed but one — which is what a
+  baseline is for. What it gives up is the claim to realism: it measures a shape of
+  workload *we chose*, so it is a regression tripwire and a comparative instrument, not a
+  statement about what SHACL costs in the world. Saying that in the README beside the
+  numbers is part of the deliverable, not a caveat to be buried. If a real-world claim is
+  ever wanted, `tests/w3c/core/complex/shacl-shacl-data-shapes.ttl` over generated data is
+  the option that was set aside and it stays available.
 
-- **What is measured, and in what units.** Compile (shapes graph → model), bind (model →
-  store IDs), and validate are three different costs with three different scaling
-  behaviours, and reporting them as one number would hide the interesting one. Validation
-  probably wants normalising per focus node rather than per run. **What would settle it:**
-  a first set of numbers — the shape of the data usually names its own unit.
+  **Reproducibility is a requirement, not a nicety.** The generator is seeded and
+  deterministic, and the seed is recorded with the numbers. A baseline nobody can
+  reproduce is an anecdote.
 
-- **Whether to count store reads.** A counter in the instantiation packages' adapters
-  would be a handful of lines and would measure the thing the store-evidence log says is
-  the engine's real cost. It is also the number that decides memoisation, since a cache's
-  payoff is reads avoided rather than time saved. Against it: a counter on the hot path
-  that ships in release builds is exactly the kind of thing that quietly costs what it
-  measures. **What would settle it:** whether it can be compiled out — a `-define:` like
-  the family's `RDF_STORE_TERM_ID_BITS`, or a bench-only adapter.
+  **Generated in-process into a store rather than vendored as fixtures**, so size is a
+  parameter rather than a file and the repository stays free of a megabyte of synthetic
+  Turtle.
 
-- **Which backend, and which `Term_ID` width.** kvstore's numbers are dominated by LMDB
-  and measure the store as much as the engine; memstore's are the engine's own. Both,
-  reported separately, is the likely answer, with memstore as the number that means
-  something about this repository. Width is a build-time choice and anything
-  width-sensitive is tested at both — whether it is worth *benchmarking* at both is a
-  separate question, and a 32-bit `Term_ID` halving a hot array is the kind of thing that
-  shows up in cache behaviour.
+  **The knobs, drawn from what the engine's cost actually depends on:** focus-node count
+  (target selectivity), value-node fan-out per focus node, shape count, nesting depth,
+  path form, violation density, and the qualified family present or absent. Two of those
+  are easy to leave out and neither should be:
+
+  - **Violation density.** `Conformance` early-exits at the first result and a `Report`
+    grows with the violation count, so conforming data and heavily-violating data are two
+    workloads rather than one workload at two settings. The `shacl` package doc promises
+    that memory stays flat *exactly when the data is worst*; only a high-density
+    configuration can test that.
+  - **The qualified family, and this one is load-bearing.** The baseline must include a
+    configuration **without** it. Discovery named the failure mode — a benchmark built
+    only on a workload that stresses the qualified family will endorse the memoisation
+    cache whatever the truth is — and this knob is the mitigation. It is what lets the
+    measurement say no.
+
+- **What is measured — decided (2026-08-07).** Three phases separately, two modes, and
+  never both instruments in one run.
+
+  **Three phases, because they scale differently and are paid at different rates.**
+  `compile` (shapes graph → model) and `bind` (model → data-store IDs) are once-per-process
+  costs; `validate` is the repeated one. Rolling them into a single number would hide the
+  interesting one, and the once-per-process pair is not negligible here — **~200 processes
+  per machine each compile a shapes graph at start-up**, so compile time is a deployment
+  cost rather than a footnote. Reported as absolute time per operation.
+
+  **`validate` is normalised per focus node**, with the configuration stated beside it,
+  plus the raw wall clock for the run. Per *focus node* rather than per value node or per
+  triple because it is the only one of the three a reader can map onto their own data: how
+  many nodes will be validated is a thing a user knows about their graph. It is only
+  meaningful with the shapes configuration named, which is why the configuration travels
+  with the number everywhere it is quoted.
+
+  **Two modes over one workload, because every instrument here perturbs what it measures.**
+
+  - **Timing mode** — the real path (`shacl_memstore.validate`), the real allocator,
+    nothing wrapped. Wall clock only.
+  - **Instrumented mode** — the bench's counting `Access` and a `mem.Tracking_Allocator`.
+    Reports **store reads** (per validation and per focus node) and **allocation**:
+    `peak_memory_allocated`, `total_memory_allocated`, and `total_allocation_count`. No
+    timings are taken in this mode and none should be quoted from it.
+
+  Allocation joins reads in the instrumented mode rather than getting a third mode: both
+  are deterministic for a fixed workload and seed, neither belongs in a timed run, and
+  they answer adjacent questions. `peak` is what tests the flat-memory promise; `total`
+  and the count are what a per-result leak would show up in.
+
+  **This turns two package-doc claims into measurements rather than assertions.**
+  `shacl.odin` promises that memory stays flat *exactly when the data is worst* and that
+  `Conformance` allocates **nothing at all, whatever the violation count**. The second is
+  an exact statement — `total_allocation_count == 0` — and at high violation density on a
+  generated graph it is a far stronger test than `tests/guards` can build. The first is
+  peak holding steady as the density knob rises.
+
+- **Backend and `Term_ID` width — decided (2026-08-07). Both backends, reported
+  separately; 64-bit as the standing baseline, 32-bit measured once.**
+
+  **Both backends, and they answer different questions.** memstore is the engine's own
+  number, uncontaminated by storage, and it is the regression baseline. kvstore is the
+  *deployment* number: ~200 processes per machine each embedding a persistent store is the
+  shape this family is designed around, so a validator benchmarked only in memory would be
+  measuring a configuration nobody runs. Neither substitutes for the other and neither is
+  quoted without saying which it is.
+
+  **The read count is an assertion, not a comparison.** It must be **identical** on both
+  backends, and that follows from the architecture rather than from luck: the
+  backend-independent core decides *what* to ask and the adapter decides only *how*, so
+  the number of `scan`, `step`, `outgoing`, and `load` calls cannot depend on the backend.
+  A divergence is a bug, and the bench should fail on it rather than report it — the same
+  reasoning the suite harness used when it asserted the two backends agree on a count.
+
+  **Width: 64-bit is the standing baseline**, since it is the default and doubling the
+  matrix on every run buys little. **32-bit is measured once, at the close, and reported
+  as a finding** — a 32-bit `Term_ID` halves the quad arrays, the bindings arrays, and the
+  subclass-closure map, so whether that shows up in cache behaviour is a real question
+  worth one answer and not a standing cost.
+
+  **Reads are width-invariant too, by the same argument** — ID width cannot change the
+  core's control flow — so the identity assertion extends across the whole matrix: **one
+  read count for a given workload and seed, across two backends and two widths.** Four
+  configurations, one integer, and any disagreement is a defect rather than a measurement.
 
 - **The memoisation question itself, stated so the measurement can answer it.** The
   duplicate is structural, not incidental: a qualified property shape carrying both
@@ -215,10 +285,12 @@ design phase has to answer. Each says what would settle it.
 Three tasks, with a decision gate between the second and the third. Decomposition happens
 in the decompose phase; this is the shape.
 
-1. **The workload decision, and `bench/`.** Settle the Detailed Design questions above,
-   then build the harness: the bench package, the workload, and `make bench` producing
-   numbers with release flags. The decision is the deliverable as much as the code, and it
-   goes in this document rather than only in the source.
+1. **`bench/`: the generator, the two modes, and `make bench`.** The design is settled, so
+   this is construction: the seeded generator with its seven knobs, the bench's own
+   counting `Access` per backend, timing and instrumented modes, and `make bench` running
+   with release flags. Two properties are asserted rather than reported, and they are the
+   cheapest bugs this initiative can catch — **the read count is identical across both
+   backends**, and identical across both `Term_ID` widths.
 2. **Baselines, and the flat-memory claims at scale.** Record the numbers where the family
    records them — the README, quoted as odin-rdf-parser quotes its throughput. Verify at
    size what `tests/guards` verifies on fixtures: that `Conformance` allocates nothing
@@ -252,3 +324,67 @@ suite is still 98 of 98 against both backends at both `Term_ID` widths.
   SHACL-SHACL shapes graph over generated data, or both), and **whether store reads are
   counted** as well as wall clock — the latter is what actually decides the memoisation
   question, and it is easier to build in than to add later.
+
+- **2026-08-07 — Both open decisions settled with Greger; transitioned to design.**
+  A **synthetic generator with knobs**, and **store reads counted** alongside wall clock.
+  Both are written into Detailed Design with their consequences; three things fell out
+  that were not obvious when the questions were asked.
+
+  1. **The read counter needs no change to shipped code.** `Access` is a struct of
+     procedure pointers and `shacl.validate` takes one directly, so `bench` supplies its
+     own counting adapters and bypasses `shacl_memstore.validate` entirely. No `-define:`
+     flag, no counter on a hot path in release builds. The design question as posed
+     ("can it be compiled out?") had a better answer than either option it offered.
+  2. **One of this initiative's own Non-Goals had to be narrowed.** "No CI performance
+     gate" was reasoned from timing noise on hosted runners, and a read count for a fixed
+     workload and seed is an exact machine-independent integer — the reasoning does not
+     reach it. Gating one is still out of scope; excluding it by argument is no longer
+     honest, and the Non-Goal now says which half it means.
+  3. **The two modes cannot share a run.** Counting adapters add an indirection per read,
+     so timing runs take the real path and counting runs take the bench's. Same workload,
+     two passes.
+
+  **The knob that decides whether this initiative can reach an honest answer is the
+  qualified family, present or absent.** Discovery named the failure mode — a workload
+  built to stress the qualified family will endorse the memoisation cache whatever the
+  truth is — and a configuration without it is the mitigation. It is called out in
+  Detailed Design rather than left to whoever writes the generator.
+
+  Still open for design, and smaller: what is measured and in what units, and which
+  backend and `Term_ID` width. Both are likely to be settled by a first set of numbers
+  rather than by argument.
+
+- **2026-08-07 — The remaining two settled; design complete, transitioned to ready.**
+  They turned out to be settleable by argument after all, and the argument produced two
+  assertions the initiative can make for free.
+
+  **What is measured:** the three phases separately — `compile` and `bind` are
+  once-per-process, `validate` is the repeated cost — with validate normalised **per focus
+  node**, because that is the only unit a reader can map onto their own graph. **Two
+  modes, never combined:** timing on the real path with the real allocator, and an
+  instrumented mode carrying both the counting `Access` and a `mem.Tracking_Allocator`.
+  Allocation joined reads in the instrumented mode rather than taking a third, since both
+  are deterministic for a fixed seed and neither belongs in a timed run.
+
+  **The compile phase earned its place on the deployment argument, not on principle.**
+  ~200 processes per machine each compile a shapes graph at start-up, so a once-per-process
+  cost is a deployment cost here in a way it would not be in a library used once.
+
+  **Backend and width:** both backends reported separately — memstore is the engine's own
+  number and the regression baseline, kvstore is the deployment number, and neither
+  substitutes for the other. 64-bit is the standing baseline; **32-bit is measured once at
+  the close and reported as a finding**, since a halved `Term_ID` shrinks the quad arrays,
+  the bindings arrays, and the subclass-closure map, which is a cache question worth one
+  answer rather than a doubled matrix forever.
+
+  **Two invariants fell out, and they are the useful part.** The backend-independent core
+  decides *what* to ask and the adapter decides only *how*, so the read count cannot depend
+  on the backend; and ID width cannot change the core's control flow, so it cannot depend
+  on the width either. That gives **one read count for a given workload and seed, across
+  two backends and two widths** — an exact integer, four ways. The bench asserts it rather
+  than reporting it, and a disagreement is a defect rather than a measurement. It is the
+  same reasoning the suite harness used when it required the two backends to agree on a
+  count, and it costs nothing to add.
+
+  **The design is complete and nothing in Detailed Design is open.** Ready to decompose
+  into the three tasks in the Implementation Plan.
