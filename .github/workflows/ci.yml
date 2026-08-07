@@ -43,17 +43,40 @@ jobs:
         with:
           path: odin-rdf-shacl
 
-      # Both track their main. Once the family publishes tags on these, pin
-      # them with `ref:` so an upstream change cannot break this repo's CI
-      # without a deliberate bump.
+      # Both are pinned rather than tracking main, so an upstream commit cannot
+      # turn this repository's CI red without a deliberate bump here
+      # (SHACL-T-0020). A red build then means this repository broke, which is
+      # the only way to tell a local regression from an upstream one.
+      #
+      # **They are pinned differently, and the asymmetry is the finding.**
+      # odin-rdf-parser is on its released tag. odin-rdf-store is on a commit,
+      # because `v0.1.0` of the store predates STORE-A-0004 and vendors exactly
+      # one LMDB archive — `liblmdb_darwin_arm64.a`. `shacl/kvstore` links those
+      # archives, so a tag pin would build here and on macOS and fail to link on
+      # the ubuntu and windows runners below. The five-platform vendoring exists
+      # only after the tag.
+      #
+      # This is not a code incompatibility: the whole suite passes against
+      # `v0.1.0` of both, on a platform whose archive that tag happens to carry.
+      # It is a packaging gap, and the fix is upstream — **odin-rdf-store cutting
+      # a release that includes the vendored archives.** When it does, this
+      # becomes `ref: v0.2.0` and the asymmetry goes away.
+      #
+      # To bump either: change the ref, run `make test` and `make check` locally
+      # against the new checkout, and commit them together — a collection is
+      # resolved in the *importing* compilation, so the store's sources are built
+      # against whichever parser this file names, and moving one without the
+      # other is how two versions of the data model end up in one binary.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-parser
+          ref: v0.1.0
           path: odin-rdf-parser
 
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-store
+          ref: f896b7b
           path: odin-rdf-store
 
       - uses: laytan/setup-odin@v2
