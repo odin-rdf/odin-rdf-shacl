@@ -43,29 +43,18 @@ jobs:
         with:
           path: odin-rdf-shacl
 
-      # Both are pinned rather than tracking main, so an upstream commit cannot
-      # turn this repository's CI red without a deliberate bump here
-      # (SHACL-T-0020). A red build then means this repository broke, which is
-      # the only way to tell a local regression from an upstream one.
+      # Both are pinned to released tags rather than tracking main, so an
+      # upstream commit cannot turn this repository's CI red without a
+      # deliberate bump here (SHACL-T-0020). A red build then means this
+      # repository broke, which is the only way to tell a local regression from
+      # an upstream one.
       #
-      # **They are pinned differently, and the asymmetry is the finding.**
-      # odin-rdf-parser is on its released tag. odin-rdf-store is on a commit,
-      # because `v0.1.0` of the store predates STORE-A-0004 and vendors exactly
-      # one LMDB archive — `liblmdb_darwin_arm64.a`. `shacl/kvstore` links those
-      # archives, so a tag pin would build here and on macOS and fail to link on
-      # the ubuntu and windows runners below. The five-platform vendoring exists
-      # only after the tag.
-      #
-      # This is not a code incompatibility: the whole suite passes against
-      # `v0.1.0` of both, on a platform whose archive that tag happens to carry.
-      # It is a packaging gap, and the fix is upstream — **odin-rdf-store cutting
-      # a release that includes the vendored archives.** When it does, this
-      # becomes `ref: v0.2.0` and the asymmetry goes away.
-      #
-      # The store ref is the **full** 40-character SHA, deliberately: a short SHA
-      # is not resolvable by `actions/checkout` under its default
-      # `fetch-depth: 1`, which fetches by ref rather than cloning history. It
-      # fails on every runner with a bare "git failed with exit code 1".
+      # **odin-rdf-store v0.1.1 is a floor, not just a pin.** `v0.1.0` vendored
+      # exactly one LMDB archive — `liblmdb_darwin_arm64.a` — and `shacl/kvstore`
+      # links those archives, so against that tag this builds on macOS and fails
+      # to link on the ubuntu and windows runners below. STORE-A-0004's
+      # five-platform vendoring is what `v0.1.1` released. Do not pin the store
+      # below it.
       #
       # To bump either: change the ref, run `make test` and `make check` locally
       # against the new checkout, and commit them together — a collection is
@@ -81,7 +70,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-store
-          ref: f896b7bbb435d3d2122a57485fb0192887863834
+          ref: v0.1.1
           path: odin-rdf-store
 
       - uses: laytan/setup-odin@v2

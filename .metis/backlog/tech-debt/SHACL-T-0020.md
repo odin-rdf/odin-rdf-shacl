@@ -15,7 +15,7 @@ tags:
   - "#phase/active"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -57,17 +57,14 @@ has: odin-rdf-parser, odin-rdf-store, and odin-rdf-sparql are all tagged `v0.1.0
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [x] Both dependency checkout steps in `.github/workflows/ci.yml` carry a `ref:`.
-      **Amended in flight (2026-08-07): parser on `v0.1.0`, store on commit `f896b7b`.**
-      The criterion originally said `ref: v0.1.0` for both; the Risk Considerations below
-      predicted this and it happened. See Status Updates.
+- [x] Both dependency checkout steps in `.github/workflows/ci.yml` carry a released tag:
+      parser `v0.1.0`, store **`v0.1.1`**. The criterion originally said `v0.1.0` for
+      both; the store needed a release first, and got one. See Status Updates.
 - [x] The comment above them is updated to say what the pins are and how to bump them,
       rather than describing a future in which tags exist. It also records *why* the two
       pins are different, so the asymmetry does not read as an oversight.
-- [ ] CI green on all three runners (ubuntu, macos, windows) with the pins in place.
-      **Cannot be verified without a push** — verified locally instead, as far as one
-      machine allows: the full suite passes against the exact pinned pair, and separately
-      against `v0.1.0` of *both*, on darwin arm64.
+- [x] CI green on all three runners (ubuntu, macos, windows) with the pins in place —
+      confirmed by a real run, not locally.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -140,3 +137,35 @@ than this repository unpinning.
 
   **What is not verified:** CI itself. The three-runner matrix needs a push, and that is
   the one acceptance criterion still open.
+
+- **2026-08-07 — Closed. Both pins are released tags after all; odin-rdf-store cut
+  `v0.1.1`.**
+
+  Greger's call, and it is the better end state: rather than this repository carrying a
+  SHA and a paragraph explaining why, the store released what it already had. **`v0.1.1`
+  is `f896b7b` annotated** — STORE-A-0004's five-platform LMDB vendoring, no public API
+  change, no behaviour change to shipped code. Verified before tagging: the only source
+  edit under `store/` between `v0.1.0` and that commit is a private temp-path helper
+  inside a `_test.odin` file, so a patch bump is right even reading semver strictly. The
+  store's own CI was green on the commit.
+
+  `ci.yml` now reads `ref: v0.1.0` for the parser and `ref: v0.1.1` for the store, and the
+  comment collapsed accordingly — what remains is the one fact a future reader needs:
+  **`v0.1.1` is a floor, not merely a pin.** Below it `shacl/kvstore` has no archive to
+  link on Linux or Windows.
+
+  **Two mistakes on the way, both mine, both worth recording because the second hid the
+  first.**
+
+  1. **A short SHA is not a usable `ref:`.** `actions/checkout` defaults to
+     `fetch-depth: 1` and fetches by ref rather than cloning history, so `f896b7b` failed
+     on all three runners with a bare "git failed with exit code 1" — before Odin was even
+     installed. The full forty characters worked. Moot now that it is a tag, but the next
+     person to pin something will reach for the short form too.
+  2. **`gh run watch --exit-status | tail` reports `tail`'s status, not `gh`'s.** The first
+     run was reported here as passing when all three jobs had failed. Redirect to a file
+     and read `$?` directly, or check the per-job conclusions.
+
+  **Verification, in the end, was a real run rather than a local approximation:** run
+  `31176264338` green on ubuntu, macos, and windows against the pinned pair, with the tag
+  swap re-run after it. Every acceptance criterion met.
