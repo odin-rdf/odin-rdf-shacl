@@ -23,7 +23,7 @@ PURITY := build/purity$(EXE)
 # rather than vendored copies, so they are reached through collections instead
 # of relative paths -- `import "rdf:rdf"` for the data model and `rdf:rdf/turtle`
 # and friends for the four format packages, `import "store:store"` for the match
-# interface with `store:store/memstore` and `store:store/kvstore` for the two
+# interface and `store:store/kvstore` for the
 # backends. Both collections are required even where this project only names the
 # store: the store's own sources import `rdf:`, and a collection is resolved in
 # the importing compilation, not the imported checkout. The SHACL-SPARQL phase
@@ -38,7 +38,6 @@ COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store
 # documentation cannot drift from the API; w3c/harness reads the vendored W3C
 # SHACL suite and is what will run it (SHACL-T-0002).
 PKGS := shacl \
-				shacl/memstore \
 				shacl/kvstore \
 				tests/guards \
 				tests/readme \
@@ -106,7 +105,7 @@ check: ## Vet every package at the default Term_ID width, then check core purity
 # absence skips the check with a message rather than failing the build. The
 # property is platform-independent, so checking it on the platforms that can is
 # enough.
-purity: ## Assert the core links no LMDB (builds tests/purity and inspects it)
+purity: ## Assert package shacl links no LMDB (builds tests/purity and inspects it)
 	@mkdir -p build
 	@odin build tests/purity -out:$(PURITY) $(COLL) || exit 1
 	@if ! command -v nm >/dev/null 2>&1; then \
@@ -114,12 +113,12 @@ purity: ## Assert the core links no LMDB (builds tests/purity and inspects it)
 		exit 0; \
 	fi; \
 	if nm $(PURITY) 2>/dev/null | grep -qi 'mdb_'; then \
-		echo "purity: FAIL -- LMDB symbols found in a core+memstore consumer."; \
+		echo "purity: FAIL -- LMDB symbols found in a core-only consumer."; \
 		echo "         Something under package shacl imports store:store/kvstore."; \
 		nm $(PURITY) | grep -i 'mdb_' | head; \
 		exit 1; \
 	fi; \
-	echo "purity: ok -- no LMDB symbols in a core+memstore consumer"
+	echo "purity: ok -- no LMDB symbols in a core-only consumer"
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.

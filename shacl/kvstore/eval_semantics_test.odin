@@ -1,4 +1,4 @@
-package shacl_memstore
+package shacl_kvstore
 
 import "core:slice"
 import "core:strings"
@@ -6,7 +6,7 @@ import "core:testing"
 
 import rdf "rdf:rdf"
 import store "store:store"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl ".."
 
@@ -45,26 +45,31 @@ ex:P_alt_overlap  a sh:PropertyShape ; sh:path [ sh:alternativePath ( ex:p ex:p 
 
 @(private = "file")
 Fixture :: struct {
-	dictionary: memstore.Dictionary,
-	dataset:    memstore.Dataset,
-	shapes:     shacl.Shapes,
-	bindings:   shacl.Path_Bindings,
+	db:      ^kvstore.Store,
+	path:    string,
+	session: Session,
+	shapes:  shacl.Shapes,
+	bindings: shacl.Path_Bindings,
 }
 
 @(private = "file")
 fixture_init :: proc(t: ^testing.T, f: ^Fixture, source: string) -> bool {
-	memstore.dictionary_init(&f.dictionary)
-	memstore.dataset_init(&f.dataset)
-
-	_, load_err := memstore.load_turtle(&f.dictionary, &f.dataset, transmute([]byte)source)
-	if !testing.expectf(t, load_err.message == "", "load failed: %s", load_err.message) {
+	f.path = temp_path("eval-semantics")
+	db, open_err := kvstore.open(f.path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return false
 	}
-	err := compile(&f.shapes, &f.dictionary, &f.dataset)
+	f.db = db
+	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)source)
+	if !testing.expectf(t, load_err.message == "" && db_err == nil, "load failed: %s %v", load_err.message, db_err) {
+		return false
+	}
+	session_init(&f.session, db)
+	err := compile(&f.shapes, &f.session)
 	if !testing.expectf(t, err.kind == .None, "compile failed: %s", shacl.error_message(err.kind)) {
 		return false
 	}
-	bind_paths(&f.bindings, &f.shapes, &f.dictionary)
+	bind_paths(&f.bindings, &f.shapes, &f.session)
 	return true
 }
 
@@ -72,8 +77,12 @@ fixture_init :: proc(t: ^testing.T, f: ^Fixture, source: string) -> bool {
 fixture_destroy :: proc(f: ^Fixture) {
 	shacl.path_bindings_destroy(&f.bindings)
 	shacl.shapes_destroy(&f.shapes)
-	memstore.dataset_destroy(&f.dataset)
-	memstore.dictionary_destroy(&f.dictionary)
+	if f.db != nil {
+		kvstore.close(f.db)
+	}
+	if f.path != "" {
+		remove_store(f.path)
+	}
 }
 
 // eval returns the value nodes of the named property shape from the named
@@ -92,17 +101,17 @@ eval :: proc(t: ^testing.T, f: ^Fixture, shape_iri, focus_iri: string) -> []stri
 		return nil
 	}
 
-	focus, found := memstore.find_term(&f.dictionary, rdf.IRI(focus_iri))
+	focus, found := session_find(&f.session, rdf.IRI(focus_iri))
 	if !testing.expectf(t, found, "focus node %s is not in the store", focus_iri) {
 		return nil
 	}
 
-	ids := value_nodes(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, path, focus)
+	ids := value_nodes(&f.shapes, &f.bindings, &f.session, path, focus)
 	defer delete(ids)
 
 	out := make([]string, len(ids))
 	for id, i in ids {
-		term := memstore.lookup_term(&f.dictionary, id)
+		term := session_term(&f.session, id)
 		if iri, is_iri := term.(rdf.IRI); is_iri {
 			out[i] = string(iri)
 		} else {
@@ -122,6 +131,7 @@ expect_set :: proc(t: ^testing.T, got: []string, want: []string, what: string) {
 	testing.expectf(t, joined_got == joined_want, "%s: got {%s}, want {%s}", what, joined_got, joined_want)
 }
 
+@(private = "file")
 EX :: "http://example.org/"
 
 @(test)
@@ -335,10 +345,10 @@ test_value_nodes_of_a_node_shape_is_empty :: proc(t: ^testing.T) {
 	}
 	defer fixture_destroy(&f)
 
-	focus, _ := memstore.find_term(&f.dictionary, rdf.IRI(EX + "a"))
+	focus, _ := session_find(&f.session, rdf.IRI(EX + "a"))
 	// -1 is what a node shape carries: it has no path, and its value node is
 	// its focus node, which is the caller's business rather than this one's.
-	ids := value_nodes(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, -1, focus)
+	ids := value_nodes(&f.shapes, &f.bindings, &f.session, -1, focus)
 	defer delete(ids)
 	testing.expect_value(t, len(ids), 0)
 	testing.expect_value(t, store.id_kind(focus), store.Term_Kind.IRI)

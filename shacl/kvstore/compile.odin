@@ -138,3 +138,66 @@ compile :: proc(s: ^shacl.Shapes, session: ^Session, allocator := context.alloca
 		allocator,
 	)
 }
+
+// compile_turtle loads a shapes graph from a Turtle document into a graph of
+// the caller's store and compiles it.
+//
+// `graph` names the graph the document lands in — nil for the default graph.
+// The returned model owns every term it holds (SHACL-A-0001), so the store may
+// be closed immediately afterwards and the model bound to a different one.
+//
+// **The store is the caller's, deliberately.** The memstore version of this
+// procedure built a private store, compiled from it, and destroyed it, so a
+// caller needed nothing but a document. That was reasonable when a store was a
+// hash map; it is not when a store is an LMDB environment, and a validation
+// library should not silently own a database. Every consumer of this package
+// already has a store open for the data graph, so the parameter costs nothing
+// it did not already have — and `Session`'s own documentation already describes
+// the arrangement this produces: shapes and data in two graphs of one store,
+// read through two Sessions.
+//
+// **Compile once, validate many.** There is no `remove` in the store yet
+// (odin-rdf-store STORE-T-0023), and loading is *not* idempotent: `load_turtle`
+// gives every load its own blank-node scope, and shapes graphs are dense with
+// blank nodes (`sh:property [ sh:path ex:p ; sh:minCount 1 ]`). Loading the
+// same document into the same graph twice therefore does not dedupe — it
+// deposits a second copy of every blank-node-rooted shape, and a later compile
+// over that graph sees duplicated shapes. Load shapes once at startup and keep
+// the `shacl.Shapes` value, which outlives the store by design. This restriction
+// relaxes when `remove` lands.
+//
+// Check `db_err` as well as the other two: a store failure means the shapes
+// were compiled from an incomplete read.
+compile_turtle :: proc(
+	s: ^shacl.Shapes,
+	st: ^kvstore.Store,
+	source: []byte,
+	graph: rdf.Graph_Label = nil,
+	base := "",
+	allocator := context.allocator,
+) -> (
+	err: shacl.Error,
+	load_err: store.Load_Error,
+	db_err: kvstore.Error,
+) {
+	added: int
+	added, load_err, db_err = kvstore.load_turtle(st, source, base, graph, allocator)
+	_ = added
+	if db_err != nil || load_err.message != "" {
+		return shacl.Error{}, load_err, db_err
+	}
+
+	graph_id, found, find_err := kvstore.find_graph_label(st, graph)
+	if find_err != nil {
+		return shacl.Error{}, load_err, find_err
+	}
+	if !found {
+		// The load just put statements there, so the label must exist.
+		return shacl.Error{}, load_err, nil
+	}
+
+	session: Session
+	session_init(&session, st, graph_id)
+	err = compile(s, &session, allocator)
+	return err, load_err, session_error(&session)
+}

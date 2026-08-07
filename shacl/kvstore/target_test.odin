@@ -1,4 +1,4 @@
-package shacl_memstore
+package shacl_kvstore
 
 import "core:slice"
 import "core:strings"
@@ -6,7 +6,7 @@ import "core:testing"
 
 import rdf "rdf:rdf"
 import store "store:store"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl ".."
 
@@ -60,36 +60,51 @@ ex:looper a ex:Loop_B .
 
 @(private = "file")
 Split :: struct {
-	shapes_dict: memstore.Dictionary,
-	shapes_data: memstore.Dataset,
-	data_dict:   memstore.Dictionary,
-	data_data:   memstore.Dataset,
-	shapes:      shacl.Shapes,
-	targets:     shacl.Target_Bindings,
+	data_db:      ^kvstore.Store,
+	data_path:    string,
+	data_session: Session,
+	shapes:       shacl.Shapes,
+	targets:      shacl.Target_Bindings,
 }
 
 @(private = "file")
 split_init :: proc(t: ^testing.T, f: ^Split) -> bool {
-	memstore.dictionary_init(&f.shapes_dict)
-	memstore.dataset_init(&f.shapes_data)
-	memstore.dictionary_init(&f.data_dict)
-	memstore.dataset_init(&f.data_data)
+	// The shapes store is opened, compiled from, and closed before the data
+	// store exists, so nothing the model holds can be borrowing from it.
+	{
+		path := temp_path("target-shapes")
+		defer remove_store(path)
+		db, open_err := kvstore.open(path)
+		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
+			return false
+		}
+		defer kvstore.close(db)
 
-	_, e1 := memstore.load_turtle(&f.shapes_dict, &f.shapes_data, transmute([]byte)string(SHAPES_GRAPH))
-	if !testing.expectf(t, e1.message == "", "shapes graph: %s", e1.message) {
-		return false
-	}
-	_, e2 := memstore.load_turtle(&f.data_dict, &f.data_data, transmute([]byte)string(DATA_GRAPH))
-	if !testing.expectf(t, e2.message == "", "data graph: %s", e2.message) {
-		return false
+		_, e1, db_err := kvstore.load_turtle(db, transmute([]byte)string(SHAPES_GRAPH))
+		if !testing.expectf(t, e1.message == "" && db_err == nil, "shapes graph: %s %v", e1.message, db_err) {
+			return false
+		}
+		session: Session
+		session_init(&session, db)
+		err := compile(&f.shapes, &session)
+		if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
+			return false
+		}
 	}
 
-	err := compile(&f.shapes, &f.shapes_dict, &f.shapes_data)
-	if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
+	f.data_path = temp_path("target-data")
+	db, open_err := kvstore.open(f.data_path)
+	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return false
 	}
-	// Bound against the *data* dictionary, not the one the model came from.
-	bind_targets(&f.targets, &f.shapes, &f.data_dict)
+	f.data_db = db
+	_, e2, db_err := kvstore.load_turtle(db, transmute([]byte)string(DATA_GRAPH))
+	if !testing.expectf(t, e2.message == "" && db_err == nil, "data graph: %s %v", e2.message, db_err) {
+		return false
+	}
+	session_init(&f.data_session, db)
+	// Bound against the *data* store, not the one the model came from.
+	bind_targets(&f.targets, &f.shapes, &f.data_session)
 	return true
 }
 
@@ -97,15 +112,17 @@ split_init :: proc(t: ^testing.T, f: ^Split) -> bool {
 split_destroy :: proc(f: ^Split) {
 	shacl.target_bindings_destroy(&f.targets)
 	shacl.shapes_destroy(&f.shapes)
-	memstore.dataset_destroy(&f.data_data)
-	memstore.dictionary_destroy(&f.data_dict)
-	memstore.dataset_destroy(&f.shapes_data)
-	memstore.dictionary_destroy(&f.shapes_dict)
+	if f.data_db != nil {
+		kvstore.close(f.data_db)
+	}
+	if f.data_path != "" {
+		remove_store(f.data_path)
+	}
 }
 
 @(private = "file")
 Collector :: struct {
-	dictionary: ^memstore.Dictionary,
+	session:    ^Session,
 	names:      [dynamic]string,
 	unbound:    int,
 	limit:      int, // stop after this many; 0 means no limit
@@ -116,7 +133,7 @@ collect :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
 	c := cast(^Collector)data
 	term: rdf.Term
 	if focus.bound {
-		term = memstore.lookup_term(c.dictionary, focus.id)
+		term = session_term(c.session, focus.id)
 	} else {
 		c.unbound += 1
 		term = focus.term
@@ -142,14 +159,14 @@ resolve :: proc(t: ^testing.T, f: ^Split, shape_iri: string, limit := 0) -> (Col
 		}
 	}
 	c := Collector {
-		dictionary = &f.data_dict,
+		session = &f.data_session,
 		names      = make([dynamic]string),
 		limit      = limit,
 	}
 	if !testing.expectf(t, index >= 0, "%s: shape not compiled", shape_iri) {
 		return c, true
 	}
-	completed := resolve_targets(&f.shapes, &f.targets, index, &f.data_data, collect, &c)
+	completed := resolve_targets(&f.shapes, &f.targets, index, &f.data_session, collect, &c)
 	slice.sort(c.names[:])
 	return c, completed
 }
@@ -315,35 +332,38 @@ test_visitor_can_stop_resolution :: proc(t: ^testing.T) {
 // them; its focus nodes are its parent's value nodes, resolved elsewhere.
 @(test)
 test_shape_without_targets_yields_nothing :: proc(t: ^testing.T) {
-	dict: memstore.Dictionary
-	memstore.dictionary_init(&dict)
-	defer memstore.dictionary_destroy(&dict)
-	ds: memstore.Dataset
-	memstore.dataset_init(&ds)
-	defer memstore.dataset_destroy(&ds)
+	path := temp_path("no-targets")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+		return
+	}
+	defer kvstore.close(db)
 
 	source := `
 	@prefix sh: <http://www.w3.org/ns/shacl#> .
 	@prefix ex: <http://example.org/> .
 	ex:P a sh:PropertyShape ; sh:path ex:p .
 	`
-	_, load_err := memstore.load_turtle(&dict, &ds, transmute([]byte)source)
-	testing.expectf(t, load_err.message == "", "load: %s", load_err.message)
+	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)source)
+	testing.expectf(t, load_err.message == "" && db_err == nil, "load: %s %v", load_err.message, db_err)
 
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
-	testing.expect_value(t, compile(&s, &dict, &ds).kind, shacl.Error_Kind.None)
+	session: Session
+	session_init(&session, db)
+	testing.expect_value(t, compile(&s, &session).kind, shacl.Error_Kind.None)
 
 	b: shacl.Target_Bindings
 	defer shacl.target_bindings_destroy(&b)
-	bind_targets(&b, &s, &dict)
+	bind_targets(&b, &s, &session)
 
 	c := Collector {
-		dictionary = &dict,
-		names      = make([dynamic]string),
+		session = &session,
+		names   = make([dynamic]string),
 	}
 	defer destroy_collector(&c)
-	completed := resolve_targets(&s, &b, 0, &ds, collect, &c)
+	completed := resolve_targets(&s, &b, 0, &session, collect, &c)
 	testing.expect(t, completed, "a shape with no targets should complete")
 	testing.expect_value(t, len(c.names), 0)
 	testing.expect_value(t, len(s.roots), 0)

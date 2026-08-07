@@ -6,10 +6,10 @@ import "core:testing"
 import rdf "rdf:rdf"
 import triples "rdf:rdf/triples"
 import turtle "rdf:rdf/turtle"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl "../../../shacl"
-import shacl_memstore "../../../shacl/memstore"
+import shacl_kvstore "../../../shacl/kvstore"
 
 // Report-graph tests live in the harness package because this is where the
 // blank-node isomorphism comparison lives, and comparing a produced report to
@@ -55,28 +55,38 @@ ex:alice ex:name "Alice" .
 
 @(private = "file")
 Fixture :: struct {
-	dictionary: memstore.Dictionary,
-	dataset:    memstore.Dataset,
-	shapes:     shacl.Shapes,
+	db:      ^kvstore.Store,
+	path:    string,
+	session: shacl_kvstore.Session,
+	shapes:  shacl.Shapes,
 }
 
 @(private = "file")
 fixture_init :: proc(t: ^testing.T, f: ^Fixture) -> bool {
-	memstore.dictionary_init(&f.dictionary)
-	memstore.dataset_init(&f.dataset)
-	_, load_err := memstore.load_turtle(&f.dictionary, &f.dataset, transmute([]byte)string(REPORT_SHAPES))
-	if !testing.expectf(t, load_err.message == "", "load: %s", load_err.message) {
+	f.path = temp_store_path("report", "shapes")
+	db, open_err := kvstore.open(f.path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return false
 	}
-	err := shacl_memstore.compile(&f.shapes, &f.dictionary, &f.dataset)
+	f.db = db
+	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)string(REPORT_SHAPES))
+	if !testing.expectf(t, load_err.message == "" && db_err == nil, "load: %s %v", load_err.message, db_err) {
+		return false
+	}
+	shacl_kvstore.session_init(&f.session, db)
+	err := shacl_kvstore.compile(&f.shapes, &f.session)
 	return testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind))
 }
 
 @(private = "file")
 fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
-	memstore.dataset_destroy(&f.dataset)
-	memstore.dictionary_destroy(&f.dictionary)
+	if f.db != nil {
+		kvstore.close(f.db)
+	}
+	if f.path != "" {
+		remove_temp_store(f.path)
+	}
 }
 
 @(private = "file")
@@ -91,7 +101,7 @@ shape_index :: proc(f: ^Fixture, iri: string) -> int {
 
 @(private = "file")
 term_id :: proc(f: ^Fixture, iri: string) -> shacl.Node_Ref {
-	id, found := memstore.find_term(&f.dictionary, rdf.IRI(iri))
+	id, found, _ := kvstore.find_term(f.db, rdf.IRI(iri))
 	return shacl.Node_Ref{id = id, bound = found}
 }
 
@@ -142,7 +152,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
 
-	shacl_memstore.report_add(
+	shacl_kvstore.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -152,7 +162,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.dictionary,
+		&f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -223,7 +233,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_memstore.report_add(
+		shacl_kvstore.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -233,7 +243,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.WARNING),
 			},
-			&f.dictionary,
+			&f.session,
 		)
 		shacl.report_finish(&r)
 		testing.expect(t, !shacl.report_conforms(&r), "any result breaks conformance, warnings included")
@@ -244,7 +254,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_memstore.report_add(
+		shacl_kvstore.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -254,7 +264,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.VIOLATION),
 			},
-			&f.dictionary,
+			&f.session,
 		)
 		shacl.report_finish(&r)
 		testing.expect(t, !shacl.report_conforms(&r), "a violation must break conformance")
@@ -292,7 +302,7 @@ test_result_path_serialisation :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_memstore.report_add(
+		shacl_kvstore.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -302,7 +312,7 @@ test_result_path_serialisation :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.VIOLATION),
 			},
-			&f.dictionary,
+			&f.session,
 		)
 		shacl.report_finish(&r)
 
@@ -354,7 +364,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	shacl_memstore.report_add(
+	shacl_kvstore.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -364,7 +374,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.dictionary,
+		&f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -396,7 +406,7 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	shacl_memstore.report_add(
+	shacl_kvstore.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -408,7 +418,7 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.dictionary,
+		&f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -464,41 +474,47 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 	{
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset)
-		defer memstore.dataset_destroy(&dataset)
-		_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)shapes_src)
-		if !testing.expectf(t, load_err.message == "", "shapes load: %s", load_err.message) {
+		path := temp_store_path("blank-report", "shapes")
+		defer remove_temp_store(path)
+		db, open_err := kvstore.open(path)
+		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 			return
 		}
-		err := shacl_memstore.compile(&model, &dictionary, &dataset)
+		defer kvstore.close(db)
+		_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)shapes_src)
+		if !testing.expectf(t, load_err.message == "" && db_err == nil, "shapes load: %s %v", load_err.message, db_err) {
+			return
+		}
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
+		err := shacl_kvstore.compile(&model, &session)
 		if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
 			return
 		}
 	}
 
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	defer memstore.dictionary_destroy(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
-	defer memstore.dataset_destroy(&dataset)
-	_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)data_src)
-	if !testing.expectf(t, load_err.message == "", "data load: %s", load_err.message) {
+	path := temp_store_path("blank-report", "data")
+	defer remove_temp_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
+	defer kvstore.close(db)
+	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)data_src)
+	if !testing.expectf(t, load_err.message == "" && db_err == nil, "data load: %s %v", load_err.message, db_err) {
+		return
+	}
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&session, db)
 
 	bindings: shacl.Bindings
-	shacl_memstore.bind(&bindings, &model, &dictionary)
+	shacl_kvstore.bind(&bindings, &model, &session)
 	defer shacl.bindings_destroy(&bindings)
 
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	failure := shacl_memstore.validate_report(&r, &model, &bindings, &dictionary, &dataset)
+	failure := shacl_kvstore.validate_report(&r, &model, &bindings, &session)
 	if !testing.expectf(t, failure == .None, "validate: %s", shacl.failure_message(failure)) {
 		return
 	}

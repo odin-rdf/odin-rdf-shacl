@@ -1,11 +1,11 @@
-package shacl_memstore
+package shacl_kvstore
 
 import "core:strings"
 import "core:testing"
 
 import rdf "rdf:rdf"
 import store "store:store"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl ".."
 
@@ -14,6 +14,7 @@ import shacl ".."
 // compile from. `shacl/kvstore` runs the same assertions against the
 // persistent backend — the two files are meant to stay recognizably parallel.
 
+@(private = "file")
 PREFIX :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -23,7 +24,18 @@ PREFIX :: `
 
 @(private = "file")
 compile_source :: proc(t: ^testing.T, s: ^shacl.Shapes, source: string) -> bool {
-	err, load_err := compile_turtle(s, transmute([]byte)source)
+	path := temp_path("compile-semantics")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
+		return false
+	}
+	defer kvstore.close(db)
+
+	err, load_err, db_err := compile_turtle(s, db, transmute([]byte)source)
+	if !testing.expectf(t, db_err == nil, "shapes store failed: %v", db_err) {
+		return false
+	}
 	if !testing.expectf(t, load_err.message == "", "shapes graph did not parse: %s", load_err.message) {
 		return false
 	}
@@ -131,22 +143,27 @@ test_model_outlives_the_store :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
 
-	// Compile from a store this test owns, then destroy it explicitly before
-	// touching the model, so the assertion is unambiguous.
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
+	// Compile from a store this test owns, then close it explicitly before
+	// touching the model, so the assertion is unambiguous. On kvstore the
+	// close unmaps the pages the terms were read from, so a model that had
+	// borrowed rather than copied reads unmapped memory here.
+	path := temp_path("model-outlives")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+		return
+	}
 
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:p ] .`
-	_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)source)
-	testing.expectf(t, load_err.message == "", "load failed: %s", load_err.message)
+	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)source)
+	testing.expectf(t, load_err.message == "" && db_err == nil, "load failed: %s %v", load_err.message, db_err)
 
-	err := compile(&s, &dictionary, &dataset)
+	session: Session
+	session_init(&session, db)
+	err := compile(&s, &session)
 	testing.expect_value(t, err.kind, shacl.Error_Kind.None)
 
-	memstore.dataset_destroy(&dataset)
-	memstore.dictionary_destroy(&dictionary)
+	kvstore.close(db)
 
 	sh, found := find_shape(&s, "http://example.org/S")
 	if !testing.expect(t, found, "shape not found after the store was destroyed") {
@@ -505,7 +522,15 @@ test_ill_formed_shapes :: proc(t: ^testing.T) {
 		s: shacl.Shapes
 		source := strings.concatenate({PREFIX, c.source})
 		defer delete(source)
-		err, load_err := compile_turtle(&s, transmute([]byte)source)
+		path := temp_path("compile-cases")
+		defer remove_store(path)
+		db, open_err := kvstore.open(path)
+		if !testing.expectf(t, open_err == nil, "%s: store: %v", c.name, open_err) {
+			continue
+		}
+		defer kvstore.close(db)
+		err, load_err, db_err := compile_turtle(&s, db, transmute([]byte)source)
+		testing.expectf(t, db_err == nil, "%s: store failed: %v", c.name, db_err)
 		testing.expectf(t, load_err.message == "", "%s: fixture did not parse: %s", c.name, load_err.message)
 		testing.expectf(
 			t,
@@ -565,7 +590,15 @@ test_cyclic_list_is_rejected :: proc(t: ^testing.T) {
 		_:cell <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> ex:x ;
 		       <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> _:cell .
 		`
-	err, load_err := compile_turtle(&s, transmute([]byte)source)
+	path := temp_path("in-not-a-list")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+		return
+	}
+	defer kvstore.close(db)
+	err, load_err, db_err := compile_turtle(&s, db, transmute([]byte)source)
+	testing.expectf(t, db_err == nil, "store failed: %v", db_err)
 	testing.expectf(t, load_err.message == "", "fixture did not parse: %s", load_err.message)
 	testing.expect_value(t, err.kind, shacl.Error_Kind.In_Not_A_List)
 }
@@ -575,31 +608,39 @@ test_cyclic_list_is_rejected :: proc(t: ^testing.T) {
 // asserts the dictionary is the same size afterwards.
 @(test)
 test_compilation_does_not_intern :: proc(t: ^testing.T) {
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	defer memstore.dictionary_destroy(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
-	defer memstore.dataset_destroy(&dataset)
+	path := temp_path("no-intern")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+		return
+	}
+	defer kvstore.close(db)
 
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetClass ex:C ; sh:property [ sh:path ex:p ] .`
-	_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)source)
-	testing.expectf(t, load_err.message == "", "load failed: %s", load_err.message)
+	_, load_err, load_db_err := kvstore.load_turtle(db, transmute([]byte)source)
+	testing.expectf(t, load_err.message == "" && load_db_err == nil, "load failed: %s %v", load_err.message, load_db_err)
 
 	// A term the shapes graph never mentions. If compilation interned
 	// anything, this ID would move.
-	before, _ := memstore.find_term(&dictionary, rdf.IRI("http://example.org/S"))
-	quads_before := memstore.count(&dataset)
+	before, _, find_err := kvstore.find_term(db, rdf.IRI("http://example.org/S"))
+	testing.expectf(t, find_err == nil, "find_term failed: %v", find_err)
+	quads_before, count_err := kvstore.count(db)
+	testing.expectf(t, count_err == nil, "count failed: %v", count_err)
 
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
-	err := compile(&s, &dictionary, &dataset)
+	session: Session
+	session_init(&session, db)
+	err := compile(&s, &session)
 	testing.expect_value(t, err.kind, shacl.Error_Kind.None)
 
-	after, still := memstore.find_term(&dictionary, rdf.IRI("http://example.org/S"))
+	after, still, find_err2 := kvstore.find_term(db, rdf.IRI("http://example.org/S"))
+	testing.expectf(t, find_err2 == nil, "find_term failed: %v", find_err2)
 	testing.expect(t, still, "the shape's own term went missing")
 	testing.expect_value(t, after, before)
-	testing.expect_value(t, memstore.count(&dataset), quads_before)
+	quads_after, count_err2 := kvstore.count(db)
+	testing.expectf(t, count_err2 == nil, "count failed: %v", count_err2)
+	testing.expect_value(t, quads_after, quads_before)
 	testing.expect_value(t, store.id_kind(after), store.Term_Kind.IRI)
 }
 
@@ -732,7 +773,15 @@ test_a_literal_is_not_a_shape :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node "not a shape" .`
-	err, load_err := compile_turtle(&s, transmute([]byte)source)
+	path := temp_path("literal-not-shape")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+		return
+	}
+	defer kvstore.close(db)
+	err, load_err, db_err := compile_turtle(&s, db, transmute([]byte)source)
+	testing.expectf(t, db_err == nil, "store failed: %v", db_err)
 	testing.expectf(t, load_err.message == "", "fixture did not parse: %s", load_err.message)
 	testing.expect_value(t, err.kind, shacl.Error_Kind.Shape_Expected)
 }

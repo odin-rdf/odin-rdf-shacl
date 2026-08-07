@@ -2,16 +2,15 @@ package w3c
 
 import "core:fmt"
 import "core:os"
+import "core:sync"
 import "core:path/filepath"
 import "core:strings"
 
 import rdf "rdf:rdf"
 import kvstore "store:store/kvstore"
-import memstore "store:store/memstore"
 
 import shacl "../../../shacl"
 import shacl_kvstore "../../../shacl/kvstore"
-import shacl_memstore "../../../shacl/memstore"
 
 // Running one suite entry: data graph + shapes graph → validation report.
 //
@@ -32,15 +31,16 @@ import shacl_memstore "../../../shacl/memstore"
 // **Both backends run the same entries**, and the runner is one procedure with
 // a switch rather than two, so a divergence between them has to be deliberate.
 
+// One arm today. Kept rather than collapsed: it is the seam a second
+// backend would use, the same reason odin-rdf-store retained its
+// conformance Backend adapter when it became a single-backend library
+// (STORE-A-0006).
 Backend :: enum {
-	Memstore,
 	Kvstore,
 }
 
 backend_name :: proc(b: Backend) -> string {
 	switch b {
-	case .Memstore:
-		return "memstore"
 	case .Kvstore:
 		return "kvstore"
 	}
@@ -104,8 +104,6 @@ run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry, backend: Backend, tag
 	defer delete(data_base)
 
 	switch backend {
-	case .Memstore:
-		return run_memstore(r, shapes_src, shapes_base, data_src, data_base)
 	case .Kvstore:
 		return run_kvstore(r, shapes_src, shapes_base, data_src, data_base, tag)
 	}
@@ -115,76 +113,6 @@ run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry, backend: Backend, tag
 // The two backend runs use a named result rather than composing a Run at each
 // return: from the moment the shapes graph compiles, the result owns a string,
 // and a `return Run{...}` that forgot to carry it would leak silently.
-@(private = "file")
-run_memstore :: proc(
-	r: ^shacl.Report,
-	shapes_src, shapes_base, data_src, data_base: string,
-) -> (
-	run: Run,
-) {
-	model: shacl.Shapes
-	defer shacl.shapes_destroy(&model)
-
-	// The shapes store lives exactly as long as the compile. Everything the
-	// model needs afterwards it owns.
-	shapes_parsed := false
-	compile_err := shacl.Error{}
-	{
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset)
-		defer memstore.dataset_destroy(&dataset)
-
-		_, load_err := memstore.load_turtle(
-			&dictionary,
-			&dataset,
-			transmute([]byte)shapes_src,
-			shapes_base,
-		)
-		shapes_parsed = load_err.message == ""
-		if shapes_parsed {
-			compile_err = shacl_memstore.compile(&model, &dictionary, &dataset)
-		}
-	}
-	if !shapes_parsed {
-		run.detail = "shapes graph failed to parse"
-		return
-	}
-	if compile_err.kind != .None {
-		run.detail = shacl.error_message(compile_err.kind)
-		return
-	}
-	run.ignored = ignored_text(&model)
-
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	defer memstore.dictionary_destroy(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
-	defer memstore.dataset_destroy(&dataset)
-
-	if _, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)data_src, data_base);
-	   load_err.message != "" {
-		run.detail = "data graph failed to parse"
-		return
-	}
-
-	bindings: shacl.Bindings
-	shacl_memstore.bind(&bindings, &model, &dictionary)
-	defer shacl.bindings_destroy(&bindings)
-
-	failure := shacl_memstore.validate_report(r, &model, &bindings, &dictionary, &dataset)
-	if failure != .None {
-		run.failure = failure
-		run.detail = shacl.failure_message(failure)
-		return
-	}
-	run.ok = true
-	return
-}
-
 @(private = "file")
 run_kvstore :: proc(
 	r: ^shacl.Report,
@@ -319,7 +247,15 @@ read_entry_file :: proc(dir, name: string) -> (source: string, ok: bool) {
 // fall back to. The same helper `shacl/kvstore`'s tests carry, for the same
 // reason — it is private to that package, and a test package cannot import
 // another's.
-@(private = "file")
+// The counter is what actually separates two concurrent stores. `tag` and
+// `role` are for a human reading a leftover directory; they are not unique
+// on their own, and were not required to be while the entry tag came from a
+// single-threaded suite walk. The report tests share one tag across five
+// parallel tests, so a deterministic path collided as a directory that
+// already exists (STORE-A-0006 port, SHACL-T-0028).
+@(private)
+store_path_counter: u64
+
 temp_store_path :: proc(tag, role: string) -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" {
@@ -334,10 +270,10 @@ temp_store_path :: proc(tag, role: string) -> string {
 	if tmp[len(tmp) - 1] == '/' || tmp[len(tmp) - 1] == '\\' {
 		tmp = tmp[:len(tmp) - 1]
 	}
-	return fmt.aprintf("%s/odin-rdf-shacl-w3c-%s-%s", tmp, tag, role)
+	n := sync.atomic_add(&store_path_counter, 1)
+	return fmt.aprintf("%s/odin-rdf-shacl-w3c-%s-%s-%d-%d", tmp, tag, role, os.get_pid(), n)
 }
 
-@(private = "file")
 remove_temp_store :: proc(path: string) {
 	os.remove(fmt.tprintf("%s/data.mdb", path))
 	os.remove(fmt.tprintf("%s/lock.mdb", path))

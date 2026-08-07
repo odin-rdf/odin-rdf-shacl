@@ -5,7 +5,6 @@ import "base:runtime"
 import rdf "rdf:rdf"
 import store "store:store"
 import kvstore "store:store/kvstore"
-import memstore "store:store/memstore"
 
 import shacl "../shacl"
 
@@ -44,7 +43,7 @@ import shacl "../shacl"
 // conformance cache would change, and it is the number that survives a change
 // of backend.
 //
-// **It must be identical on memstore and kvstore**, and that follows from the
+// **It was identical on memstore and kvstore**, which followed from the
 // architecture rather than from luck. The backend-independent core decides what
 // to ask; the adapter decides only how. It must also be identical at 64- and
 // 32-bit `Term_ID`, because ID width cannot reach the core's control flow. So
@@ -67,127 +66,6 @@ reads_total :: proc(r: Reads) -> int {
 
 // Mem_Probe is the memstore counting context: the same two fields the real
 // adapter's `Data` carries, plus the tally.
-Mem_Probe :: struct {
-	dataset:    ^memstore.Dataset,
-	dictionary: ^memstore.Dictionary,
-	graph:      store.Term_ID,
-	reads:      Reads,
-}
-
-// mem_access builds an `Access` over a probe. The graph is bound into every
-// pattern rather than left wildcard, exactly as the real adapters do
-// (SHACL-A-0001 decision 5) — a benchmark that quietly widened to the whole
-// dataset would measure a different engine.
-mem_access :: proc(p: ^Mem_Probe) -> shacl.Access {
-	return shacl.Access {
-		scan = mem_scan,
-		step = mem_step,
-		outgoing = mem_outgoing,
-		load = mem_load,
-		data = p,
-		load_data = p,
-	}
-}
-
-@(private = "file")
-mem_scan :: proc(
-	data: rawptr,
-	subject, predicate, object: store.Term_ID,
-	position: int,
-	visit: proc(data: rawptr, id: store.Term_ID) -> bool,
-	visit_data: rawptr,
-) -> bool {
-	p := cast(^Mem_Probe)data
-	p.reads.scan += 1
-	it := memstore.match(p.dataset, store.Match_Pattern{subject, predicate, object, p.graph})
-	defer memstore.match_destroy(&it)
-	for {
-		q, ok := memstore.match_next(&it)
-		if !ok {
-			return true
-		}
-		if !visit(visit_data, q[position]) {
-			return false
-		}
-	}
-}
-
-@(private = "file")
-mem_step :: proc(
-	data: rawptr,
-	from: store.Term_ID,
-	predicate: store.Term_ID,
-	inverted: bool,
-	out: ^[dynamic]store.Term_ID,
-) {
-	p := cast(^Mem_Probe)data
-	p.reads.step += 1
-	pattern :=
-		inverted \
-		? store.Match_Pattern{store.WILDCARD, predicate, from, p.graph} \
-		: store.Match_Pattern{from, predicate, store.WILDCARD, p.graph}
-	position := inverted ? store.QUAD_S : store.QUAD_O
-
-	it := memstore.match(p.dataset, pattern)
-	defer memstore.match_destroy(&it)
-	for {
-		q, ok := memstore.match_next(&it)
-		if !ok {
-			return
-		}
-		append(out, q[position])
-	}
-}
-
-@(private = "file")
-mem_outgoing :: proc(
-	data: rawptr,
-	subject: store.Term_ID,
-	visit: proc(data: rawptr, predicate, object: store.Term_ID) -> bool,
-	visit_data: rawptr,
-) -> bool {
-	p := cast(^Mem_Probe)data
-	p.reads.outgoing += 1
-	it := memstore.match(
-		p.dataset,
-		store.Match_Pattern{subject, store.WILDCARD, store.WILDCARD, p.graph},
-	)
-	defer memstore.match_destroy(&it)
-	for {
-		q, ok := memstore.match_next(&it)
-		if !ok {
-			return true
-		}
-		if !visit(visit_data, q[store.QUAD_P], q[store.QUAD_O]) {
-			return false
-		}
-	}
-}
-
-// memstore's `lookup_term` borrows its dictionary's storage, so `owned` is
-// false and the caller must not free what comes back. kvstore's below is the
-// other half of the asymmetry SHACL-A-0001 decision 3 exists to hide.
-@(private = "file")
-mem_load :: proc(
-	data: rawptr,
-	id: store.Term_ID,
-	allocator: runtime.Allocator,
-) -> (
-	term: rdf.Term,
-	owned: bool,
-) {
-	p := cast(^Mem_Probe)data
-	p.reads.load += 1
-	return memstore.lookup_term(p.dictionary, id), false
-}
-
-// Kv_Probe is the kvstore counting context.
-//
-// `err` is sticky, and it matters more here than anywhere else in this package:
-// a failed LMDB read yields no value nodes, which is exactly what a conforming
-// graph looks like. A benchmark that reported a fast, silent, empty validation
-// would be reporting a broken store as good news, so `main` checks this before
-// it believes a number.
 Kv_Probe :: struct {
 	db:    ^kvstore.Store,
 	graph: store.Term_ID,

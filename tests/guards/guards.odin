@@ -14,14 +14,17 @@ package guards
 
 import "core:log"
 import "core:mem"
+import "core:fmt"
+import "core:strings"
+import "core:sync"
+import "core:os"
 import "core:testing"
 
 import rdf "rdf:rdf"
-import store "store:store"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl "../../shacl"
-import shacl_memstore "../../shacl/memstore"
+import shacl_kvstore "../../shacl/kvstore"
 
 // A cyclic graph with every path form over it, for the evaluation guard.
 PATHS :: `
@@ -155,7 +158,11 @@ test_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "compile/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 		s: shacl.Shapes
-		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(SHAPES), "", allocator)
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
 		shacl.shapes_destroy(&s)
 	})
 }
@@ -175,7 +182,11 @@ test_failed_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 			sh:property [ sh:path ex:p ; sh:minCount "not a number" ] .
 		`
 		s: shacl.Shapes
-		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(BAD), "", allocator)
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(BAD), nil, "", allocator)
 		shacl.shapes_destroy(&s)
 	})
 }
@@ -190,37 +201,35 @@ test_path_evaluation_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "path evaluation", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
 
-		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(PATHS), "", nil, allocator)
+		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(PATHS), "", nil, allocator)
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+		_ = shacl_kvstore.compile(&s, &session, allocator)
 
 		b: shacl.Path_Bindings
 		defer shacl.path_bindings_destroy(&b)
-		shacl_memstore.bind_paths(&b, &s, &dictionary, allocator)
+		shacl_kvstore.bind_paths(&b, &s, &session, allocator)
 
-		focus, _ := memstore.find_term(&dictionary, rdf.IRI("http://example.org/a"))
+		focus, _, _ := kvstore.find_term(db, rdf.IRI("http://example.org/a"))
 		for sh in s.shapes {
 			if sh.path < 0 {
 				continue
 			}
 			for _ in 0 ..< 4 {
-				nodes := shacl_memstore.value_nodes(
+				nodes := shacl_kvstore.value_nodes(
 					&s,
 					&b,
-					&dictionary,
-					&dataset,
+					&session,
 					sh.path,
 					focus,
-					store.DEFAULT_GRAPH,
 					allocator,
 				)
 				delete(nodes)
@@ -237,22 +246,22 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "target resolution", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
 
-		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(TARGETS), "", nil, allocator)
+		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(TARGETS), "", nil, allocator)
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+		_ = shacl_kvstore.compile(&s, &session, allocator)
 
 		b: shacl.Target_Bindings
 		defer shacl.target_bindings_destroy(&b)
-		shacl_memstore.bind_targets(&b, &s, &dictionary, allocator)
+		shacl_kvstore.bind_targets(&b, &s, &session, allocator)
 
 		count := 0
 		visit :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
@@ -262,14 +271,13 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 		}
 		for _, i in s.shapes {
 			for _ in 0 ..< 4 {
-				shacl_memstore.resolve_targets(
+				shacl_kvstore.resolve_targets(
 					&s,
 					&b,
 					i,
-					&dataset,
+					&session,
 					visit,
 					&count,
-					store.DEFAULT_GRAPH,
 					allocator,
 				)
 			}
@@ -284,19 +292,19 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "report build/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
-		_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(PATHS), "", nil, allocator)
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
+		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(PATHS), "", nil, allocator)
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_memstore.compile(&s, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+		_ = shacl_kvstore.compile(&s, &session, allocator)
 
-		focus, _ := memstore.find_term(&dictionary, rdf.IRI("http://example.org/a"))
+		focus, _, _ := kvstore.find_term(db, rdf.IRI("http://example.org/a"))
 
 		r: shacl.Report
 		shacl.report_init(&r, allocator)
@@ -305,7 +313,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 		// serialiser builds are all exercised.
 		for sh, i in s.shapes {
 			for _ in 0 ..< 8 {
-				shacl_memstore.report_add(
+				shacl_kvstore.report_add(
 					&r,
 					&s,
 					shacl.Result {
@@ -315,7 +323,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 						component = .Min_Count,
 						severity = rdf.IRI(shacl.VIOLATION),
 					},
-					&dictionary,
+					&session,
 				)
 			}
 		}
@@ -419,17 +427,20 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "", allocator)
+		shapes_path := guard_store_path()
+		defer remove_guard_store(shapes_path, allocator)
+		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(shapes_db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
-		_, _ = memstore.load_turtle(
-			&dictionary,
-			&dataset,
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
+		_, _, _ = kvstore.load_turtle(
+			db,
 			transmute([]byte)string(VALIDATION_DATA),
 			"",
 			nil,
@@ -437,7 +448,7 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 		)
 
 		b: shacl.Bindings
-		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		shacl_kvstore.bind(&b, &s, &session, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		count := 0
@@ -449,14 +460,12 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 		// Repeated, because a per-validation leak and a per-result leak look the
 		// same after one run.
 		for _ in 0 ..< 4 {
-			_ = shacl_memstore.validate(
+			_ = shacl_kvstore.validate(
 				&s,
 				&b,
-				&dictionary,
-				&dataset,
+				&session,
 				visit,
 				&count,
-				store.DEFAULT_GRAPH,
 				allocator,
 			)
 		}
@@ -479,21 +488,31 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
-	err, _ := shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "")
+	shapes_path := guard_store_path()
+	defer remove_guard_store(shapes_path)
+	shapes_db, shapes_open := kvstore.open(shapes_path)
+	if !testing.expectf(t, shapes_open == nil, "shapes store: %v", shapes_open) {
+		return
+	}
+	defer kvstore.close(shapes_db)
+	err, _, _ := shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES))
 	if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
 		return
 	}
 
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	defer memstore.dictionary_destroy(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
-	defer memstore.dataset_destroy(&dataset)
-	_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(VALIDATION_DATA))
+	path := guard_store_path()
+	defer remove_guard_store(path)
+	db, open_err := kvstore.open(path)
+	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
+		return
+	}
+	defer kvstore.close(db)
+	_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(VALIDATION_DATA))
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&session, db)
 
 	b: shacl.Bindings
-	shacl_memstore.bind(&b, &s, &dictionary)
+	shacl_kvstore.bind(&b, &s, &session)
 	defer shacl.bindings_destroy(&b)
 
 	count := 0
@@ -502,14 +521,12 @@ test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 		n^ += 1
 		return true
 	}
-	failure := shacl_memstore.validate(
+	failure := shacl_kvstore.validate(
 		&s,
 		&b,
-		&dictionary,
-		&dataset,
+		&session,
 		visit,
 		&count,
-		store.DEFAULT_GRAPH,
 	)
 	testing.expectf(
 		t,
@@ -542,17 +559,20 @@ test_early_exit_and_recursion_unwind_cleanly :: proc(t: ^testing.T) {
 		for source in sources {
 			s: shacl.Shapes
 			defer shacl.shapes_destroy(&s)
-			_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)source, "", allocator)
+			shapes_path := guard_store_path()
+			defer remove_guard_store(shapes_path, allocator)
+			shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+			defer kvstore.close(shapes_db, allocator)
+			_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)source, nil, "", allocator)
 
-			dictionary: memstore.Dictionary
-			memstore.dictionary_init(&dictionary, allocator)
-			defer memstore.dictionary_destroy(&dictionary)
-			dataset: memstore.Dataset
-			memstore.dataset_init(&dataset, allocator)
-			defer memstore.dataset_destroy(&dataset)
-			_, _ = memstore.load_turtle(
-				&dictionary,
-				&dataset,
+			path := guard_store_path()
+			defer remove_guard_store(path, allocator)
+			db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+			defer kvstore.close(db, allocator)
+			session: shacl_kvstore.Session
+			shacl_kvstore.session_init(&session, db)
+			_, _, _ = kvstore.load_turtle(
+				db,
 				transmute([]byte)string(VALIDATION_DATA),
 				"",
 				nil,
@@ -560,21 +580,19 @@ test_early_exit_and_recursion_unwind_cleanly :: proc(t: ^testing.T) {
 			)
 
 			b: shacl.Bindings
-			shacl_memstore.bind(&b, &s, &dictionary, allocator)
+			shacl_kvstore.bind(&b, &s, &session, allocator)
 			defer shacl.bindings_destroy(&b)
 
 			stop :: proc(data: rawptr, result: shacl.Result) -> bool {
 				return false
 			}
 			for _ in 0 ..< 4 {
-				_ = shacl_memstore.validate(
+				_ = shacl_kvstore.validate(
 					&s,
 					&b,
-					&dictionary,
-					&dataset,
+					&session,
 					stop,
 					nil,
-					store.DEFAULT_GRAPH,
 					allocator,
 				)
 			}
@@ -593,17 +611,20 @@ test_conformance_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "", allocator)
+		shapes_path := guard_store_path()
+		defer remove_guard_store(shapes_path, allocator)
+		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(shapes_db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
-		_, _ = memstore.load_turtle(
-			&dictionary,
-			&dataset,
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
+		_, _, _ = kvstore.load_turtle(
+			db,
 			transmute([]byte)string(VALIDATION_DATA),
 			"",
 			nil,
@@ -611,11 +632,11 @@ test_conformance_validation_is_net_zero :: proc(t: ^testing.T) {
 		)
 
 		b: shacl.Bindings
-		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		shacl_kvstore.bind(&b, &s, &session, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		for _ in 0 ..< 4 {
-			_, _ = shacl_memstore.conforms(&s, &b, &dictionary, &dataset, store.DEFAULT_GRAPH, allocator)
+			_, _ = shacl_kvstore.conforms(&s, &b, &session, allocator)
 		}
 	})
 }
@@ -629,7 +650,11 @@ test_repeated_compiles_do_not_accumulate :: proc(t: ^testing.T) {
 		context.allocator = allocator
 		for _ in 0 ..< 8 {
 			s: shacl.Shapes
-			_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(SHAPES), "", allocator)
+			path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
 			shacl.shapes_destroy(&s)
 		}
 	})
@@ -662,17 +687,20 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 		`
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_, _ = shacl_memstore.compile_turtle(&s, transmute([]byte)string(SUPPRESS), "", allocator)
+		shapes_path := guard_store_path()
+		defer remove_guard_store(shapes_path, allocator)
+		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(shapes_db, allocator)
+		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(SUPPRESS), nil, "", allocator)
 
-		dictionary: memstore.Dictionary
-		memstore.dictionary_init(&dictionary, allocator)
-		defer memstore.dictionary_destroy(&dictionary)
-		dataset: memstore.Dataset
-		memstore.dataset_init(&dataset, allocator)
-		defer memstore.dataset_destroy(&dataset)
-		_, _ = memstore.load_turtle(
-			&dictionary,
-			&dataset,
+		path := guard_store_path()
+		defer remove_guard_store(path, allocator)
+		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		defer kvstore.close(db, allocator)
+		session: shacl_kvstore.Session
+		shacl_kvstore.session_init(&session, db)
+		_, _, _ = kvstore.load_turtle(
+			db,
 			transmute([]byte)string(VALIDATION_DATA),
 			"",
 			nil,
@@ -680,23 +708,50 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 		)
 
 		b: shacl.Bindings
-		shacl_memstore.bind(&b, &s, &dictionary, allocator)
+		shacl_kvstore.bind(&b, &s, &session, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		node := rdf.Term(rdf.IRI("http://example.org/a"))
 		for shape_index in 0 ..< len(s.shapes) {
 			for _ in 0 ..< 4 {
-				_, _ = shacl_memstore.conforms_node(
+				_, _ = shacl_kvstore.conforms_node(
 					&s,
 					&b,
-					&dictionary,
-					&dataset,
+					&session,
 					node,
 					shape_index,
-					store.DEFAULT_GRAPH,
 					allocator,
 				)
 			}
 		}
 	})
+}
+
+
+// Scratch databases for the guards. The in-memory backend needed no path.
+@(private = "file")
+guard_store_counter: u64
+
+@(private = "file")
+guard_store_path :: proc() -> string {
+	tmp := os.get_env("TMPDIR", context.temp_allocator)
+	if tmp == "" {
+		tmp = os.get_env("TEMP", context.temp_allocator)
+	}
+	if tmp == "" {
+		tmp = os.get_env("TMP", context.temp_allocator)
+	}
+	if tmp == "" {
+		tmp = "/tmp"
+	}
+	n := sync.atomic_add(&guard_store_counter, 1)
+	return fmt.aprintf("%s/odin-rdf-shacl-guard-%d-%d", strings.trim_right(tmp, `/\`), os.get_pid(), n)
+}
+
+@(private = "file")
+remove_guard_store :: proc(path: string, allocator := context.allocator) {
+	os.remove(fmt.tprintf("%s/data.mdb", path))
+	os.remove(fmt.tprintf("%s/lock.mdb", path))
+	os.remove(path)
+	delete(path, allocator)
 }

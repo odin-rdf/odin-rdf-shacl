@@ -3,10 +3,10 @@ package main
 import "core:fmt"
 import "core:mem"
 
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl "../shacl"
-import shacl_memstore "../shacl/memstore"
+import shacl_kvstore "../shacl/kvstore"
 
 // The three result consumers, measured against the same walk (SHACL-T-0024).
 //
@@ -46,62 +46,69 @@ Consumers :: struct {
 	conforms:    bool,
 }
 
-// measure_consumers runs the same validation three ways on memstore, each under
-// its own tracking allocator.
+// measure_consumers runs the same validation three ways, each under its own
+// tracking allocator.
 //
-// memstore only, deliberately. The question is what *this engine* allocates, and
-// on kvstore every figure would carry LMDB's page handling and term
-// materialisation as well — a different question, and one the store already
-// answers for itself.
+// **The question these figures answer changed on 2026-08-07 (SHACL-T-0028), and
+// the old numbers are not comparable to the new ones.** This ran on memstore
+// deliberately: the question was what *this engine* allocates, and memstore's
+// `lookup_term` borrowed its dictionary's storage, so nothing the store did
+// showed up in the count. odin-rdf-store retired that backend (STORE-A-0006),
+// and kvstore copies every materialised term into the caller's allocator — so
+// every figure below now includes term materialisation as well as the engine's
+// own work.
+//
+// That is arguably the more useful number, since it is what a real consumer
+// pays; it is simply not the number this benchmark used to report. What is no
+// longer measurable anywhere is the engine's allocation in isolation.
 measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 
-	shapes_dict: memstore.Dictionary
-	memstore.dictionary_init(&shapes_dict)
-	defer memstore.dictionary_destroy(&shapes_dict)
-	shapes_data: memstore.Dataset
-	memstore.dataset_init(&shapes_data)
-	defer memstore.dataset_destroy(&shapes_data)
-	if _, err := memstore.load_turtle(
-		&shapes_dict,
-		&shapes_data,
-		transmute([]byte)w.shapes_ttl,
-	); err.message != "" {
+	shapes_db, shapes_path, shapes_ok := open_temp_store(c.name, "consumers-shapes")
+	if !shapes_ok {
+		return
+	}
+	defer close_temp_store(shapes_db, shapes_path)
+	if _, err, _ := kvstore.load_turtle(shapes_db, transmute([]byte)w.shapes_ttl);
+	   err.message != "" {
 		fail("%s: shapes graph failed to load", c.name)
 		return
 	}
-	if e := shacl_memstore.compile(&model, &shapes_dict, &shapes_data); e.kind != .None {
+	shapes_session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&shapes_session, shapes_db)
+	if e := shacl_kvstore.compile(&model, &shapes_session); e.kind != .None {
 		fail("%s: shapes graph did not compile", c.name)
 		return
 	}
 
-	dict: memstore.Dictionary
-	memstore.dictionary_init(&dict)
-	defer memstore.dictionary_destroy(&dict)
-	data: memstore.Dataset
-	memstore.dataset_init(&data)
-	defer memstore.dataset_destroy(&data)
-	if _, err := memstore.load_turtle(&dict, &data, transmute([]byte)w.data_ttl);
+	db, path, db_ok := open_temp_store(c.name, "consumers-data")
+	if !db_ok {
+		return
+	}
+	defer close_temp_store(db, path)
+	if _, err, _ := kvstore.load_turtle(db, transmute([]byte)w.data_ttl);
 	   err.message != "" {
 		fail("%s: data graph failed to load", c.name)
 		return
 	}
 
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&session, db)
+
 	bindings: shacl.Bindings
 	defer shacl.bindings_destroy(&bindings)
-	shacl_memstore.bind(&bindings, &model, &dict)
+	shacl_kvstore.bind(&bindings, &model, &session)
 
 	// (1) The raw stream, counting and keeping nothing.
 	{
 		tracker: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracker, context.allocator)
 		defer mem.tracking_allocator_destroy(&tracker)
-		failure := shacl_memstore.validate(
+		failure := shacl_kvstore.validate(
 			&model,
 			&bindings,
-			&dict,
-			&data,
+			&session,
 			count_visitor,
 			&out.raw.results,
 			allocator = mem.tracking_allocator(&tracker),
@@ -120,11 +127,10 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 		tracker: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracker, context.allocator)
 		defer mem.tracking_allocator_destroy(&tracker)
-		conforms, failure := shacl_memstore.conforms(
+		conforms, failure := shacl_kvstore.conforms(
 			&model,
 			&bindings,
-			&dict,
-			&data,
+			&session,
 			allocator = mem.tracking_allocator(&tracker),
 		)
 		if failure != .None {
@@ -142,12 +148,11 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 		defer mem.tracking_allocator_destroy(&tracker)
 		r: shacl.Report
 		shacl.report_init(&r, mem.tracking_allocator(&tracker))
-		failure := shacl_memstore.validate_report(
+		failure := shacl_kvstore.validate_report(
 			&r,
 			&model,
 			&bindings,
-			&dict,
-			&data,
+			&session,
 			allocator = mem.tracking_allocator(&tracker),
 		)
 		if failure != .None {

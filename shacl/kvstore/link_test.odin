@@ -2,6 +2,7 @@ package shacl_kvstore
 
 import "core:fmt"
 import "core:os"
+import "core:sync"
 import "core:testing"
 
 import kvstore "store:store/kvstore"
@@ -15,6 +16,15 @@ import kvstore "store:store/kvstore"
 // the filesystem root on Linux, which a non-root user cannot create. Copied
 // deliberately from odin-rdf-store's own test helper, which is private to
 // that package.
+// Scratch paths must be unique per store, not merely per test name. The
+// suite grew from 14 tests to ~85 when the in-memory backend was retired
+// (odin-rdf-store STORE-A-0006), the runner uses ~10 threads, and several
+// tests hold two stores at once (shapes and data). A bare name would let
+// two of them collide, which fails as a store error and reproduces only
+// under load; it would also inherit a stale directory from a previous run.
+@(private)
+path_counter: u64
+
 @(private)
 temp_path :: proc(name: string) -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -30,7 +40,8 @@ temp_path :: proc(name: string) -> string {
 	if tmp[len(tmp) - 1] == '/' || tmp[len(tmp) - 1] == '\\' {
 		tmp = tmp[:len(tmp) - 1]
 	}
-	return fmt.aprintf("%s/odin-rdf-shacl-%s", tmp, name)
+	n := sync.atomic_add(&path_counter, 1)
+	return fmt.aprintf("%s/odin-rdf-shacl-%s-%d-%d", tmp, name, os.get_pid(), n)
 }
 
 @(private)

@@ -1,17 +1,14 @@
 package main
 
 import "core:fmt"
-import "core:mem"
 import "core:os"
 import "core:time"
 
 import store "store:store"
 import kvstore "store:store/kvstore"
-import memstore "store:store/memstore"
 
 import shacl "../shacl"
 import shacl_kvstore "../shacl/kvstore"
-import shacl_memstore "../shacl/memstore"
 
 // The instrumented mode: reads and allocation, never timings.
 //
@@ -26,93 +23,6 @@ import shacl_memstore "../shacl/memstore"
 // and folding compile and bind into the same tally would bury it under a
 // one-off cost that scales with the shapes graph instead.
 
-// instrument_memstore validates through this package's counting Access, under a
-// tracking allocator.
-instrument_memstore :: proc(c: Config, w: Workload) -> (out: Instrumented, ok: bool) {
-	model: shacl.Shapes
-	defer shacl.shapes_destroy(&model)
-
-	shapes_dict: memstore.Dictionary
-	memstore.dictionary_init(&shapes_dict)
-	defer memstore.dictionary_destroy(&shapes_dict)
-	shapes_data: memstore.Dataset
-	memstore.dataset_init(&shapes_data)
-	defer memstore.dataset_destroy(&shapes_data)
-	if _, err := memstore.load_turtle(
-		&shapes_dict,
-		&shapes_data,
-		transmute([]byte)w.shapes_ttl,
-	); err.message != "" {
-		fail("%s: shapes graph failed to load", c.name)
-		return
-	}
-	if e := shacl_memstore.compile(&model, &shapes_dict, &shapes_data); e.kind != .None {
-		fail("%s: shapes graph did not compile", c.name)
-		return
-	}
-
-	dict: memstore.Dictionary
-	memstore.dictionary_init(&dict)
-	defer memstore.dictionary_destroy(&dict)
-	data: memstore.Dataset
-	memstore.dataset_init(&data)
-	defer memstore.dataset_destroy(&data)
-	if _, err := memstore.load_turtle(&dict, &data, transmute([]byte)w.data_ttl);
-	   err.message != "" {
-		fail("%s: data graph failed to load", c.name)
-		return
-	}
-
-	bindings: shacl.Bindings
-	defer shacl.bindings_destroy(&bindings)
-	shacl_memstore.bind(&bindings, &model, &dict)
-
-	probe := Mem_Probe {
-		dataset    = &data,
-		dictionary = &dict,
-		graph      = store.DEFAULT_GRAPH,
-	}
-
-	tracker: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracker, context.allocator)
-	defer mem.tracking_allocator_destroy(&tracker)
-
-	failure := shacl.validate(
-		&model,
-		&bindings,
-		mem_access(&probe),
-		count_visitor,
-		&out.results,
-		mem.tracking_allocator(&tracker),
-	)
-	if failure != .None {
-		fail("%s: instrumented memstore validation failed — %s", c.name, shacl.failure_message(failure))
-		return
-	}
-
-	out.reads = probe.reads
-	out.peak = int(tracker.peak_memory_allocated)
-	out.total_bytes = int(tracker.total_memory_allocated)
-	out.allocations = int(tracker.total_allocation_count)
-
-	// Validation returns everything it took. This is the same promise
-	// `tests/guards` asserts on fixtures of a few dozen triples; here it is
-	// asserted at a size those cannot reach, which is the only reason to
-	// re-state it.
-	if len(tracker.allocation_map) != 0 {
-		fail(
-			"%s: validation leaked %d allocation(s) at scale",
-			c.name,
-			len(tracker.allocation_map),
-		)
-	}
-	return out, true
-}
-
-// instrument_kvstore is the same walk against the persistent backend. Only the
-// reads and the result count are compared across backends: allocation differs
-// legitimately, because kvstore materialises terms from database bytes while
-// memstore borrows its dictionary's storage (SHACL-A-0001 decision 3).
 instrument_kvstore :: proc(c: Config, w: Workload) -> (out: Instrumented, ok: bool) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)

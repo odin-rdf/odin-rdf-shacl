@@ -26,7 +26,7 @@
 // **Two modes over one workload, because every instrument here perturbs what it
 // measures.**
 //
-//   - *Timing* — the real path through `shacl/memstore` and `shacl/kvstore`,
+//   - *Timing* — the real path through `shacl/kvstore`,
 //     the real allocator, nothing wrapped. Wall clock only.
 //   - *Instrumented* — this package's counting `Access` (see `access.odin`) and
 //     a `mem.Tracking_Allocator`. Reports store reads and allocation. **No
@@ -42,7 +42,8 @@
 // question about validation is what it costs in steady state, and the first
 // pass pays for cold pages and an unwarmed allocator — the very first run of
 // this benchmark reported memstore as *slower* than LMDB on the reference
-// configuration, purely because memstore went first. The question about compile
+// configuration, purely because memstore went first. (Historical: the in-memory
+// backend was retired in 2026-08 — odin-rdf-store STORE-A-0006.) The question about compile
 // and bind is the opposite: they happen once per process, so a cold number is
 // not noise in the measurement, it is the measurement. Reporting a warmed
 // figure for a cost nobody pays twice would flatter it.
@@ -61,7 +62,8 @@
 //     would agree on the new one. That case is caught by (3), which was
 //     confirmed by perturbing the PRNG and watching the pins fail rather than
 //     this assertion.
-//  2. **The read count is identical on memstore and kvstore.** The
+//  2. **The read count was identical on memstore and kvstore** — historical,
+//     and no longer checkable with one backend (STORE-A-0006). The
 //     backend-independent core decides *what* to ask and the adapter decides
 //     only *how*, so a divergence is a bug rather than a property of a backend.
 //  3. **The read count matches its pin.** See `config.odin` — a constant per
@@ -86,11 +88,9 @@ import "core:time"
 
 import store "store:store"
 import kvstore "store:store/kvstore"
-import memstore "store:store/memstore"
 
 import shacl "../shacl"
 import shacl_kvstore "../shacl/kvstore"
-import shacl_memstore "../shacl/memstore"
 
 // REPS is how many timed validations a configuration runs after its warm-up.
 // The reported figure is the fastest of them: a minimum is the statistic that
@@ -189,7 +189,7 @@ warm_up :: proc() {
 	w := generate(c)
 	defer workload_destroy(&w)
 	for _ in 0 ..< 3 {
-		_, _ = time_memstore(c, w)
+		_, _ = time_kvstore(c, w)
 	}
 }
 
@@ -221,45 +221,27 @@ run_config :: proc(c: Config) {
 		c.qualified,
 	)
 
-	mem_t, mem_ok := time_memstore(c, w)
 	kv_t, kv_ok := time_kvstore(c, w)
-	if mem_ok {
-		report_timing("memstore", c, mem_t)
-	}
 	if kv_ok {
 		report_timing("kvstore ", c, kv_t)
 	}
 
-	mem_i, mem_i_ok := instrument_memstore(c, w)
 	kv_i, kv_i_ok := instrument_kvstore(c, w)
-	if mem_i_ok {
-		report_instrumented("memstore", c, mem_i)
-	}
 	if kv_i_ok {
 		report_instrumented("kvstore ", c, kv_i)
 	}
-	if !mem_i_ok || !kv_i_ok {
+	if !kv_i_ok {
 		return
 	}
 
-	// (2) The cross-backend invariant. Per verb rather than only in total: two
-	// errors that cancel in the sum are exactly what a total would hide.
-	if mem_i.reads != kv_i.reads {
-		fail(
-			"%s: backends disagree on reads — memstore %v, kvstore %v. The core decides what to ask and the adapter only how, so this is a defect rather than a measurement",
-			c.name,
-			mem_i.reads,
-			kv_i.reads,
-		)
-	}
-	if mem_i.results != kv_i.results {
-		fail(
-			"%s: backends disagree on results — memstore %d, kvstore %d",
-			c.name,
-			mem_i.results,
-			kv_i.results,
-		)
-	}
+	// (2) The cross-backend invariant is gone with the second backend
+	// (odin-rdf-store STORE-A-0006, SHACL-T-0028). It asserted that memstore
+	// and kvstore performed the same number of reads per verb and produced the
+	// same results — the core decides what to ask and the adapter only how, so
+	// a disagreement was a defect rather than a measurement. With one adapter
+	// there is nothing to disagree with, and no check replaces it: the read
+	// counts below are now a description of what the engine does, not a
+	// cross-checked invariant.
 
 	if k, k_ok := measure_consumers(c, w); k_ok {
 		report_consumers(c, k)
@@ -279,7 +261,7 @@ run_config :: proc(c: Config) {
 	}
 
 	// (3) The pin.
-	total := reads_total(mem_i.reads)
+	total := reads_total(kv_i.reads)
 	pinned, has_pin := pinned_reads(c.name)
 	switch {
 	case !has_pin:
@@ -305,81 +287,6 @@ count_visitor :: proc(data: rawptr, result: shacl.Result) -> bool {
 	n := cast(^int)data
 	n^ += 1
 	return true
-}
-
-@(private = "file")
-time_memstore :: proc(c: Config, w: Workload) -> (t: Timing, ok: bool) {
-	model: shacl.Shapes
-	defer shacl.shapes_destroy(&model)
-
-	shapes_dict: memstore.Dictionary
-	memstore.dictionary_init(&shapes_dict)
-	defer memstore.dictionary_destroy(&shapes_dict)
-	shapes_data: memstore.Dataset
-	memstore.dataset_init(&shapes_data)
-	defer memstore.dataset_destroy(&shapes_data)
-
-	// Loading is untimed on purpose: parsing and interning are odin-rdf-parser's
-	// and odin-rdf-store's measured business, and this is a non-goal of
-	// SHACL-I-0003. What is timed is what this repository wrote.
-	if _, err := memstore.load_turtle(
-		&shapes_dict,
-		&shapes_data,
-		transmute([]byte)w.shapes_ttl,
-	); err.message != "" {
-		fail("%s: shapes graph failed to load — %s", c.name, err.message)
-		return
-	}
-
-	start := time.tick_now()
-	compile_err := shacl_memstore.compile(&model, &shapes_dict, &shapes_data)
-	t.compile = time.tick_since(start)
-	if compile_err.kind != .None {
-		fail("%s: shapes graph did not compile — %s", c.name, shacl.error_message(compile_err.kind))
-		return
-	}
-
-	dict: memstore.Dictionary
-	memstore.dictionary_init(&dict)
-	defer memstore.dictionary_destroy(&dict)
-	data: memstore.Dataset
-	memstore.dataset_init(&data)
-	defer memstore.dataset_destroy(&data)
-	if _, err := memstore.load_turtle(&dict, &data, transmute([]byte)w.data_ttl);
-	   err.message != "" {
-		fail("%s: data graph failed to load — %s", c.name, err.message)
-		return
-	}
-
-	bindings: shacl.Bindings
-	defer shacl.bindings_destroy(&bindings)
-	start = time.tick_now()
-	shacl_memstore.bind(&bindings, &model, &dict)
-	t.bind = time.tick_since(start)
-
-	t.validate = max(time.Duration)
-	for rep in 0 ..< REPS + 1 {
-		t.results = 0
-		start = time.tick_now()
-		failure := shacl_memstore.validate(
-			&model,
-			&bindings,
-			&dict,
-			&data,
-			count_visitor,
-			&t.results,
-		)
-		elapsed := time.tick_since(start)
-		if failure != .None {
-			fail("%s: memstore validation failed — %s", c.name, shacl.failure_message(failure))
-			return
-		}
-		// Rep 0 is the warm-up and is discarded.
-		if rep > 0 && elapsed < t.validate {
-			t.validate = elapsed
-		}
-	}
-	return t, true
 }
 
 @(private = "file")
