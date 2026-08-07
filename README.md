@@ -17,7 +17,7 @@ shapes compilation, target resolution, property paths, and
 `sh:ValidationReport` emission.
 
 **All 98 entries of the W3C SHACL 1.0 suite's `core/` tree pass**, across all
-seven directories, against both storage backends, at both `Term_ID` widths.
+seven directories, against the LMDB-backed store, at both `Term_ID` widths.
 There is no skip list and no expected-failure file: this repository claims
 conformance only for directories where *every* entry passes, and every directory
 is now one of them. See `.metis/` for the vision, the initiatives, and the ADRs.
