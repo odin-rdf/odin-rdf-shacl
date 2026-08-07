@@ -19,10 +19,41 @@
 # actually resolves and runs on each rather than merely compiling.
 name: CI
 
+# Documentation-only commits do not run this workflow. More than half the
+# commits in a working session here touch only `.metis/` and `docs/`, and each
+# one was costing a three-platform matrix to prove that prose still compiles.
+#
+# **A denylist, not an allowlist, and the asymmetry is the whole argument.** The
+# tempting spelling is `paths: [shacl/**, tests/**, bench/**, ...]` — run only
+# for these. That fails toward *no CI*: add a source directory the list does not
+# name and it is silently unverified, which is the same shape of hazard as a
+# skip list, and this repository's whole convention is to assert rather than
+# trust. A denylist fails the other way — add a documentation directory nobody
+# adds here and you get a pointless run until the list catches up. Wasteful,
+# visible, harmless.
+#
+# `.github/**` is deliberately absent from the list: a change to CI must run CI.
+# `workflow_dispatch` carries no filter either, so any commit can be run by hand
+# from the Actions tab regardless.
+#
+# One thing to know before adding branch protection: a workflow skipped by a
+# path filter reports no status at all, so if this ever becomes a *required*
+# check, documentation-only pull requests will wait forever for a run that will
+# not happen. It does not bite today — this repository commits to main directly.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.metis/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '.metis/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
