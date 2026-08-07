@@ -72,8 +72,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 7},
-	{"core/property", 38, 38, false, 11},
+	{"core/node", 32, 32, false, 9},
+	{"core/property", 38, 38, false, 12},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -96,4 +96,14 @@ ENABLED_ENTRIES :: 26
 //
 // It starts at the catalogue initiative's measured 18 — `core/node` 7 plus
 // `core/property` 11 — and every component task is expected to move it.
-PROGRESS_FLOOR :: 18
+//
+// **21 at SHACL-T-0012**, and the four entries it moved split two ways, which is
+// worth recording because only two of them are the engine getting better.
+// `sh:datatype` gaining its §4.3.1 lexical check took `property/datatype-ill-formed`
+// and `node/datatype-001`. The other two — `node/class-002` and the rest of
+// `node/datatype-001`'s expected graph — came from a defect in this harness:
+// `expected_report` followed `sh:focusNode` into the *data* graph whenever an
+// entry's focus node was a blank node, so it demanded triples no report can
+// contain. Every `core/node` value-range entry has that shape, so it would have
+// been read as an engine failure for the whole of SHACL-T-0013.
+PROGRESS_FLOOR :: 21

@@ -49,6 +49,14 @@ SHT_APPROVED :: rdf.IRI(SHT_NS + "approved")
 
 RDFS_LABEL :: rdf.IRI("http://www.w3.org/2000/01/rdf-schema#label")
 
+// The three report predicates that name a node living outside the report. They
+// are spelled here rather than imported from `shacl` so this reader stays a
+// reader — it parses manifests and knows nothing about the engine under test.
+// See expected_report for what they decide.
+SH_FOCUS_NODE :: rdf.IRI("http://www.w3.org/ns/shacl#focusNode")
+SH_VALUE :: rdf.IRI("http://www.w3.org/ns/shacl#value")
+SH_SOURCE_SHAPE :: rdf.IRI("http://www.w3.org/ns/shacl#sourceShape")
+
 // Expectation is what an entry says should happen. The suite's `core/`
 // directories are entirely Report; Failure occurs only in the excluded
 // `sparql/pre-binding/` directory, but it is modelled here so an entry
@@ -249,6 +257,21 @@ parse_test_file :: proc(source: string, base_name: string) -> Test_File {
 // themselves subjects in the same document — the report is exactly the blank
 // nodes hanging off mf:result plus the triples they assert.
 //
+// **It stops at three predicates for the same reason** (SHACL-T-0012). Stopping
+// at IRIs is not enough: an entry whose focus node is a *blank node* in the data
+// — `_:b30507 rdf:type ex:TestClass`, targeted by `sh:targetClass` — has that
+// data triple pulled into the expected report through `sh:focusNode`, and no
+// produced report can ever contain it. The entry then fails for a reason that
+// has nothing to do with the engine. `core/node`'s `datatype-001` is where this
+// was found; every `core/node` value-range entry has the same shape, so it would
+// have blocked those too.
+//
+// `sh:focusNode`, `sh:value`, and `sh:sourceShape` **name** a node that lives
+// somewhere else; every other predicate here **structures** one, and its blank
+// nodes are part of the report the engine writes — nested `sh:result`s and the
+// blank-node property paths in `sh:resultPath`, which `core/path` depends on.
+// A named node is compared as a node, which is all a produced report can offer.
+//
 // The returned slice borrows from the Test_File's statements; free the
 // dynamic array itself, not the triples.
 expected_report :: proc(tf: ^Test_File, e: Entry) -> [dynamic]rdf.Triple {
@@ -292,11 +315,25 @@ expected_report :: proc(tf: ^Test_File, e: Entry) -> [dynamic]rdf.Triple {
 			append(&out, t)
 			#partial switch o in t.object {
 			case rdf.Blank_Node:
-				append(&frontier, t.object)
+				if !names_a_node_elsewhere(t.predicate) {
+					append(&frontier, t.object)
+				}
 			}
 		}
 	}
 	return out
+}
+
+// names_a_node_elsewhere reports whether a report predicate points *at* a node
+// rather than *building* one. See expected_report for why the distinction
+// decides where the closure stops.
+@(private = "file")
+names_a_node_elsewhere :: proc(predicate: rdf.Term) -> bool {
+	iri, is_iri := predicate.(rdf.IRI)
+	if !is_iri {
+		return false
+	}
+	return iri == SH_FOCUS_NODE || iri == SH_VALUE || iri == SH_SOURCE_SHAPE
 }
 
 @(private = "file")

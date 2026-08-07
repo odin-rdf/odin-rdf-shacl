@@ -12,14 +12,25 @@ build/
 # `tests/guards`, `tests/readme`, `tests/w3c/harness` are all real packages, and
 # an unanchored `memstore` would ignore one of them.
 #
-# Package `shacl` needs no entry: its binary would collide with the `shacl/`
-# directory, so none is written. Do not add `/shacl` here — it would match the
-# directory and ignore the whole core package.
+# Package `shacl` needs no *extensionless* entry: its binary would collide with
+# the `shacl/` directory, so none is written. Do not add `/shacl` here — it
+# would match the directory and ignore the whole core package. `/shacl.exe` is
+# safe and needed, because on Windows there is no collision to prevent it.
 /memstore
 /kvstore
 /guards
 /readme
 /harness
+
+# The same binaries on Windows, which names them with an extension. Written out
+# rather than globbed for the reason above: `*.exe` would be broader than the
+# packages this repo actually builds.
+/shacl.exe
+/memstore.exe
+/kvstore.exe
+/guards.exe
+/readme.exe
+/harness.exe
 
 # Metis Ralph loop state -- per-session runtime state, not source
 .claude/

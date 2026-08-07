@@ -32,6 +32,17 @@ returns every `sh:` parameter the compile saw on a shape and skipped. **Check it
 before trusting a `sh:conforms true`** while the catalogue is incomplete: a
 report with no results and a non-empty ignored list is not a validated graph.
 
+**`sh:datatype` checks the lexical form, but only for the datatypes it
+models.** §4.3.1 asks two things — that the datatype IRI matches, and that the
+value's lexical form lies in that datatype's lexical space — so
+`"abc"^^xsd:integer` and `"300"^^xsd:byte` both violate `sh:datatype` even
+though the IRI is right. The lexical spaces this engine knows are xsd:string,
+xsd:boolean, the integer tower with its derived ranges, xsd:decimal, xsd:float,
+xsd:double, xsd:dateTime, xsd:date, and rdf:langString. **For any other
+datatype the check is skipped rather than failed**: an engine may call a
+lexical form invalid only when it knows the space, so `sh:datatype rdf:HTML`
+accepts whatever it is given. The set grows on evidence.
+
 This is a peer of [odin-rdf-sparql](../odin-rdf-sparql) on the same
 foundation, not a layer above it. **SHACL Core has no dependency on the query
 engine at all** — not at runtime, and not at link time: the `sparql:`

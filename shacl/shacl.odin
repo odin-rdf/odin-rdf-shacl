@@ -96,9 +96,9 @@
 // the violation count — it is a graph, and that is what it is for.
 //
 //
-// # Five contracts a caller should know
+// # Six contracts a caller should know
 //
-// The first is this engine's answer to being incomplete, the next two are
+// The first two are this engine's answers to being incomplete, the next two are
 // SHACL-A-0001 decisions, and the rest are the spec's; each surprises someone
 // otherwise.
 //
@@ -111,6 +111,17 @@
 // conforming report and look complete, so compilation records what it passed
 // over. While the constraint catalogue is incomplete, **a `sh:conforms true`
 // means what it says only if `shapes_ignored` is empty**.
+//
+// **`sh:datatype` skips the lexical check for datatypes it does not model.**
+// §4.3.1 requires the value's lexical form to lie in the datatype's lexical
+// space as well as the IRI to match, and this engine enforces it — for
+// xsd:string, xsd:boolean, the integer tower with its derived ranges,
+// xsd:decimal, xsd:float, xsd:double, xsd:dateTime, xsd:date, and
+// rdf:langString. Any other datatype passes on the IRI alone. Failing instead
+// would reject `sh:datatype rdf:HTML` on a perfectly good HTML literal: a
+// lexical form can only be called invalid against a space that is known. The
+// same machinery decides `sh:minInclusive` and its three companions, so the two
+// answers can never diverge.
 //
 // **One data graph.** SHACL is specified against a single RDF graph;
 // odin-rdf-store holds a quad dataset. Validation reads one caller-named

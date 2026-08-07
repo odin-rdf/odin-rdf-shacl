@@ -1,6 +1,23 @@
 NAME  := shacl-bench
 BENCH := bench
-OUT   := build/$(NAME)
+
+# Odin rejects an output path with no extension on Windows -- "Output path
+# build/purity must have an appropriate extension" -- so every `-out:` in this
+# file is spelled through EXE. `OS` is set to Windows_NT by Windows itself
+# rather than by the shell, which is the one test that holds whether make is
+# MSYS, MinGW, or native.
+#
+# It is only the two built binaries that need it. `odin test` names its own
+# output and `odin check` writes none, so the suite and the vet pass were never
+# affected -- which is why this surfaced on the purity check and nowhere else.
+ifeq ($(OS),Windows_NT)
+EXE := .exe
+else
+EXE :=
+endif
+
+OUT    := build/$(NAME)$(EXE)
+PURITY := build/purity$(EXE)
 
 # Odin source collections. The parser and the store are sibling checkouts
 # rather than vendored copies, so they are reached through collections instead
@@ -88,15 +105,15 @@ check: ## Vet every package at the default Term_ID width, then check core purity
 # enough.
 purity: ## Assert the core links no LMDB (builds tests/purity and inspects it)
 	@mkdir -p build
-	@odin build tests/purity -out:build/purity $(COLL) || exit 1
+	@odin build tests/purity -out:$(PURITY) $(COLL) || exit 1
 	@if ! command -v nm >/dev/null 2>&1; then \
 		echo "purity: nm unavailable, skipping symbol check"; \
 		exit 0; \
 	fi; \
-	if nm build/purity 2>/dev/null | grep -qi 'mdb_'; then \
+	if nm $(PURITY) 2>/dev/null | grep -qi 'mdb_'; then \
 		echo "purity: FAIL -- LMDB symbols found in a core+memstore consumer."; \
 		echo "         Something under package shacl imports store:store/kvstore."; \
-		nm build/purity | grep -i 'mdb_' | head; \
+		nm $(PURITY) | grep -i 'mdb_' | head; \
 		exit 1; \
 	fi; \
 	echo "purity: ok -- no LMDB symbols in a core+memstore consumer"

@@ -189,24 +189,28 @@ class_check_visit :: proc(data: rawptr, id: store.Term_ID) -> bool {
 }
 
 // check_datatype is `sh:datatype` (§4.3.1): the value node must be a literal
-// whose datatype IRI is exactly the parameter.
+// whose datatype IRI is exactly the parameter **and whose lexical form lies in
+// that datatype's lexical space**.
 //
 // Exactly, and by code point: RDF 1.1 Concepts §3.2 forbids further
-// normalization of IRIs, so this is string equality and not a judgement call. A
-// language-tagged literal carries `rdf:langString` and therefore never
-// satisfies `sh:datatype xsd:string`, which falls out of the comparison rather
-// than needing a case.
+// normalization of IRIs, so the first half is string equality and not a
+// judgement call. A language-tagged literal carries `rdf:langString` and
+// therefore never satisfies `sh:datatype xsd:string`, which falls out of the
+// comparison rather than needing a case.
 //
-// **What is deliberately not here.** §4.3.1 also requires the lexical form to
-// be well-formed for the datatype, so `"abc"^^xsd:integer` should violate even
-// though the datatype matches. That check belongs with the catalogue
-// initiative's value-range components, which need the same lexical-to-value
-// machinery; the spine's enabled directories exercise `sh:datatype` only with
-// `xsd:string`, whose lexical space is every string. Recorded rather than
-// forgotten: `core/property`'s `datatype-ill-formed` is the entry that demands
-// it — `"300"^^xsd:byte` is out of range and `"c"^^xsd:byte` is not a number,
-// and both must violate against `sh:datatype xsd:byte` even though the datatype
-// IRI matches exactly. That directory stays disabled until they do.
+// **The second half was the spine's recorded debt**, discharged in
+// SHACL-T-0012 along with the lexical-to-value machinery it shares. It is not a
+// refinement: `"300"^^xsd:byte` and `"c"^^xsd:byte` both name xsd:byte exactly
+// and neither is one, and `core/property`'s `datatype-ill-formed` is the entry
+// that says so. The spine's enabled directories used `sh:datatype` only with
+// `xsd:string`, whose lexical space is every string, which is why they could go
+// green without it.
+//
+// **An unmodelled datatype satisfies.** `lexical_status` answers `.Unchecked`
+// for a datatype this engine does not model — rdf:HTML is the one in the corpus
+// — and only `.Ill_Formed` violates. Violating on `.Unchecked` would fail
+// `sh:datatype rdf:HTML` on a perfectly good HTML literal: an engine may say a
+// lexical form is outside a lexical space only when it knows the space.
 @(private = "file")
 check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	want, is_iri := c.term.(rdf.IRI)
@@ -218,7 +222,10 @@ check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 		rdf.destroy_term(term, v.allocator)
 	}
 	literal, is_literal := term.(rdf.Literal)
-	return is_literal && literal.datatype == want
+	if !is_literal || literal.datatype != want {
+		return false
+	}
+	return lexical_status(literal) != .Ill_Formed
 }
 
 // check_in is `sh:in` (§4.6.1): the value node must be a member of the list.
