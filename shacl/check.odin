@@ -39,7 +39,14 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	switch kind {
 	case .Min_Count, .Max_Count, .Has_Value:
 		return .Node_Set
-	case .Class, .Datatype, .Node_Kind, .In:
+	case .Class,
+	     .Datatype,
+	     .Node_Kind,
+	     .In,
+	     .Min_Inclusive,
+	     .Max_Inclusive,
+	     .Min_Exclusive,
+	     .Max_Exclusive:
 		return .Value
 	}
 	return .Value
@@ -134,6 +141,8 @@ check_value :: proc(
 		ok = node_kind_of(v, value) & c.node_kind != {}
 	case .In:
 		ok = check_in(v, c, value)
+	case .Min_Inclusive, .Max_Inclusive, .Min_Exclusive, .Max_Exclusive:
+		ok = check_range(v, c, value)
 	case .Min_Count, .Max_Count, .Has_Value:
 		return
 	}
@@ -240,6 +249,46 @@ check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 		} else if rdf.equal_term(value.term, v.s.values[index]) {
 			return true
 		}
+	}
+	return false
+}
+
+// check_range is the four value-range components (§4.6.2–4.6.5):
+// `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and `sh:maxExclusive`.
+// One procedure rather than four, because they differ only in which of the four
+// answers they accept.
+//
+// **These compare values, not terms**, and that is the whole reason
+// SHACL-T-0012 exists: `sh:minInclusive 4` is satisfied by `"4.0"^^xsd:decimal`,
+// which is a different term and the same number. Everything else in this file
+// answers from a `Term_ID` and never materialises a bound.
+//
+// **Incomparable violates, and it does so structurally.** The spec's condition
+// is that the comparison *holds*, and a comparison that could not be made does
+// not hold — so `sh:minInclusive 4` violates on `ex:John`, on `"Hello"`, on
+// `"abc"^^xsd:integer`, and on a dateTime whose timezone window overlaps the
+// bound's. None of those needs a case here: `.Incomparable` matches no arm below
+// and falls through to false. That is deliberate. Writing it as an early
+// `if order == .Incomparable { return false }` would be the same behaviour with
+// a place for a later component to get the polarity backwards.
+@(private = "file")
+check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
+	term, owned := materialize(v, value)
+	defer if owned {
+		rdf.destroy_term(term, v.allocator)
+	}
+	// Ordered value-against-bound, so the component names read as they do in the
+	// shapes graph: `.Greater` is the value node above the minimum.
+	order := compare_values(value_of(term), value_of(c.term))
+	#partial switch c.kind {
+	case .Min_Inclusive:
+		return order == .Greater || order == .Equal
+	case .Max_Inclusive:
+		return order == .Less || order == .Equal
+	case .Min_Exclusive:
+		return order == .Greater
+	case .Max_Exclusive:
+		return order == .Less
 	}
 	return false
 }

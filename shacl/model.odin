@@ -101,6 +101,13 @@ Constraint_Kind :: enum u8 {
 	Node_Kind,
 	Has_Value,
 	In,
+	// The value-range components (SHACL-T-0013). They carry `term` like
+	// Class/Datatype/Has_Value do, and are the first components that compare it
+	// by value rather than by term.
+	Min_Inclusive,
+	Max_Inclusive,
+	Min_Exclusive,
+	Max_Exclusive,
 }
 
 // Node_Kind is `sh:nodeKind` (§4.4.2), as a set of the three primitive kinds
@@ -123,8 +130,9 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 
 // Constraint is one constraint component with its parameter. Which field
 // carries the parameter depends on kind: `count` for the cardinality
-// components, `term` for Class/Datatype/Has_Value, `node_kind` for Node_Kind,
-// and `values` — a range into Shapes.values — for In.
+// components, `term` for Class/Datatype/Has_Value and the four value-range
+// bounds, `node_kind` for Node_Kind, and `values` — a range into Shapes.values —
+// for In.
 Constraint :: struct {
 	kind:      Constraint_Kind,
 	count:     int,

@@ -57,6 +57,14 @@ NODE_KIND :: NS + "nodeKind"
 HAS_VALUE :: NS + "hasValue"
 IN :: NS + "in"
 
+// The value-range components (§4.6.2–4.6.5), SHACL-T-0013. Their parameter is a
+// single term compared by **value** rather than by term, which is the whole
+// reason SHACL-T-0012 came first.
+MIN_INCLUSIVE :: NS + "minInclusive"
+MAX_INCLUSIVE :: NS + "maxInclusive"
+MIN_EXCLUSIVE :: NS + "minExclusive"
+MAX_EXCLUSIVE :: NS + "maxExclusive"
+
 // The shape-expecting parameters (§2.1.1). A node that is the value of one of
 // these **is a shape**, which is why they land here in SHACL-T-0010 — before
 // the constraint components that read them (SHACL-T-0017 and SHACL-T-0018).
@@ -105,6 +113,10 @@ DATATYPE_COMPONENT :: NS + "DatatypeConstraintComponent"
 NODE_KIND_COMPONENT :: NS + "NodeKindConstraintComponent"
 HAS_VALUE_COMPONENT :: NS + "HasValueConstraintComponent"
 IN_COMPONENT :: NS + "InConstraintComponent"
+MIN_INCLUSIVE_COMPONENT :: NS + "MinInclusiveConstraintComponent"
+MAX_INCLUSIVE_COMPONENT :: NS + "MaxInclusiveConstraintComponent"
+MIN_EXCLUSIVE_COMPONENT :: NS + "MinExclusiveConstraintComponent"
+MAX_EXCLUSIVE_COMPONENT :: NS + "MaxExclusiveConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"

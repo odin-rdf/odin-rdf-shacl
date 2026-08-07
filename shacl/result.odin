@@ -58,6 +58,14 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 		return HAS_VALUE_COMPONENT
 	case .In:
 		return IN_COMPONENT
+	case .Min_Inclusive:
+		return MIN_INCLUSIVE_COMPONENT
+	case .Max_Inclusive:
+		return MAX_INCLUSIVE_COMPONENT
+	case .Min_Exclusive:
+		return MIN_EXCLUSIVE_COMPONENT
+	case .Max_Exclusive:
+		return MAX_EXCLUSIVE_COMPONENT
 	}
 	return ""
 }

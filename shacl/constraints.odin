@@ -52,11 +52,22 @@ compile_constraints :: proc(
 		}
 	}
 
-	// The components whose parameter is a single term.
-	terms := [3]struct {
+	// The components whose parameter is a single term. The four value-range
+	// bounds join them unchanged: what differs is how the term is *compared*,
+	// which is the evaluator's business and not this table's — SHACL-T-0013
+	// added four lines here and nothing else in this file.
+	terms := [7]struct {
 		iri:  string,
 		kind: Constraint_Kind,
-	}{{CLASS, .Class}, {DATATYPE, .Datatype}, {HAS_VALUE, .Has_Value}}
+	} {
+		{CLASS, .Class},
+		{DATATYPE, .Datatype},
+		{HAS_VALUE, .Has_Value},
+		{MIN_INCLUSIVE, .Min_Inclusive},
+		{MAX_INCLUSIVE, .Max_Inclusive},
+		{MIN_EXCLUSIVE, .Min_Exclusive},
+		{MAX_EXCLUSIVE, .Max_Exclusive},
+	}
 	for entry in terms {
 		if !v.found[entry.iri] {
 			continue
@@ -140,6 +151,11 @@ IMPLEMENTED_PARAMETERS := []string {
 	NODE_KIND,
 	HAS_VALUE,
 	IN,
+	// The value-range components (SHACL-T-0013).
+	MIN_INCLUSIVE,
+	MAX_INCLUSIVE,
+	MIN_EXCLUSIVE,
+	MAX_EXCLUSIVE,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately

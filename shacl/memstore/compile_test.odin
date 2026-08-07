@@ -743,7 +743,7 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 			sh:minCount 1 ;
 			sh:minInclusive 2 ;
 			sh:pattern "^a" ;
-			sh:property [ sh:path ex:p ; sh:maxLength 5 ; sh:minInclusive 2 ] .
+			sh:property [ sh:path ex:p ; sh:maxLength 5 ; sh:pattern "^b" ] .
 		`,
 	) {
 		return
@@ -761,14 +761,19 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 
 	// Unimplemented components are recorded, from every shape and not only the
 	// root — sh:maxLength is on the property shape.
-	for iri in ([]string{shacl.NS + "minInclusive", shacl.NS + "pattern", shacl.NS + "maxLength"}) {
+	for iri in ([]string{shacl.NS + "pattern", shacl.NS + "maxLength"}) {
 		testing.expectf(t, got[iri], "%s is not implemented and should have been recorded", iri)
 	}
 
 	// Implemented components and the spec's inert annotations are not, nor is a
-	// predicate outside the SHACL namespace.
+	// predicate outside the SHACL namespace. `sh:minInclusive` is here rather
+	// than above because SHACL-T-0013 implemented it: a component leaving the
+	// record is exactly what landing one is supposed to do, and this line is
+	// what would notice if a future component were wired into the evaluator
+	// without being declared in IMPLEMENTED_PARAMETERS.
 	for iri in ([]string {
 			shacl.NS + "minCount",
+			shacl.NS + "minInclusive",
 			shacl.NS + "targetNode",
 			shacl.NS + "property",
 			shacl.NS + "path",
@@ -780,10 +785,10 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 		testing.expectf(t, !got[iri], "%s should not be recorded as ignored", iri)
 	}
 
-	// sh:minInclusive appears on two shapes and is recorded once: the record is
-	// a property of the compile, not a list of occurrences.
+	// sh:pattern appears on two shapes and is recorded once: the record is a
+	// property of the compile, not a list of occurrences.
 	testing.expect_value(t, len(ignored), len(got))
-	testing.expect_value(t, len(got), 3)
+	testing.expect_value(t, len(got), 2)
 }
 
 // A shape-expecting parameter is recognised by discovery and still recorded as

@@ -749,3 +749,108 @@ test_conforms_node_reports_recursion_as_a_failure :: proc(t: ^testing.T) {
 	_, failure := conforms_node(&f.shapes, &f.bindings, &f.dictionary, &f.dataset, a, p)
 	testing.expect_value(t, failure, shacl.Failure.Recursive_Shape)
 }
+
+// ---- The value-range components (SHACL-T-0013) ---------------------------
+
+@(private = "file")
+RANGE_SHAPES :: PREFIX + `
+ex:MinIncl a sh:NodeShape ; sh:targetNode 3, 4, 5 ; sh:minInclusive 4 .
+ex:MaxIncl a sh:NodeShape ; sh:targetNode 3, 4, 5 ; sh:maxInclusive 4 .
+ex:MinExcl a sh:NodeShape ; sh:targetNode 3, 4, 5 ; sh:minExclusive 4 .
+ex:MaxExcl a sh:NodeShape ; sh:targetNode 3, 4, 5 ; sh:maxExclusive 4 .
+`
+
+@(private = "file")
+RANGE_DATA :: PREFIX + `
+ex:unused ex:p ex:q .
+`
+
+// All four bounds against the same three nodes, so the difference between them
+// is one column of the expectation rather than four separate tests: inclusive
+// and exclusive differ only at the bound itself, and that is the boundary a
+// `<=` written as `<` moves.
+//
+// Every result names the node it blames, which is the value scope asserted
+// rather than assumed — a set-scoped component would report once per shape with
+// no `sh:value`, and the last column would read `-`.
+//
+// The `?` prefix is not noise: these focus nodes are named by `sh:targetNode`
+// and appear nowhere in the data graph, so they are **unbound** and reach the
+// comparison as terms rather than through the store's dictionary. That is the
+// half of the path the suite cannot reach — an entry's shapes and data are the
+// same document, so everything in it is bound — and it is the half where a
+// value has to be decoded from a term the store has never interned.
+@(test)
+test_value_range_boundaries :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, RANGE_SHAPES, RANGE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"MinIncl|MinInclusiveConstraintComponent|?\"3\"|?\"3\"",
+			"MaxIncl|MaxInclusiveConstraintComponent|?\"5\"|?\"5\"",
+			// The exclusive pair adds the bound itself, and only that.
+			"MinExcl|MinExclusiveConstraintComponent|?\"3\"|?\"3\"",
+			"MinExcl|MinExclusiveConstraintComponent|?\"4\"|?\"4\"",
+			"MaxExcl|MaxExclusiveConstraintComponent|?\"4\"|?\"4\"",
+			"MaxExcl|MaxExclusiveConstraintComponent|?\"5\"|?\"5\"",
+		},
+		"value ranges at the boundary",
+	)
+}
+
+@(private = "file")
+COMPARE_SHAPES :: PREFIX + `
+ex:Compare a sh:NodeShape ; sh:minInclusive 4 ;
+	sh:targetNode 4.0 ;                  # a decimal equal to an integer bound
+	sh:targetNode "12"^^xsd:byte ;       # a derived integer above it
+	sh:targetNode ex:John ;              # an IRI has no value
+	sh:targetNode "Hello" ;              # a string has no order against a number
+	sh:targetNode "abc"^^xsd:integer .   # ill-formed, so also no value
+
+# A bound that is not a value either. Nothing can be shown to be in range, so
+# nothing is.
+ex:NoBound a sh:NodeShape ; sh:targetNode 4 ; sh:minInclusive ex:NotANumber .
+`
+
+// The two halves of "compares values, not terms", in one fixture.
+//
+// The first is that a bound is met by a different term denoting the same or a
+// greater number — `"4.0"^^xsd:decimal` and `"12"^^xsd:byte` both satisfy
+// `sh:minInclusive 4`, and term equality would have failed both.
+//
+// The second is that everything the comparison *cannot* place violates:
+// §4.6.2's condition is that the comparison holds, and one that could not be
+// made does not hold. It applies to a value node with no value and equally to a
+// bound with none, which is the case the suite never exercises.
+@(test)
+test_value_range_incomparable_violates :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, COMPARE_SHAPES, RANGE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Compare|MinInclusiveConstraintComponent|?John|?John",
+			"Compare|MinInclusiveConstraintComponent|?\"Hello\"|?\"Hello\"",
+			"Compare|MinInclusiveConstraintComponent|?\"abc\"|?\"abc\"",
+			"NoBound|MinInclusiveConstraintComponent|?\"4\"|?\"4\"",
+		},
+		"incomparable violates",
+	)
+}

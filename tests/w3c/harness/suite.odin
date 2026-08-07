@@ -72,8 +72,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 9},
-	{"core/property", 38, 38, false, 12},
+	{"core/node", 32, 32, false, 15},
+	{"core/property", 38, 38, false, 16},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -106,4 +106,9 @@ ENABLED_ENTRIES :: 26
 // entry's focus node was a blank node, so it demanded triples no report can
 // contain. Every `core/node` value-range entry has that shape, so it would have
 // been read as an engine failure for the whole of SHACL-T-0013.
-PROGRESS_FLOOR :: 21
+//
+// **31 at SHACL-T-0013**, which is every one of the ten value-range entries in
+// the corpus and nothing else: `core/node` gained its six `min`/`maxInclusive`
+// and `min`/`maxExclusive` entries, `core/property` its four. The catalogue's
+// remaining work is 38 entries of the original 51.
+PROGRESS_FLOOR :: 31
