@@ -4,14 +4,14 @@ level: task
 title: "bench/: the seeded generator, the two modes, and the read-count invariants"
 short_code: "SHACL-T-0023"
 created_at: 2026-08-07T11:34:40.577743+00:00
-updated_at: 2026-08-07T11:34:40.577743+00:00
+updated_at: 2026-08-07T12:15:52.140153+00:00
 parent: SHACL-I-0003
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -34,6 +34,8 @@ flags.
 **This task produces the instrument, not the numbers.** Recording baselines is
 [[SHACL-T-0024]] and deciding memoisation is [[SHACL-T-0025]]; a first set of figures will
 inevitably appear here, and they are a smoke test rather than a deliverable.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

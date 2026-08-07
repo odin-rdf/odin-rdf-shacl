@@ -4,7 +4,7 @@ level: task
 title: "Pin the CI checkouts of odin-rdf-parser and odin-rdf-store to v0.1.0"
 short_code: "SHACL-T-0020"
 created_at: 2026-08-07T10:50:22.702881+00:00
-updated_at: 2026-08-07T11:49:53.337802+00:00
+updated_at: 2026-08-07T12:17:14.340309+00:00
 parent: 
 blocked_by: []
 archived: false
@@ -12,7 +12,7 @@ archived: false
 tags:
   - "#task"
   - "#tech-debt"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: true
@@ -50,10 +50,6 @@ has: odin-rdf-parser, odin-rdf-store, and odin-rdf-sparql are all tagged `v0.1.0
   either upstream starts moving again. It is also a prerequisite for the release
   ([[SHACL-T-0021]]) being reproducible: a tag whose CI floated against two moving targets
   does not pin what was actually tested.
-
-## Acceptance Criteria
-
-## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
