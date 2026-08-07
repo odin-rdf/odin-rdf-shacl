@@ -4,18 +4,18 @@ level: task
 title: "Tag v0.1.0"
 short_code: "SHACL-T-0021"
 created_at: 2026-08-07T10:50:26.006066+00:00
-updated_at: 2026-08-07T10:50:26.006066+00:00
+updated_at: 2026-08-07T13:14:13.695581+00:00
 parent: 
 blocked_by: [SHACL-T-0020, SHACL-T-0025]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#feature"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -46,13 +46,15 @@ odin-rdf-store, and odin-rdf-sparql are each released at `v0.1.0` and this one i
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] `v0.1.0` tagged on a green `main`, with release notes stating the conformance
-      position: 98 of 98 `core/` entries, all twenty-nine non-SPARQL constraint components
-      of §4, both backends, both `Term_ID` widths, no skip list.
-- [ ] The notes name the scope boundary plainly — SHACL-SPARQL is a later phase and SHACL
+- [x] `v0.1.0` tagged on a green `main` **and published as a GitHub Release**, with notes
+      stating the conformance position: 98 of 98 `core/` entries, all twenty-nine
+      non-SPARQL constraint components of §4, both backends, both `Term_ID` widths, no
+      skip list. The criterion originally said only "tagged"; the family convention is an
+      annotated tag *and* a Release, and all three siblings have both.
+- [x] The notes name the scope boundary plainly — SHACL-SPARQL is a later phase and SHACL
       Core has zero dependency on odin-rdf-sparql — and the known omissions: `sh:detail`,
       duplicate results undeduplicated, and the `sh:pattern` dialect divergence.
-- [ ] The README's status section agrees with the notes.
+- [x] The README's status section agrees with the notes.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -85,4 +87,31 @@ rather than defaulting.
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-07 — Released. https://github.com/odin-rdf/odin-rdf-shacl/releases/tag/v0.1.0**
+
+  Annotated tag on `1bbcd52`, matching the siblings' style, plus a GitHub Release. **All
+  four repositories of the family are now released**: parser `v0.1.0`, store `v0.1.1`,
+  sparql `v0.1.0`, shacl `v0.1.0`.
+
+  **Sequenced as decided.** The tag waited for [[SHACL-I-0003]], because every sibling
+  shipped `v0.1.0` *with* performance evidence — odin-rdf-parser's headline claim is a
+  benchmark result — and this repository's first release should not have been the family's
+  only one without numbers. It waited for [[SHACL-T-0020]] too, so that what CI verified is
+  what the tag pins. Both dependencies were complete and the target commit was green on all
+  three runners before the tag was cut.
+
+  **One amendment to the acceptance criteria.** The first criterion said "tagged"; the
+  family convention is an annotated tag **and** a GitHub Release, which only became visible
+  when odin-rdf-store's `v0.1.1` was cut and the sibling releases were checked. Corrected
+  above rather than silently satisfied.
+
+  **What the notes say**, per the remaining criteria: the conformance position; that
+  SHACL-SPARQL is a later phase and SHACL Core has zero dependency on odin-rdf-sparql; and
+  the three known omissions named as deliberate — `sh:detail` absent because it appears
+  nowhere in the corpus, duplicate results undeduplicated and open with a consumer-report
+  trigger, and the `sh:pattern` dialect divergence with `s` and `q` rejected rather than
+  ignored. Also the performance figures and the flat-memory promise, stated in the
+  allocator-independent form SHACL-T-0025's correction produced.
+
+  The README's status section agrees with the notes; both were written from the same
+  measurements rather than from each other.
