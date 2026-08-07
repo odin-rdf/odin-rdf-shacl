@@ -39,9 +39,20 @@ import store "store:store"
 //   - `sh:datatype` needs §4.3.1's lexical check, which the spine deferred for a
 //     whole initiative because its enabled directories only ever used
 //     `xsd:string`, whose lexical space is every string.
+//   - `sh:closed` reports `sh:resultPath <the offending predicate>` — a term of
+//     the *data* graph, on a node shape that has no path at all — and does not
+//     ignore `rdf:type` unless the shapes graph says so. `node/closed-001` and
+//     `closed-002` are the pair that show both.
 //
-// Four families, four traps. The entries are a few minutes to read and the
+// Five families, five traps. The entries are a few minutes to read and the
 // alternative is a component that looks right.
+//
+// **A sixth edit, for a component that asks a new question of the data.**
+// `sh:closed` needed the predicate and object of one triple together, which none
+// of `Access`'s three read verbs could express, so it added a fourth
+// (`Outgoing`, below) and an adapter per backend. That is not a seam edit at all
+// — it is the seam admitting the engine had only ever asked for one quad
+// position at a time.
 //
 // **Scope is the thing worth naming**, and it answers exactly one question:
 // how often is the component asked? A value-scoped one is asked once per value
@@ -69,6 +80,31 @@ import store "store:store"
 // default is free here, and its counterweight — that procedure pointers
 // measured as noise once a call does real work — is the escape hatch if the
 // catalogue ever wants one.
+
+// Outgoing streams the predicate and object of every triple with `subject` as
+// its subject — the properties a node actually uses, and their values.
+//
+// The fourth way this engine reads the data graph, and the first added since the
+// spine. `Scan` and `Step` both yield one position of a matched quad, which
+// answers every question the engine had until `sh:closed`: that component needs
+// the predicate and the object of the *same* triple, and no sequence of
+// single-position reads gives a pair without matching twice.
+//
+// **The gap is in `Access`, not in odin-rdf-store.** The published match
+// interface returns whole `Encoded_Quad`s, so every backend already had the
+// answer; what was too narrow was this package's own adapter. Recorded in
+// `docs/store-evidence.md`, because a narrowing that has to be widened is worth
+// as much to the log as a capability that was missing.
+//
+// `visit` returning false stops the read, and Outgoing then returns false, so
+// early exit reaches the store rather than being simulated above it — the same
+// contract `Scan` has. The graph is the adapter's, for the same reason.
+Outgoing :: #type proc(
+	data: rawptr,
+	subject: store.Term_ID,
+	visit: proc(data: rawptr, predicate, object: store.Term_ID) -> bool,
+	visit_data: rawptr,
+) -> bool
 
 // Constraint_Scope says whether a component is checked once per value node or
 // once over the whole value-node set.
@@ -100,6 +136,14 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Less_Than,
 	     .Less_Than_Or_Equals:
 		return .Node_Set
+	//
+	// `sh:closed` is value-scoped and reads as though it were not, which is the
+	// mirror image of `sh:uniqueLang` above. It looks like a statement about the
+	// shape — "this shape is closed" — and §4.8.1 asks it of each **value node**,
+	// whose outgoing triples are what it inspects. On a node shape the two are
+	// indistinguishable, since the single value node is the focus node, and that
+	// is every entry the corpus has; on a property shape they differ, and the
+	// spec's wording is what decides it rather than the corpus.
 	case .Class,
 	     .Datatype,
 	     .Node_Kind,
@@ -111,7 +155,8 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Min_Length,
 	     .Max_Length,
 	     .Pattern,
-	     .Language_In:
+	     .Language_In,
+	     .Closed:
 		return .Value
 	}
 	return .Value
@@ -429,6 +474,15 @@ check_value :: proc(
 	focus: Focus_Node,
 	value: Node_Ref,
 ) {
+	// `sh:closed` returns before the shared tail below, because it is the one
+	// value-scoped component that emits **several** results for one value node —
+	// one per triple it objects to — and each names a different `sh:resultPath`
+	// and `sh:value`. There is nothing for a single `ok` to carry.
+	if c.kind == .Closed {
+		check_closed(v, shape_index, c, focus, value)
+		return
+	}
+
 	ok: bool
 	switch c.kind {
 	case .Class:
@@ -452,12 +506,101 @@ check_value :: proc(
 	     .Equals,
 	     .Disjoint,
 	     .Less_Than,
-	     .Less_Than_Or_Equals:
+	     .Less_Than_Or_Equals,
+	     .Closed:
 		return
 	}
 	if !ok {
 		emit_result(v, shape_index, focus, value, true, c.kind)
 	}
+}
+
+// check_closed is `sh:closed` with `sh:ignoredProperties` (§4.8.1): the value
+// node may use no predicate beyond those the shape's property shapes declare and
+// those the shapes graph explicitly ignores.
+//
+// **This is the component that asks the store a question the spine never
+// asked** — which predicates a node actually uses — and it is why SHACL-I-0002
+// singled it out as the likeliest source of store evidence. The answer is one
+// match with the subject and the graph bound and the other two positions
+// wildcard, which the published interface has always served; what was too narrow
+// was `Access`, whose three existing verbs each yield a single quad position. See
+// `Outgoing` above and `docs/store-evidence.md`.
+//
+// **A result per offending triple, not per offending predicate**, and each names
+// that triple: `sh:resultPath` is the predicate and `sh:value` is the object.
+// `node/closed-001` measures it — `ex:InvalidInstance1` carries `rdf:type` and
+// `ex:otherProperty` outside the shape and expects two results, one naming
+// `ex:SomeClass` and one naming `4`. The same entry settles something easy to
+// assume away: **`rdf:type` is not ignored by default.** It is an ordinary
+// predicate here, and `closed-002` is the same data with
+// `sh:ignoredProperties ( rdf:type )` and one result instead of two.
+//
+// An unbound value node is the subject of no triple — nothing in the graph can
+// mention a term the dictionary does not hold — so it uses no predicates and
+// conforms. That is the emptiness reading, and it is the right one here: this
+// component objects to what a node *has*, not to what it lacks.
+@(private = "file")
+check_closed :: proc(
+	v: ^Validation,
+	shape_index: int,
+	c: Constraint,
+	focus: Focus_Node,
+	value: Node_Ref,
+) {
+	if !value.bound {
+		return
+	}
+	state := Closed_Check {
+		v           = v,
+		shape_index = shape_index,
+		constraint  = c,
+		focus       = focus,
+	}
+	v.access.outgoing(v.access.data, value.id, closed_visit, &state)
+}
+
+@(private = "file")
+Closed_Check :: struct {
+	v:           ^Validation,
+	shape_index: int,
+	constraint:  Constraint,
+	focus:       Focus_Node,
+}
+
+// closed_visit judges one of the value node's triples.
+//
+// The allowed set is compared by `Term_ID`, which is what the compile-time work
+// in `compile_closed_sets` bought: the predicates are resolved to data-store IDs
+// once per validation, so this is an integer scan over a handful of entries per
+// triple rather than a term comparison. An allowed predicate the data store has
+// never seen is unbound and matches nothing, which is correct — a predicate that
+// appears in a triple is in the dictionary by definition, so an unbound entry
+// cannot be the one being judged.
+@(private = "file")
+closed_visit :: proc(data: rawptr, predicate, object: store.Term_ID) -> bool {
+	state := cast(^Closed_Check)data
+	v := state.v
+	c := state.constraint
+
+	for i in 0 ..< c.values.count {
+		index := c.values.start + i
+		if v.b.value_bound[index] && v.b.value[index] == predicate {
+			return true
+		}
+	}
+
+	emit_result(
+		v,
+		state.shape_index,
+		state.focus,
+		Node_Ref{id = object, bound = true},
+		true,
+		.Closed,
+		Node_Ref{id = predicate, bound = true},
+		true,
+	)
+	return !v.stopped
 }
 
 // check_class is `sh:class` (§4.4.1): the value node must be a SHACL instance

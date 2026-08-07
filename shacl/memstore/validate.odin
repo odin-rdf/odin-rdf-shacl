@@ -56,6 +56,7 @@ validate :: proc(
 	access := shacl.Access {
 		scan      = scan_adapter,
 		step      = step_adapter,
+		outgoing  = outgoing_adapter,
 		load      = load_adapter,
 		data      = &data,
 		load_data = dictionary,
@@ -157,6 +158,7 @@ conforms_node :: proc(
 	access := shacl.Access {
 		scan      = scan_adapter,
 		step      = step_adapter,
+		outgoing  = outgoing_adapter,
 		load      = load_adapter,
 		data      = &data,
 		load_data = dictionary,

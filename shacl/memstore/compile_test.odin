@@ -481,6 +481,24 @@ test_ill_formed_shapes :: proc(t: ^testing.T) {
 			.Shape_Expected,
 			shacl.PROPERTY,
 		},
+		{
+			// The syntax rule is the vendored `shacl-shacl` shapes graph's own:
+			// `sh:closed` carries `sh:datatype xsd:boolean`.
+			"non-boolean sh:closed",
+			`ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:closed "yes" .`,
+			.Closed_Not_Boolean,
+			shacl.CLOSED,
+		},
+		{
+			// Raised from the pass that runs after the `sh:property` fixup, which
+			// is the only compile error not produced where its parameter is read —
+			// so this case is what proves that pass reports rather than skips.
+			"sh:ignoredProperties that is not a list",
+			`ex:S a sh:NodeShape ; sh:targetNode ex:n ;
+			 sh:closed true ; sh:ignoredProperties ex:notAList .`,
+			.Ignored_Properties_Not_A_List,
+			shacl.IGNORED_PROPERTIES,
+		},
 	}
 
 	for c in cases {

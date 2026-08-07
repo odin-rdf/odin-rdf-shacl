@@ -9,24 +9,30 @@ odin-rdf-store's Metis from this repository, and nothing here is worked around
 with a backend-specific shortcut. Upstream repositories are read-only from this
 project; findings go to review as a proposal.
 
-Started SHACL-T-0005. Status below is as of **SHACL-T-0008**, the task that
-closed the initiative. The validator is complete and four W3C suite directories
-are green against both backends, so the log reflects a whole validation path
-rather than target resolution alone. Consolidated for review in
-[`store-proposal.md`](store-proposal.md).
+Started SHACL-T-0005. Status below is as of **SHACL-T-0016**, the task
+SHACL-I-0002 named as the one most likely to produce a finding. Consolidated for
+review in [`store-proposal.md`](store-proposal.md).
 
 ## Summary so far
 
-**Nothing yet.** No capability gap has been found. That is a result rather than
-an absence of work: the vision predicted this project would pull two specific
-store backlog items, and neither prediction has survived contact with the code.
-A whole validator — targets, paths, seven constraint components, and report
-emission — reaches the store through `match` and `find_term` and nothing else.
+**Still no capability gap.** That is a result rather than an absence of work: the
+vision predicted this project would pull two specific store backlog items, and
+neither prediction has survived contact with the code. A validator with
+twenty-one constraint components reaches the store through `match` and
+`find_term` and nothing else.
+
+**SHACL-T-0016 is the task that was supposed to break that, and it half did.**
+`sh:closed` asks the data graph a question no earlier component asked — which
+predicates a node actually uses — and the store answered it with one ordinary
+`match`. What could *not* answer it was this repository's own `Access` struct.
+See the section below: the first real finding in this log is a narrowing we
+built, not a capability the store lacks, and the log had never thought to look
+there.
 
 | Predicted by the vision | Status |
 | --- | --- |
 | **STORE-T-0017** — a named-graph wildcard for the graph position | **Retired.** Not needed, and cannot become needed without reversing a decision. |
-| **STORE-T-0016** — dataset introspection (the named-graph list, a graph's terms) | **Not wanted so far.** Target resolution turned out to be ordinary match patterns. |
+| **STORE-T-0016** — dataset introspection (the named-graph list, a graph's terms) | **Retired.** Target resolution turned out to be ordinary match patterns, and so did `sh:closed`, which was the last thing predicted to want it. |
 
 ## STORE-T-0017 — retired
 
@@ -63,6 +69,63 @@ Every one is served by the published interface as it stands. The prediction may
 still come true in the catalogue initiative — `sh:closed` needs the predicates
 a focus node actually uses, which is a wildcard-predicate match rather than
 introspection, so probably not even there.
+
+**SHACL-T-0016 settled it: not even there.** `sh:closed` is implemented and asks
+for nothing STORE-T-0016 would supply. What it wants is the outgoing triples of
+one node, which is a match pattern, and the section below is what that turned up
+instead.
+
+## SHACL-T-0016 — `sh:closed`, and the first finding this log has produced
+
+The initiative singled this component out as the likeliest source of store
+evidence, for a good reason: it is the only one that asks what a node *has*
+rather than checking a value the shape already named. Recorded in full, including
+the part that is a non-finding, because a prediction that half held is worth more
+than a verdict.
+
+**What the store was asked for: one match, already served.** The question is "the
+predicates and objects of every triple with this node as subject", and the
+pattern is `(node, *, *, graph)` — two positions bound, two wildcard, the graph
+bound like every other read this engine issues. `match` returns whole
+`Encoded_Quad`s, so the predicate and the object arrive together with no second
+read and no new verb. Both backends served it unchanged; neither needed a line.
+
+**What did not serve it: `Access`, which is ours.** The core reaches the data
+graph through a struct of procedure pointers the instantiation packages fill in,
+and until this task it had three read verbs — `Scan`, which streams **one**
+position of each matched quad, `Step`, which streams nodes reachable by a
+predicate, and `Term_Loader`. Every question the engine had asked until now
+wanted a single position, so the narrowing had never cost anything. `sh:closed`
+wants the predicate and the object of the *same* triple, and no composition of
+those three produces a pair: `Scan` yielding `QUAD_P` and then a `Step` per
+predicate found is two reads per node and a different answer on a repeated
+predicate.
+
+So `Access` gained a fourth verb, `Outgoing`, and each instantiation package
+gained an eight-line adapter around the same `match` it already calls.
+
+**Why this belongs in an evidence log about somebody else's interface.** Because
+the log had been asking one question and there were two. "Can the published
+interface answer this?" was asked at every component and always answered yes.
+"Can *our* narrowing of it answer this?" was never asked at all, because the
+narrowing was written before there was a component that strained it — and a
+narrowing that predates its consumers is exactly the thing that quietly becomes
+the constraint. Nothing was worked around: the fix is in this repository, where
+it belongs, and no backend-specific shortcut was taken. But an engine that had
+been less careful would have reached this point, found `Access` insufficient,
+and filed it upstream as a store gap.
+
+**One thing this sharpens, without changing a verdict.** `sh:closed` reads an
+empty answer as "this node uses no predicates" and reports conformance, so on the
+persistent backend a failed read is silently a *pass* rather than silently a
+missing value node. That is the hazard `shacl/kvstore/eval.odin`'s header already
+names and `session_error` already covers; it is recorded here only because this
+is the component where the consequence is most inverted, and a caller who skips
+the error check has a `sh:conforms true` that means nothing.
+
+Verdict: **no proposal to odin-rdf-store from this task.** STORE-T-0016 is
+retired as a prediction rather than merely unexercised — the one target this
+project had for wanting graph introspection has landed and does not want it.
 
 ## Considered and rejected as a gap: focus nodes absent from the dictionary
 

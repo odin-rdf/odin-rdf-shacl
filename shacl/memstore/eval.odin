@@ -111,6 +111,37 @@ scan_adapter :: proc(
 	}
 }
 
+// outgoing_adapter streams the predicate and object of every triple with
+// `subject` as its subject — one match with the subject and the graph bound and
+// the other two positions wildcard.
+//
+// It exists because `scan_adapter` yields one position of a matched quad and
+// `sh:closed` needs two of the same quad. The store's own `match` has always
+// returned whole quads, so this widens the adapter rather than the interface.
+@(private)
+outgoing_adapter :: proc(
+	data: rawptr,
+	subject: store.Term_ID,
+	visit: proc(data: rawptr, predicate, object: store.Term_ID) -> bool,
+	visit_data: rawptr,
+) -> bool {
+	d := cast(^Data)data
+	it := memstore.match(
+		d.dataset,
+		store.Match_Pattern{subject, store.WILDCARD, store.WILDCARD, d.graph},
+	)
+	defer memstore.match_destroy(&it)
+	for {
+		q, ok := memstore.match_next(&it)
+		if !ok {
+			return true
+		}
+		if !visit(visit_data, q[store.QUAD_P], q[store.QUAD_O]) {
+			return false
+		}
+	}
+}
+
 // resolve_targets streams a shape's focus nodes against a memstore data
 // graph. Returns false if the visitor asked to stop.
 resolve_targets :: proc(

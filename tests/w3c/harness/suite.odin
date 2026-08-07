@@ -48,11 +48,11 @@ Suite :: struct {
 // enabling a broken one, so they are on.
 //
 // The three that remain need constraint components the spine deliberately does
-// not implement — the logical combinators, the value-range and string families,
-// `sh:node`, `sh:closed` — and belong to the catalogue initiative, which turns
-// them on one at a time under the same rule. `core/complex` additionally needs
-// `sh:sparql`, so it belongs to the SHACL-SPARQL phase rather than to the
-// catalogue.
+// not implement, and after SHACL-T-0016 the list is down to the two structural
+// families: the logical combinators and the shape-based constraints. They belong
+// to the catalogue initiative, which turns the directories on one at a time under
+// the same rule. `core/complex` additionally needs `sh:sparql`, so it belongs to
+// the SHACL-SPARQL phase rather than to the catalogue.
 // The floors were measured by this table's own instrumentation at SHACL-T-0009,
 // and they reproduce the diagnostic figure SHACL-I-0001 closed on: 18 of the 69
 // entries in `core/node` and `core/property`, which is why the catalogue's real
@@ -72,7 +72,7 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 22},
+	{"core/node", 32, 32, false, 24},
 	{"core/property", 38, 38, false, 27},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
@@ -128,4 +128,13 @@ ENABLED_ENTRIES :: 26
 // parameter as unbound rather than erroring, and four components therefore
 // dispatched, ran, and found an empty second set on every focus node. Twenty
 // entries of the original 51 remain.
-PROGRESS_FLOOR :: 49
+//
+// **51 at SHACL-T-0016** — `node/closed-001` and `closed-002`, the whole of
+// `sh:closed` in the two catalogue directories. It is the smallest move any
+// component task has made and the only one that needed a new way to read the
+// data graph: `Access` gained a fourth verb, because its three existing ones
+// each yield a single quad position and this component wants a predicate and its
+// object together. `core/complex` is unchanged at 1 of 2, still pinned at 0.
+// Eighteen entries of the original 51 remain, all of them behind the logical
+// combinators and the shape-based constraints.
+PROGRESS_FLOOR :: 51

@@ -25,17 +25,28 @@ import rdf "rdf:rdf"
 // result has no path, and a constraint that failed against the focus node
 // itself — `sh:minCount`, say — has no single value to blame.
 Result :: struct {
-	focus:       Focus_Node,
-	value:       Node_Ref,
-	has_value:   bool,
-	path:        int, // index into Shapes.paths, or -1
-	shape:       int, // index into Shapes.shapes
-	component:   Constraint_Kind,
+	focus:              Focus_Node,
+	value:              Node_Ref,
+	has_value:          bool,
+	path:               int, // index into Shapes.paths, or -1
+
+	// The result path when it is **not** the shape's, which happens for exactly
+	// one component. `sh:closed` reports the predicate of the triple it objects
+	// to (§4.8.1), and that predicate is a term of the *data* graph — not a
+	// compiled path, so `path` cannot name it, and `node/closed-001` puts it on a
+	// node shape whose `path` is -1 and still expects an `sh:resultPath`.
+	//
+	// When `has_path_predicate` is true this is the `sh:resultPath` and `path` is
+	// -1; the two are never both set.
+	path_predicate:     Node_Ref,
+	has_path_predicate: bool,
+	shape:              int, // index into Shapes.shapes
+	component:          Constraint_Kind,
 
 	// The shape's `sh:severity`, borrowed from the compiled model's term table
 	// and valid as long as the model is. Any IRI, not one of three — see
 	// `Shape.severity`.
-	severity:    rdf.Term,
+	severity:           rdf.Term,
 }
 
 // Result_Visitor receives each result. Returning false stops validation.
@@ -86,6 +97,10 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 		return LESS_THAN_COMPONENT
 	case .Less_Than_Or_Equals:
 		return LESS_THAN_OR_EQUALS_COMPONENT
+	// `sh:ignoredProperties` has no component of its own, like `sh:flags`: it
+	// widens what `sh:closed` allows, and a result from the pair names this.
+	case .Closed:
+		return CLOSED_COMPONENT
 	}
 	return ""
 }

@@ -33,15 +33,22 @@ import store "store:store"
 
 // Access is everything the validator may do to the data graph.
 //
-// `scan` and `step` both read it, and both take the same `data` because both
-// adapters need the same two things — the dataset and the graph — and the graph
-// belongs to the adapter rather than to the core, so a validation cannot widen
-// itself to the whole dataset (SHACL-A-0001 decision 5). `load` materialises an
-// ID and takes its own `load_data`, because on memstore that is the dictionary
-// while the dataset is a separate handle.
+// `scan`, `step` and `outgoing` all read it, and all take the same `data`
+// because the adapters need the same two things — the dataset and the graph —
+// and the graph belongs to the adapter rather than to the core, so a validation
+// cannot widen itself to the whole dataset (SHACL-A-0001 decision 5). `load`
+// materialises an ID and takes its own `load_data`, because on memstore that is
+// the dictionary while the dataset is a separate handle.
+//
+// **`outgoing` is the fourth read verb and the first one added since the spine**
+// (SHACL-T-0016). The three above it each yield *one* position of a matched
+// quad; `sh:closed` needs the predicate and the object of the same triple
+// together, which none of them can express. That is a gap in this struct, not in
+// the store — see `docs/store-evidence.md`.
 Access :: struct {
 	scan:      Scan,
 	step:      Step,
+	outgoing:  Outgoing,
 	load:      Term_Loader,
 	data:      rawptr,
 	load_data: rawptr,
@@ -68,7 +75,8 @@ Bindings :: struct {
 	constraint:       []store.Term_ID,
 	constraint_bound: []bool,
 
-	// Indexed by Shapes.values: the members of every sh:in list.
+	// Indexed by Shapes.values: the members of every list-valued parameter —
+	// `sh:in`, `sh:languageIn`, and `sh:closed`'s allowed predicates.
 	value:            []store.Term_ID,
 	value_bound:      []bool,
 	allocator:        runtime.Allocator,
@@ -104,6 +112,10 @@ bindings_init :: proc(
 	// belongs here.
 	for c, i in s.constraints {
 		#partial switch c.kind {
+		//
+		// `sh:closed` is deliberately absent: its parameter is a *list*, so it
+		// resolves through `b.value` below exactly as `sh:in`'s members do, and it
+		// never reads `b.constraint` at all.
 		case .Class,
 		     .Datatype,
 		     .Has_Value,
@@ -419,6 +431,12 @@ push_frame :: proc(v: ^Validation, stack: ^[dynamic]Frame, shape_index: int, foc
 // The result borrows and owns nothing (see result.odin): it names nodes by
 // `Term_ID` and the shape and path by index, and is valid only for the duration
 // of the call.
+//
+// The two trailing parameters serve `sh:closed` alone and default to off. A
+// component that supplies a `path_predicate` is saying its `sh:resultPath` is a
+// term of the data graph rather than the shape's path, so the shape's path is
+// dropped rather than carried alongside — the report would otherwise have to
+// choose between two, and §4.8.1 already chose.
 @(private)
 emit_result :: proc(
 	v: ^Validation,
@@ -427,16 +445,20 @@ emit_result :: proc(
 	value: Node_Ref,
 	has_value: bool,
 	component: Constraint_Kind,
+	path_predicate: Node_Ref = {},
+	has_path_predicate: bool = false,
 ) {
 	shape := v.s.shapes[shape_index]
 	result := Result {
-		focus     = focus,
-		value     = value,
-		has_value = has_value,
-		path      = shape.path,
-		shape     = shape_index,
-		component = component,
-		severity  = shape.severity,
+		focus              = focus,
+		value              = value,
+		has_value          = has_value,
+		path               = has_path_predicate ? -1 : shape.path,
+		path_predicate     = path_predicate,
+		has_path_predicate = has_path_predicate,
+		shape              = shape_index,
+		component          = component,
+		severity           = shape.severity,
 	}
 	if !v.visit(v.visit_data, result) {
 		v.stopped = true

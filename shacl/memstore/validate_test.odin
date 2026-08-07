@@ -106,6 +106,14 @@ record :: proc(data: rawptr, result: shacl.Result) -> bool {
 	} else {
 		strings.write_string(&sb, "-")
 	}
+	// A fifth field, written only where there is one to write: `sh:closed` is
+	// the one component whose `sh:resultPath` is a term of the data graph rather
+	// than the shape's path (§4.8.1). Appending it unconditionally would have
+	// meant editing every expectation in this file to say "no path".
+	if result.has_path_predicate {
+		strings.write_byte(&sb, '|')
+		write_node(s, &sb, result.path_predicate)
+	}
 
 	append(&s.lines, strings.to_string(sb))
 	if s.stop_at > 0 && len(s.lines) >= s.stop_at {
@@ -1206,5 +1214,92 @@ test_property_pair_ordering :: proc(t: ^testing.T) {
 			"_:|LessThanOrEqualsConstraintComponent|mixed|\"2\"",
 		},
 		"lessThan and lessThanOrEquals",
+	)
+}
+
+@(private = "file")
+CLOSED_SHAPES :: PREFIX + `
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+# The shape of node/closed-001: rdf:type is an ordinary predicate and is
+# reported like any other.
+ex:Closed a sh:NodeShape ; sh:targetNode ex:strict ; sh:closed true ;
+	sh:property [ sh:path ex:allowed ] .
+
+# The shape of node/closed-002: the same data, one predicate ignored.
+ex:ClosedIgnoring a sh:NodeShape ; sh:targetNode ex:ignoring ; sh:closed true ;
+	sh:ignoredProperties ( rdf:type ) ;
+	sh:property [ sh:path ex:allowed ] .
+
+# A property shape whose path is compound declares no predicate at all, so this
+# shape allows nothing. core/complex's personexample.ttl is the corpus instance.
+ex:ClosedCompound a sh:NodeShape ; sh:targetNode ex:compound ; sh:closed true ;
+	sh:property [ sh:path [ sh:inversePath ex:parent ] ] .
+
+# sh:closed false switches the component off rather than configuring it.
+ex:NotClosed a sh:NodeShape ; sh:targetNode ex:open ; sh:closed false .
+
+# sh:closed at a *property* shape: the subjects are its value nodes, and the
+# focus node the results name is still ex:owner.
+ex:ClosedOnProperty a sh:NodeShape ; sh:targetNode ex:owner ;
+	sh:property [ sh:path ex:child ; sh:closed true ;
+		sh:property [ sh:path ex:allowed ] ] .
+`
+
+@(private = "file")
+CLOSED_DATA :: PREFIX + `
+ex:strict   a ex:C ; ex:allowed 1 ; ex:extra 2 .
+ex:ignoring a ex:C ; ex:allowed 1 ; ex:extra 2 .
+ex:compound   ex:allowed 1 .
+ex:open       ex:anything 1 ; ex:whatever 2 .
+ex:owner      ex:child ex:kid .
+ex:kid        ex:allowed 1 ; ex:extra 2 .
+`
+
+// sh:closed and sh:ignoredProperties (§4.8.1) — the component that asks the
+// data graph which predicates a node actually uses.
+//
+// Five things, of which the suite measures only the first two:
+//
+//   - **rdf:type is not ignored by default.** ex:strict reports it, exactly as
+//     `node/closed-001` expects, and ex:ignoring does not, exactly as
+//     `closed-002` expects. Assuming otherwise is the obvious mistake, and it
+//     would still pass `closed-002`.
+//   - **The result names the triple, not the shape.** `sh:resultPath` is the
+//     offending predicate and `sh:value` its object — the fifth field below —
+//     and every one of these is on a node shape, whose own path is -1.
+//   - **A compound path declares nothing.** ex:ClosedCompound's only property
+//     shape is an inverse path, which is a blank node in the shapes graph and
+//     can never equal a triple's predicate, so ex:compound's one triple
+//     violates. No enabled entry reaches this; `core/complex` has the case.
+//   - **`sh:closed false` compiles to no constraint**, so ex:open reports
+//     nothing despite using two undeclared predicates.
+//   - **It is scoped to value nodes, not focus nodes.** ex:ClosedOnProperty
+//     closes a *property* shape, so the node inspected is ex:kid while the node
+//     blamed is ex:owner. The two coincide on every node shape, which is every
+//     entry the corpus has, so this is the spec's wording pinned rather than the
+//     suite's.
+@(test)
+test_closed :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, CLOSED_SHAPES, CLOSED_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Closed|ClosedConstraintComponent|strict|C|type",
+			"Closed|ClosedConstraintComponent|strict|\"2\"|extra",
+			"ClosedIgnoring|ClosedConstraintComponent|ignoring|\"2\"|extra",
+			"ClosedCompound|ClosedConstraintComponent|compound|\"1\"|allowed",
+			"_:|ClosedConstraintComponent|owner|\"2\"|extra",
+		},
+		"closed and ignoredProperties",
 	)
 }

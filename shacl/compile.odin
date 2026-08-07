@@ -98,6 +98,8 @@ VOCAB_TERMS := []string {
 	DISJOINT,
 	LESS_THAN,
 	LESS_THAN_OR_EQUALS,
+	CLOSED,
+	IGNORED_PROPERTIES,
 	NODE,
 	NOT,
 	AND,
@@ -483,6 +485,26 @@ compile :: proc(
 			}
 			s.shapes[shape_index].properties = Span{start, len(s.shape_children) - start}
 		}
+	}
+
+	// ---- The one constraint that had to wait for the fixup -----------------
+	//
+	// `sh:closed`'s allowed-predicate set is a statement about a shape's
+	// *children*, so it cannot be compiled until they are linked. Everything else
+	// about the component was decided in `compile_constraints`; this only fills in
+	// `Constraint.values`.
+	if err := compile_closed_sets(
+		s,
+		r,
+		pending[:len(s.shapes)],
+		load,
+		load_data,
+		&v,
+		MATCH,
+		NEXT,
+		DESTROY,
+	); err.kind != .None {
+		return err
 	}
 
 	// Roots are where validation starts: the shapes carrying targets.

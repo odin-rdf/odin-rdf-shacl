@@ -84,6 +84,14 @@ DISJOINT :: NS + "disjoint"
 LESS_THAN :: NS + "lessThan"
 LESS_THAN_OR_EQUALS :: NS + "lessThanOrEquals"
 
+// `sh:closed` and its modifier (§4.8.1), SHACL-T-0016. The only component whose
+// parameter is neither a value nor a predicate to compare against but a
+// *statement about the shape's own children*: which predicates its property
+// shapes declare. `sh:ignoredProperties` widens that set and, like `sh:flags`,
+// has no constraint component of its own.
+CLOSED :: NS + "closed"
+IGNORED_PROPERTIES :: NS + "ignoredProperties"
+
 // The shape-expecting parameters (§2.1.1). A node that is the value of one of
 // these **is a shape**, which is why they land here in SHACL-T-0010 — before
 // the constraint components that read them (SHACL-T-0017 and SHACL-T-0018).
@@ -145,6 +153,7 @@ EQUALS_COMPONENT :: NS + "EqualsConstraintComponent"
 DISJOINT_COMPONENT :: NS + "DisjointConstraintComponent"
 LESS_THAN_COMPONENT :: NS + "LessThanConstraintComponent"
 LESS_THAN_OR_EQUALS_COMPONENT :: NS + "LessThanOrEqualsConstraintComponent"
+CLOSED_COMPONENT :: NS + "ClosedConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"

@@ -41,6 +41,8 @@ Error_Kind :: enum {
 	Flags_Unsupported, // an sh:flags letter this engine's regex engine does not have
 	Language_In_Not_A_List, // sh:languageIn whose value is not an RDF list
 	Unique_Lang_Not_Boolean, // sh:uniqueLang whose value is not an xsd:boolean
+	Closed_Not_Boolean, // sh:closed whose value is not an xsd:boolean
+	Ignored_Properties_Not_A_List, // sh:ignoredProperties whose value is not an RDF list
 }
 
 // error_message returns a static description of kind. Allocation-free, and
@@ -87,6 +89,10 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "sh:languageIn value is not an RDF list (§4.5.4)"
 	case .Unique_Lang_Not_Boolean:
 		return "sh:uniqueLang is not an xsd:boolean (§4.5.5)"
+	case .Closed_Not_Boolean:
+		return "sh:closed is not an xsd:boolean (§4.8.1)"
+	case .Ignored_Properties_Not_A_List:
+		return "sh:ignoredProperties value is not an RDF list (§4.8.1)"
 	}
 	return "unknown error"
 }

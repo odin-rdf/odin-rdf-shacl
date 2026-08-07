@@ -15,18 +15,18 @@ end to end, and four of the W3C SHACL suite's seven `core/` directories are
 green — `core/targets`, `core/path`, `core/misc`, and
 `core/validation-reports`, every entry, against both storage backends, at both
 `Term_ID` widths. What is missing is most of the SHACL Core constraint
-catalogue. Twenty components validate: the spine's `sh:minCount`,
+catalogue. Twenty-one components validate: the spine's `sh:minCount`,
 `sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
 `sh:in`, which is exactly what those four directories exercise; the four
 value-range bounds `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and
-`sh:maxExclusive`; and the string-based `sh:minLength`, `sh:maxLength`,
-`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`; and the
+`sh:maxExclusive`; the string-based `sh:minLength`, `sh:maxLength`,
+`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`; the
 property-pair `sh:equals`, `sh:disjoint`, `sh:lessThan`, and
-`sh:lessThanOrEquals`. `sh:closed`, the logical combinators
-(`sh:and`/`sh:or`/`sh:not`/`sh:xone`), and the shape-based constraints
-(`sh:node`, `sh:qualifiedValueShape`) are the rest of the second initiative,
-and the remaining suite directories stay disabled until they land. See
-`.metis/` for the vision, the initiative, and SHACL-A-0001.
+`sh:lessThanOrEquals`; and `sh:closed` with `sh:ignoredProperties`. The logical
+combinators (`sh:and`/`sh:or`/`sh:not`/`sh:xone`) and the shape-based
+constraints (`sh:node`, `sh:qualifiedValueShape`) are the rest of the second
+initiative, and the remaining suite directories stay disabled until they land.
+See `.metis/` for the vision, the initiative, and SHACL-A-0001.
 
 **A constraint this engine does not implement is ignored, and the compile says
 so.** Erroring instead would reject the spec's own non-validating annotations

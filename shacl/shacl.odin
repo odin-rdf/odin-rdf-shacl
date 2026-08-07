@@ -96,7 +96,7 @@
 // the violation count — it is a graph, and that is what it is for.
 //
 //
-// # Seven contracts a caller should know
+// # Eight contracts a caller should know
 //
 // The first three are this engine's answers to being incomplete or to being
 // written in Odin, the next two are SHACL-A-0001 decisions, and the rest are the
@@ -155,6 +155,18 @@
 // whole set, which is why `Shape.severity` and `Result.severity` are
 // `rdf.Term` rather than an enum. `severity_is` compares one against a
 // vocabulary constant.
+//
+// **A `sh:closed` result's path is a term, not the shape's path.** §4.8.1 makes
+// the result blame the triple it objected to — `sh:resultPath` is that triple's
+// predicate and `sh:value` its object — and that predicate belongs to the data
+// graph, so no index into the compiled model can name it. `Result.path` is
+// therefore -1 for these and `has_path_predicate` is true instead, with the
+// predicate in `path_predicate`; a caller reading `path` alone will conclude
+// there is no path, and on a node shape that is exactly the wrong conclusion.
+// `Report` handles it. Relatedly, `sh:closed` is switched on by the term
+// `"true"^^xsd:boolean` and by nothing else — `"1"^^xsd:boolean` leaves the shape
+// open — which is the reading `sh:uniqueLang` takes for the same wording, on the
+// authority of a suite entry.
 //
 // **Recursive shapes are reported as a failure, not validated.** §3.4 leaves
 // recursion undefined and explicitly permits a processor to signal a failure,

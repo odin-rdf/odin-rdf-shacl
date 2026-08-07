@@ -125,6 +125,12 @@ Constraint_Kind :: enum u8 {
 	Disjoint,
 	Less_Than,
 	Less_Than_Or_Equals,
+	// `sh:closed` (SHACL-T-0016). `values` holds the **allowed** predicates, and
+	// it is the only constraint whose parameter is not read off its own shape
+	// node alone: the set is `sh:ignoredProperties` together with the predicate
+	// paths of the shape's `sh:property` children, so it cannot be filled until
+	// those children are linked. See the closing pass in `compile`.
+	Closed,
 }
 
 // Node_Kind is `sh:nodeKind` (§4.4.2), as a set of the three primitive kinds
@@ -149,13 +155,15 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 // carries the parameter depends on kind: `count` for the cardinality components
 // and the two lengths, `term` for Class/Datatype/Has_Value and the four
 // value-range bounds, `node_kind` for Node_Kind, `values` — a range into
-// Shapes.values — for In and Language_In, and `pattern` for Pattern. The four
-// property-pair components also use `term`, but it holds a *predicate* rather
-// than something to compare against.
+// Shapes.values — for In, Language_In and Closed, and `pattern` for Pattern.
+// The four property-pair components also use `term`, but it holds a *predicate*
+// rather than something to compare against.
 //
 // `Unique_Lang` carries nothing at all. Its parameter is the boolean that
 // switches it on, and a constraint that is switched off is simply not compiled,
-// so by the time one exists there is nothing left to record.
+// so by the time one exists there is nothing left to record. `Closed`'s boolean
+// works the same way; what its `values` holds is the set the boolean makes
+// meaningful, not the boolean.
 //
 // **`pattern` is the first thing a Constraint owns.** Every other field either
 // borrows the model's term table or is a plain value; a compiled regular
@@ -212,7 +220,8 @@ Shapes :: struct {
 
 	// Child index arrays. `shape_children` holds indices into `shapes`
 	// (a shape's sh:property values); `path_children` holds indices into
-	// `paths` (a path node's operands); `values` holds terms (sh:in).
+	// `paths` (a path node's operands); `values` holds terms (sh:in,
+	// sh:languageIn, sh:closed's allowed predicates).
 	shape_children: [dynamic]int,
 	path_children:  [dynamic]int,
 	values:         [dynamic]rdf.Term,
@@ -333,7 +342,8 @@ shapes_ignored :: proc(s: ^Shapes) -> []rdf.Term {
 	return s.ignored[:]
 }
 
-// constraint_values returns the member terms of an sh:in constraint.
+// constraint_values returns the member terms of a list-valued constraint:
+// `sh:in`'s and `sh:languageIn`'s members, and `sh:closed`'s allowed predicates.
 constraint_values :: proc(s: ^Shapes, c: Constraint) -> []rdf.Term {
 	return s.values[c.values.start:][:c.values.count]
 }

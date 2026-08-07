@@ -107,14 +107,22 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 	node := fresh_blank(r)
 	append(&r.triples, triple(r, r.node, rdf.IRI(RESULT), node))
 	append(&r.triples, triple(r, node, rdf.IRI(rdf.RDF_TYPE), rdf.IRI(VALIDATION_RESULT)))
-
 	append(&r.triples, triple(r, node, rdf.IRI(FOCUS_NODE), node_term(r, result.focus, load, load_data)))
 
 	if result.has_value {
 		append(&r.triples, triple(r, node, rdf.IRI(VALUE), node_term(r, result.value, load, load_data)))
 	}
 
-	if result.path >= 0 {
+	// `sh:resultPath` comes from the shape's compiled path, except for the one
+	// component whose path is a term of the data graph: `sh:closed` names the
+	// predicate it objected to (§4.8.1), which no compiled path can express and
+	// which a node shape — where `path` is -1 — carries all the same.
+	if result.has_path_predicate {
+		append(
+			&r.triples,
+			triple(r, node, rdf.IRI(RESULT_PATH), node_term(r, result.path_predicate, load, load_data)),
+		)
+	} else if result.path >= 0 {
 		append(&r.triples, triple(r, node, rdf.IRI(RESULT_PATH), write_path(r, s, result.path)))
 	}
 

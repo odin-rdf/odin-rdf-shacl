@@ -211,6 +211,127 @@ compile_constraints :: proc(
 		}
 	}
 
+	// sh:closed (§4.8.1). Switched on by its parameter exactly as `sh:uniqueLang`
+	// is, and read exactly as strictly — **the term `"true"^^xsd:boolean` and
+	// nothing else** — which is a choice rather than a measurement, because no
+	// corpus entry writes it any other way.
+	//
+	// The two readings are the same two `sh:uniqueLang` faced. §4.8.1's prose says
+	// "if sh:closed is true", which is the wording `property/uniqueLang-002`
+	// settled strictly; the spec's normative SPARQL says `FILTER ($closed)`, whose
+	// effective boolean value makes `"1"^^xsd:boolean` activate it. Nothing in the
+	// corpus distinguishes them here, so this follows the engine's own precedent:
+	// two parameters the specification words identically should not answer
+	// differently in one engine, and the reading that already has a suite entry
+	// behind it wins. If a later corpus revision adds the entry, it is this
+	// comparison that changes.
+	//
+	// **The allowed-predicate set is not read here**, and cannot be: it includes
+	// the predicate paths of this shape's `sh:property` children, which are not
+	// linked to it until the fixup pass. `compile` fills `values` afterwards; see
+	// `compile_closed_sets`.
+	if v.found[CLOSED] {
+		vals := objects_of(r, shape_id, v.ids[CLOSED], MATCH, NEXT, DESTROY)
+		defer delete(vals)
+		for id in vals {
+			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
+				return Error{.Closed_Not_Boolean, shape_node, intern(&s.terms, rdf.IRI(CLOSED))}
+			}
+			if literal.lexical == "true" {
+				append(&s.constraints, Constraint{kind = .Closed})
+			}
+		}
+	}
+
+	return Error{}
+}
+
+// compile_closed_sets fills in the allowed-predicate set of every `sh:closed`
+// constraint in the model, and is the one piece of constraint compilation that
+// cannot run while its shape is being compiled.
+//
+// **Why it is a separate pass.** §4.8.1's allowed set is `sh:ignoredProperties`
+// together with the predicates the shape's *property shapes* declare, and a
+// shape's `sh:property` children are linked by index in `compile`'s fixup pass,
+// after every shape exists. `compile_constraints` runs before that and would
+// have to re-query the shapes graph for children it cannot yet name. So the
+// boolean is compiled there and the set here, and the two halves meet through
+// `Constraint.values` — appended contiguously, like `sh:in`'s members, so
+// `bindings_init` resolves them to data-store IDs with no case of its own.
+//
+// **A property shape declares a predicate only when its path is a bare
+// predicate.** A sequence, an inverse, or any other compound path is a blank
+// node in the shapes graph, and a triple's predicate is always an IRI, so such a
+// path can never name one — the spec says so by defining the allowed set through
+// `sh:property/sh:path`, and it falls out here rather than needing a rule. The
+// case is real and in the corpus: `core/complex`'s `personexample.ttl` closes a
+// shape one of whose property shapes has `sh:path [ sh:inversePath ex:worksFor ]`.
+//
+// `shape_ids` is every compiled shape's node in the *shapes* store, indexed by
+// shape index — `compile`'s worklist, which already holds them in that order, so
+// the graph is not re-queried to find them.
+@(private)
+compile_closed_sets :: proc(
+	s: ^Shapes,
+	r: Reader($D, $It),
+	shape_ids: []store.Term_ID,
+	load: Term_Loader,
+	load_data: rawptr,
+	v: ^Vocab,
+	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
+	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
+	$DESTROY: proc(it: ^It),
+) -> Error {
+	for shape_index in 0 ..< len(s.shapes) {
+		shape := s.shapes[shape_index]
+		for offset in 0 ..< shape.constraints.count {
+			index := shape.constraints.start + offset
+			if s.constraints[index].kind != .Closed {
+				continue
+			}
+			start := len(s.values)
+
+			if v.found[IGNORED_PROPERTIES] {
+				heads := objects_of(
+					r,
+					shape_ids[shape_index],
+					v.ids[IGNORED_PROPERTIES],
+					MATCH,
+					NEXT,
+					DESTROY,
+				)
+				defer delete(heads)
+				for head in heads {
+					items, ok := list_items(r, head, MATCH, NEXT, DESTROY)
+					defer delete(items)
+					if !ok {
+						return Error {
+							.Ignored_Properties_Not_A_List,
+							shape.node,
+							intern(&s.terms, rdf.IRI(IGNORED_PROPERTIES)),
+						}
+					}
+					for id in items {
+						append(&s.values, materialize_term(s, load, load_data, id))
+					}
+				}
+			}
+
+			// The predicates the shape's own property shapes declare. Already
+			// interned by path compilation, so this borrows the model's table
+			// rather than materializing anything a second time.
+			for child in shape_properties(s, shape) {
+				path := s.shapes[child].path
+				if path < 0 || s.paths[path].kind != .Predicate {
+					continue
+				}
+				append(&s.values, s.paths[path].predicate)
+			}
+
+			s.constraints[index].values = Span{start, len(s.values) - start}
+		}
+	}
 	return Error{}
 }
 
@@ -302,6 +423,11 @@ IMPLEMENTED_PARAMETERS := []string {
 	DISJOINT,
 	LESS_THAN,
 	LESS_THAN_OR_EQUALS,
+	// `sh:closed` (SHACL-T-0016). `sh:ignoredProperties` is here for `sh:flags`'
+	// reason: it is read and acted on, so a shapes graph carrying one is not using
+	// anything unimplemented, even though it names no component of its own.
+	CLOSED,
+	IGNORED_PROPERTIES,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately
