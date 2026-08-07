@@ -109,12 +109,18 @@ the only thing that distinguishes a test from a comment.
 
 ## What SHACL-I-0002 left open
 
-- **Duplicate results are not deduplicated.** A shape that is both a root and
-  another shape's `sh:property` value is validated twice at the same focus node
-  and reports twice. §3.4 arguably makes results a set. **No entry in all 98
-  exercises it**, which is a stronger statement than the spine could make — the
-  corpus is now fully run, so this stays open on the corpus's silence rather than
-  on a partial reading of it.
+- **Duplicate results are not deduplicated — deliberately open, with a trigger**
+  (Greger, 2026-08-07). A shape that is both a root and another shape's
+  `sh:property` value is validated twice at the same focus node and reports twice.
+  §3.4 arguably makes results a set. **No entry in all 98 exercises it**, which is
+  a stronger statement than the spine could make — the corpus is now fully run.
+
+  That is exactly why it needed a decision rather than another deferral: there is
+  no forcing evidence in this corpus and there never will be, so left alone it
+  would have stayed open by default forever while reading like an oversight.
+  **Trigger: a consumer reporting it, or a SHACL 1.2 / SHACL-SPARQL suite entry
+  that distinguishes the two readings.** Until then the behaviour is what it is,
+  and it is a recorded decision rather than a gap.
 - **`sh:detail` is not implemented, and is a known omission rather than an
   oversight.** It appears nowhere in the vendored corpus, in any directory. The
   shape-based constraints would naturally nest a child's results under a

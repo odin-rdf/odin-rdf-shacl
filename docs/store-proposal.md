@@ -108,6 +108,34 @@ Two more are listed as not-yet-exercised in the evidence log: **STORE-T-0015** (
 iteration) and **STORE-T-0018** (cardinality estimates), both wanted by a planner. This
 engine has no planner and no join order to choose.
 
+## One documentation suggestion (SHACL-T-0019)
+
+**Not a proposal and not a gap** — the only thing in this document that asks odin-rdf-store
+for anything at all, and what it asks for is a sentence.
+
+Both backends relabel blank nodes on load: `Load_Scope` maps a document's `_:b79526` to a
+fresh blank node, and `fresh_blank` generates `b0`, `b1`, … densely from zero, **per
+dictionary**. That is correct and deliberate (STORE-I-0001 decision 6) — two documents
+loaded into one store that both write `_:b1` must not merge.
+
+The consequence a consumer meets is the part worth documenting: because the labels are
+dense from zero *per store*, **two stores hand out the same labels for unrelated nodes,
+with certainty rather than by coincidence**. Any consumer taking terms from two stores and
+putting them in one graph is performing an RDF merge, and an RDF merge must standardise
+blank nodes apart.
+
+This engine did not, and shipped reports asserting that a shape and the value it blamed
+were the same node — two bugs, one of which the W3C suite structurally could not catch,
+because every `core/` entry names one file as both its data graph and its shapes graph.
+
+**The suggestion:** state the property where a consumer will read it rather than only in
+`load.odin`'s source — that blank-node labels are generated densely from `b0` per
+dictionary, so labels are meaningful only within one store, and a consumer combining terms
+from two must standardise them apart.
+
+No interface change, no capability request. Raised for review at Greger's direction
+(2026-08-07); the fix for the consequence is in odin-rdf-shacl, where it belongs.
+
 ## What this means for the vision
 
 The vision predicted this project would pull two store backlog items. It pulled neither,

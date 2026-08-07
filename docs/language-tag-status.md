@@ -128,12 +128,17 @@ decision but a reason to spend the change now.
 
 ## Recommendation
 
-Leave it. Keep the decision and this design recorded, and **extend the trigger**, which
-is the one recommendation that changed at SHACL-T-0019: from "a suite entry fails" to "a
-suite entry fails **or** a user reports it". At SHACL-I-0001 that was offered as an
-option; now that the whole corpus runs green, the suite has demonstrated it will not be
-the one to raise the alarm, and a trigger that can only be pulled by something that
-cannot happen is not a trigger.
+Leave it. Keep the decision and this design recorded, and **the trigger is now widened**
+— from "a suite entry fails" to "a suite entry fails **or** a user reports it"
+(**ratified by Greger, 2026-08-07**). At SHACL-I-0001 that was offered as an option and at
+SHACL-T-0019 it was a recommendation; it is now the trigger. The reasoning it rests on:
+the whole corpus runs green, so the suite has demonstrated it will not be the one to raise
+the alarm, and a trigger that can only be pulled by something that cannot happen is not a
+trigger.
+
+**This is a family-level change, not a local one**, because the fix it gates lands in
+odin-rdf-parser. Anyone carrying this question into that repository should carry the
+widened form.
 
 If the family would rather close the question than carry it, the change is small,
 designed, and hot-path-neutral by construction — but it belongs in odin-rdf-parser's own

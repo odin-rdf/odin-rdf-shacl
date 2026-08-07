@@ -4,14 +4,14 @@ level: initiative
 title: "Performance evidence: a benchmark workload, and the memoisation decision"
 short_code: "SHACL-I-0003"
 created_at: 2026-08-07T10:48:30.161797+00:00
-updated_at: 2026-08-07T11:30:43.132727+00:00
+updated_at: 2026-08-07T11:47:06.435999+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/ready"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -122,10 +122,14 @@ duration. Recorded so that the departure is deliberate rather than unnoticed.
   would not either flap or be set so loose it catches nothing. Timing baselines are
   recorded and compared deliberately, the way the family compares them.
 
-  **Narrowed from an absolute once store-read counting was decided** (2026-08-07). A read
-  count for a fixed workload and seed is an exact integer and does not vary with the
-  machine, so the noise argument does not reach it. Gating one is not in scope here, but
-  it is no longer excluded by this document — see Detailed Design.
+  **Narrowed twice on 2026-08-07, and the second time it stopped applying at all to one
+  metric.** A read count for a fixed workload and seed is an exact integer that does not
+  vary with the machine, so the noise argument never reached it — and **the read count is
+  now pinned and asserted, in the family's own idiom** (Greger). It is not a threshold: it
+  is a number in a file that changes only by deliberate edit, exactly as `TOTAL_ENTRIES`
+  and `ENABLED_ENTRIES` are. See Detailed Design.
+
+  What remains a Non-Goal is a **timing** gate, and that stands unchanged.
 - **Not the v0.1.0 release.** Tagging, the CI pins, and the vision refresh are backlog
   items ([[SHACL-T-0020]], [[SHACL-T-0021]], [[SHACL-T-0022]]), independent of this and of
   each other.
@@ -214,6 +218,45 @@ the measurement is capable of answering it either way.
   an exact statement — `total_allocation_count == 0` — and at high violation density on a
   generated graph it is a far stronger test than `tests/guards` can build. The first is
   peak holding steady as the density knob rises.
+
+- **Store reads are counted alongside wall clock, and the count is pinned — decided
+  (Greger, 2026-08-07).**
+
+  **It needs no change to shipped code, which was not obvious until it was checked.**
+  `Access` is a struct of procedure pointers, `shacl.validate` takes one directly, and both
+  `Access` and its four verb types are exported. So `bench` supplies its *own*
+  adapters — calling the backend's match interface and bumping counters in the same
+  body — and calls `shacl.validate` with them, bypassing `shacl_memstore.validate`, which
+  builds the uncounted one. No `-define:` flag, no counter on a hot path in release builds,
+  nothing to compile out. `Access` was not designed for this; it falls out of its being a
+  procedure set rather than an interface.
+
+  The instantiation packages' own adapters are `@(private)`, so `bench` writes roughly
+  thirty lines per backend against the same match interface rather than reusing them.
+  **Deliberately not exported to avoid the duplication**: widening a shipped API for a
+  benchmark's convenience is the wrong trade, and this repository already has the precedent
+  for copying a small thing rather than coupling to it (the harness's `compare.odin`,
+  copied from odin-rdf-parser for reasons stated at the top of that file).
+
+  **The read count is deterministic, and that is the larger prize.** For a fixed workload
+  and seed it is an exact integer — machine-independent, immune to runner noise, identical
+  on every platform. That makes it something wall clock can never be.
+
+  **So it is pinned rather than merely reported.** Not a threshold, which is what
+  "performance gate" usually means and what this initiative's Non-Goals rightly rejected.
+  A *pin*: the expected read count for each standing configuration is a constant in the
+  bench source, asserted on every run, changed only by a deliberate edit with a diff behind
+  it. That is this family's most characteristic mechanism — `TOTAL_ENTRIES`,
+  `ENABLED_ENTRIES`, the progress floor SHACL-T-0019 retired — applied to the one metric
+  here that can carry it. What it buys: "the engine started reading more" becomes a failing
+  build rather than a number nobody compared. What it costs: every legitimate engine
+  improvement has to re-pin, which is the ratchet working rather than failing.
+
+  **It also makes the memoisation question concrete**, which is why it was worth deciding
+  before the harness was built. The comparison becomes: the same workload with and without
+  the `(shape, node)` cache, reads avoided alongside time saved. A cache that avoids few
+  reads on a qualified-family-free configuration is a cache that buys a corner case with a
+  hot-path map lookup.
 
 - **Backend and `Term_ID` width — decided (2026-08-07). Both backends, reported
   separately; 64-bit as the standing baseline, 32-bit measured once.**
@@ -388,3 +431,61 @@ suite is still 98 of 98 against both backends at both `Term_ID` widths.
 
   **The design is complete and nothing in Detailed Design is open.** Ready to decompose
   into the three tasks in the Implementation Plan.
+
+- **2026-08-07 — Decomposed into three tasks** (SHACL-T-0023 … SHACL-T-0025), matching the
+  Implementation Plan.
+
+  **Dependency shape is a chain, not a fan.** SHACL-T-0023 builds the instrument and gates
+  both others; SHACL-T-0024 (baselines, flat-memory promises) and SHACL-T-0025 (the
+  memoisation decision) are independent of each other and can run in parallel, though
+  T-0025 will want T-0024's baselines to compare a cached run against.
+
+  **The decomposition found one gap in the exit criteria's coverage.** "The workload is
+  documented with the reasoning for choosing it" had no task carrying it — the reasoning
+  lives in this document, which is not where someone reading `bench/` will look for it. It
+  is now an acceptance criterion on SHACL-T-0023: a package doc to the family's contract
+  standard, covering the knobs, the two modes, the two invariants, and the honest limit
+  (this is a workload this project chose, so the numbers are a regression instrument rather
+  than a claim about the world).
+
+  **Two things are deliberately repeated across tasks rather than stated once.** The
+  qualified-family knob appears as a criterion in SHACL-T-0023 — it must be a *standing*
+  configuration, not merely reachable — and again as the central risk in SHACL-T-0025,
+  because it is the single point where this initiative can produce a confident wrong
+  answer. And the read-count invariants appear in SHACL-T-0023 (assert them) and again in
+  SHACL-T-0025 (re-establish them if a cache lands), because a cache changes read counts,
+  and an invariant nobody re-checked is an invariant that has quietly become a bug report.
+
+  **SHACL-T-0025 is written so that "no cache" is a completed task**, not a failed one.
+  That is the outcome the design phase worked to keep reachable, and a decomposition that
+  read as though implementing the cache were the goal would have undone it.
+
+  Not transitioned to active — awaiting human review.
+
+- **2026-08-07 — Two decisions taken at review, and one document repaired.**
+
+  **The read count is pinned, not merely reported** (Greger). Not a threshold — a constant
+  in the bench source, asserted every run, changed only by deliberate edit, in the idiom of
+  `TOTAL_ENTRIES` and `ENABLED_ENTRIES`. That is a stronger position than the design phase
+  reached on its own: it had narrowed the "no CI performance gate" Non-Goal to leave the
+  door open, and this walks through it. Recorded as an acceptance criterion on
+  SHACL-T-0023 as well as here, since it is the bench that has to carry the constant.
+
+  **Baselines: one reference configuration in the README, the full matrix in Metis**
+  (Greger). A README with a single number cannot be extrapolated from and a README with a
+  matrix is noise; the reference configuration with its seed and knob settings, plus a
+  pointer to the swept matrix in SHACL-T-0024's log, is the middle. Now an acceptance
+  criterion there rather than a judgement left to whoever writes it.
+
+  **Repair.** The "store reads are counted" bullet in Detailed Design was destroyed by an
+  editing mistake when the neighbouring question was settled, and it went into commit
+  `d33befe` missing — the decision survived only as a summary in the Status Updates above.
+  It is restored here in full, with the pin folded in. Nothing was decided differently;
+  the reasoning that had been lost is the part about `Access` being a procedure set, which
+  is *why* the counter needs no change to shipped code and is the load-bearing fact for
+  SHACL-T-0023.
+
+  **Release sequencing settled alongside** (Greger): the `v0.1.0` tag waits for this
+  initiative, since every sibling shipped `v0.1.0` with performance evidence.
+  [[SHACL-T-0021]] now blocks on [[SHACL-T-0020]] and [[SHACL-T-0025]]; the CI pin and the
+  vision refresh were released to proceed immediately and are not held for it.

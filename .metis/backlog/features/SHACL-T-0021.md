@@ -6,7 +6,7 @@ short_code: "SHACL-T-0021"
 created_at: 2026-08-07T10:50:26.006066+00:00
 updated_at: 2026-08-07T10:50:26.006066+00:00
 parent: 
-blocked_by: []
+blocked_by: [SHACL-T-0020, SHACL-T-0025]
 archived: false
 
 tags:
@@ -63,15 +63,18 @@ process here.
 
 ### Dependencies
 
-None hard. Two sequencing questions, both judgement calls for a human:
+**Both sequencing questions are settled (Greger, 2026-08-07).**
 
-1. **Before or after [[SHACL-I-0003]]?** The siblings all shipped `v0.1.0` *with*
-   performance evidence — odin-rdf-parser's headline claim is a benchmark result. Tagging
-   first means this repository's first release is the one in the family with no numbers in
-   it. Tagging after means the release waits on a week or two of benchmark work for a claim
-   nobody has asked for yet.
-2. **After [[SHACL-T-0020]]**, ideally. A tag whose CI floated against two moving upstream
-   branches does not pin what was actually tested.
+1. **After [[SHACL-I-0003]].** The tag waits for the benchmark. Every sibling that shipped
+   `v0.1.0` shipped it *with* performance evidence — odin-rdf-parser's headline claim is a
+   benchmark result — and this repository's first release should not be the family's only
+   one with no numbers in it. The cost, accepted: nobody can depend on a tag until the
+   benchmark initiative closes.
+2. **After [[SHACL-T-0020]].** A tag whose CI floated against two moving upstream branches
+   does not pin what was actually tested.
+
+So this is the last of the three backlog items. [[SHACL-T-0020]] and [[SHACL-T-0022]] are
+**not** held for it and were released to proceed immediately.
 
 ### Risk Considerations
 
