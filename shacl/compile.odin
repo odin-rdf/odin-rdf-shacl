@@ -139,12 +139,12 @@ TARGET_PREDICATES := [4]struct {
 // `sh:and`, `sh:or`, and `sh:xone` name an RDF list whose *members* are shapes,
 // the other three name one directly.
 //
-// This table is discovery's, not the evaluator's. None of these six validates
-// anything yet — that is SHACL-T-0017 and SHACL-T-0018 — and until then a
-// shapes graph using one is reported through `shapes_ignored`. What lands here
-// in SHACL-T-0010 is only the §2.1.1 rule that their values *are shapes*, which
-// every one of those later components depends on and none of them should have
-// to introduce.
+// This table is discovery's, not the evaluator's, and that separation is the
+// point rather than an accident of ordering. What landed here in SHACL-T-0010 is
+// only the §2.1.1 rule that these parameters' values *are shapes* — a rule every
+// one of the six components depends on and none of them should have to
+// introduce. All six validate now (SHACL-T-0017 and SHACL-T-0018), and this
+// table did not change when they did.
 @(private)
 SHAPE_EXPECTING_PARAMETERS := [6]struct {
 	iri:     string,

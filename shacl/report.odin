@@ -28,6 +28,22 @@ import rdf "rdf:rdf"
 // It owns every term in the graph, including the blank-node labels it
 // generates, and frees them at `report_destroy`. The triples it hands out
 // borrow from it.
+//
+// **A report names nodes in three graphs, and their blank nodes are
+// standardised apart** — the merge rule RDF has always had, and the source of
+// the only two bugs SHACL-T-0019 found. A blank node in a report is one of:
+//
+//	_:b…   the data graph's, exactly as the store labelled it — `sh:focusNode`
+//	       and `sh:value`, which is how a result says *which* unnamed node
+//	       failed, so these are the labels a consumer can act on
+//	_:s…   the shapes graph's, its store label prefixed with `s` —
+//	       `sh:sourceShape` when the shape is a blank node
+//	_:r…   the report's own: the report node, each result node, and the
+//	       structure of a non-predicate `sh:resultPath`. Meaningless outside
+//	       the report
+//
+// See `fresh_blank` and `shape_term` for why, and for what a caller supplying
+// its own `Term_Loader` owes.
 Report :: struct {
 	triples:   [dynamic]rdf.Triple,
 	node:      rdf.Term, // the sh:ValidationReport node
@@ -131,7 +147,7 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 		&r.triples,
 		triple(r, node, rdf.IRI(SOURCE_CONSTRAINT_COMPONENT), rdf.IRI(component_iri(result.component))),
 	)
-	append(&r.triples, triple(r, node, rdf.IRI(SOURCE_SHAPE), result_source_shape(s, result)))
+	append(&r.triples, triple(r, node, rdf.IRI(SOURCE_SHAPE), shape_term(r, result_source_shape(s, result))))
 
 	// Only what the shape declared: no processor-generated messages, ever.
 	//
@@ -239,12 +255,77 @@ node_term :: proc(r: ^Report, ref: Node_Ref, load: Term_Loader, load_data: rawpt
 	return result
 }
 
-// fresh_blank mints a blank node the report owns. Labels are sequential and
-// carry no meaning: report comparison is by isomorphism, so the only thing
-// that matters is that they are distinct within the graph.
+// shape_term resolves a **shapes-graph** term into the report's own storage.
+// Only `sh:sourceShape` uses it, because it is the only place a shapes-graph
+// term reaches a report as a node rather than as a vocabulary IRI.
+//
+// An IRI or a literal passes through. A blank node is **relabelled**, and that
+// is this procedure's entire reason to exist (SHACL-T-0019): a report names
+// nodes in two different graphs, and merging two graphs without standardising
+// their blank nodes apart is the oldest mistake in RDF. Both backends label
+// loaded blank nodes `b0`, `b1`, … from zero, per store — so a shapes graph's
+// first blank node and a data graph's first blank node arrive here carrying the
+// same label while denoting nothing like each other, and a report that took
+// both at face value would assert `sh:sourceShape _:b0 ; sh:value _:b0` and mean
+// that the shape and the value it blamed were the same node.
+//
+// The data graph's labels are the ones kept, because they are the ones a
+// consumer can act on: `sh:value _:b0` is how a result says *which* unnamed node
+// failed, and that is only useful if it is the store's own name for it. So the
+// shapes graph is the side that moves, to `s` + its label. A consumer resolving
+// a blank-node source shape back to the shapes graph strips the `s`.
+//
+// The suite cannot see any of this and could not have found it. Every `core/`
+// entry names one file as both its data graph and its shapes graph, so the two
+// loads assign identical labels and conflating them is accidentally correct;
+// and the comparison is by isomorphism, so relabelling is invisible either way.
+// It is a defect a consumer would have hit on the first shapes graph kept in a
+// separate file from its data.
+@(private = "file")
+shape_term :: proc(r: ^Report, term: rdf.Term) -> rdf.Term {
+	blank, is_blank := term.(rdf.Blank_Node)
+	if !is_blank {
+		return intern(&r.terms, term)
+	}
+	label := fmt.aprintf("s%s", string(blank), allocator = r.allocator)
+	defer delete(label, r.allocator)
+	return intern(&r.terms, rdf.Blank_Node(label))
+}
+
+// fresh_blank mints a blank node the report owns: the report node, each
+// result node, and the blank-node structure of a non-predicate
+// `sh:resultPath`.
+//
+// **The `r` is the whole point of the label** (SHACL-T-0019). A report graph
+// mixes blank nodes from three graphs, and this is one of the two places they
+// are standardised apart — see `shape_term` for the other, and for the general
+// argument. The three namespaces:
+//
+//	b…   the data graph's, untouched — the label the store gave it
+//	s…   the shapes graph's, prefixed by shape_term
+//	r…   the report's own, minted here
+//
+// This one minted `b0`, `b1`, … until SHACL-T-0019, which put it in direct
+// collision with the first namespace and produced a wrong graph rather than an
+// ugly one: in `core/property/nodeKind-001` — six blank-node property shapes
+// over data with three blank nodes — a result node and the source shape it
+// blamed came out as the same term, and the report asserted
+// `_:b3 sh:sourceShape _:b3`. That one the suite did catch, as an isomorphism
+// failure, which is what an isomorphism check is for: conflating two nodes is
+// invisible to any comparison that only counts triples.
+//
+// The residual contract, since a prefix is a convention and not a proof:
+// borrowed blank-node labels must not begin with `r` or `s`. Both shipped
+// backends generate `b` followed by decimal digits and nothing else, so it holds
+// by construction there; a caller writing its own `Term_Loader` is the one case
+// that has to know.
+//
+// Beyond that the labels carry no meaning — report comparison is by
+// isomorphism — and they are sequential only because a counter is the cheapest
+// way to be distinct.
 @(private = "file")
 fresh_blank :: proc(r: ^Report) -> rdf.Term {
-	label := fmt.aprintf("b%d", r.counter, allocator = r.allocator)
+	label := fmt.aprintf("r%d", r.counter, allocator = r.allocator)
 	defer delete(label, r.allocator)
 	r.counter += 1
 	return intern(&r.terms, rdf.Blank_Node(label))

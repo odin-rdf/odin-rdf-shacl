@@ -9,17 +9,16 @@ odin-rdf-store's Metis from this repository, and nothing here is worked around
 with a backend-specific shortcut. Upstream repositories are read-only from this
 project; findings go to review as a proposal.
 
-Started SHACL-T-0005. Status below is as of **SHACL-T-0016**, the task
-SHACL-I-0002 named as the one most likely to produce a finding. Consolidated for
-review in [`store-proposal.md`](store-proposal.md).
+Started SHACL-T-0005. Status below is as of **SHACL-T-0019**, which closes
+SHACL-I-0002. Consolidated for review in [`store-proposal.md`](store-proposal.md).
 
 ## Summary so far
 
 **Still no capability gap.** That is a result rather than an absence of work: the
 vision predicted this project would pull two specific store backlog items, and
-neither prediction has survived contact with the code. A validator with
-twenty-one constraint components reaches the store through `match` and
-`find_term` and nothing else.
+neither prediction has survived contact with the code. A validator with all
+twenty-nine of SHACL Core's non-SPARQL constraint components reaches the store
+through `match` and `find_term` and nothing else.
 
 **SHACL-T-0016 is the task that was supposed to break that, and it half did.**
 `sh:closed` asks the data graph a question no earlier component asked — which
@@ -28,6 +27,18 @@ predicates a node actually uses — and the store answered it with one ordinary
 See the section below: the first real finding in this log is a narrowing we
 built, not a capability the store lacks, and the log had never thought to look
 there.
+
+**SHACL-T-0019 produced the second finding, and it is the first that is about
+odin-rdf-store at all.** It is still not a capability gap: it is a *contract* —
+both backends relabel loaded blank nodes densely from `b0` per dictionary, so
+two stores collide by construction, and a consumer merging terms from both into
+one graph must standardise them apart. This engine did not, and shipped reports
+that conflated a shape with the value it blamed. The fix is here; what goes
+upstream, if anything, is a sentence of documentation. Full write-up below.
+
+**Closing verdict for SHACL-I-0002: no proposal to odin-rdf-store.** Twenty-nine
+constraint components, five target forms, seven path forms, suppressed
+validation, and 98 of 98 suite entries, all served by `match` and `find_term`.
 
 | Predicted by the vision | Status |
 | --- | --- |
@@ -126,6 +137,53 @@ the error check has a `sh:conforms true` that means nothing.
 Verdict: **no proposal to odin-rdf-store from this task.** STORE-T-0016 is
 retired as a prediction rather than merely unexercised — the one target this
 project had for wanting graph introspection has landed and does not want it.
+
+## SHACL-T-0019 — the second finding, and it is a contract rather than a capability
+
+The initiative's closing task, and the one that verifies rather than builds. It
+found a defect, and unlike SHACL-T-0016's — which was about a narrowing this
+repository wrote — this one is about something odin-rdf-store does. It is still
+**not a gap**, and the store is not wrong; what it is is a contract that is true,
+documented only in the store's own source, and easy for a consumer to get wrong
+in a way nothing catches.
+
+**The contract.** Both backends relabel blank nodes on load. A document's
+`_:b79526` does not keep that label: `Load_Scope` maps it to a fresh blank node
+from the dictionary, and `fresh_blank` generates `b0`, `b1`, … densely from zero,
+per dictionary. This is right and it is deliberate — STORE-I-0001 decision 6 —
+because two documents loaded into one store that both write `_:b1` must not be
+merged into one node.
+
+**The consequence a consumer meets.** Because the labels are dense from zero *per
+store*, two stores hand out **the same labels for unrelated nodes**, with
+certainty rather than by unlucky coincidence. Any consumer that takes terms from
+two stores and puts them in one graph is performing an RDF merge, and an RDF
+merge must standardise blank nodes apart. A SHACL report does exactly that: it
+names nodes of the data graph (`sh:focusNode`, `sh:value`) and of the shapes
+graph (`sh:sourceShape`), which are two stores by construction here
+(SHACL-A-0001 decision 3 destroys the shapes store before the data store opens).
+
+This engine did not standardise them apart, and produced graphs asserting that a
+shape and the value it blamed were the same node. Fixed in
+`shacl/report.odin` — the data graph's labels are kept, because they are the ones
+a consumer can act on; the shapes graph's are prefixed; the report's own are
+minted in a third namespace.
+
+**Verdict: nothing to file, and one sentence worth offering upstream.** No
+capability is missing and no interface changes. But the store's public
+documentation describes what `load_*` does to blank node labels only in the
+source of `load.odin`, and the property that bites — *labels are dense from zero
+per dictionary, so two dictionaries collide by construction* — is worth stating
+where a consumer will read it. That is a documentation suggestion for review, not
+a proposal, and it is the only thing this log has ever had to say about the store
+itself.
+
+**Why the suite could not have caught it.** Every `core/` entry names one file as
+both its data graph and its shapes graph, so the two loads assign identical
+labels and merging the two namespaces is accidentally correct. The half that
+*was* caught — `property/nodeKind-001` and `complex/personexample` — collided
+with the report's own minted labels, which is a third namespace and not a store
+question at all.
 
 ## Considered and rejected as a gap: focus nodes absent from the dictionary
 

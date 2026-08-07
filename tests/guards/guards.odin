@@ -79,15 +79,37 @@ ex:PersonShape a sh:NodeShape, rdfs:Class ;
 		sh:hasValue ex:v ;
 		sh:in ( ex:one ex:two "three"@en ) ;
 	] ;
+	# The qualified family, on a property shape because that is the only place
+	# it is well-formed. It allocates a suppressed run per value node and counts
+	# the answers, and sh:qualifiedValueShapesDisjoint walks the sibling shapes
+	# besides — the most intricate thing in SHACL Core, and so the one most
+	# worth watching here.
+	sh:property [
+		sh:path ex:q ;
+		sh:qualifiedValueShape ex:Nested ;
+		sh:qualifiedMinCount 1 ;
+		sh:qualifiedMaxCount 2 ;
+		sh:qualifiedValueShapesDisjoint true ;
+	] ;
 	# SHACL-T-0010's two additions, both of which allocate: the shape-expecting
 	# parameters discover further shapes (through a list and directly), and the
 	# ignored-parameter record interns a term per unimplemented parameter it
-	# finds. sh:minInclusive is unimplemented and sh:name is inert, so the
-	# record has to distinguish them without leaking either.
+	# finds. sh:name is inert and sh:sparql is unimplemented — SHACL-SPARQL, a
+	# later phase — so the record has to distinguish them without leaking
+	# either. It was sh:minInclusive until SHACL-T-0013 implemented it, which
+	# left this guard covering an empty record for six tasks; a parameter this
+	# project has decided *not* to implement is the one that stays honest.
+	#
+	# All six shape-expecting parameters appear here, which is the point of the
+	# fixture rather than a flourish: each one allocates a nested suppressed
+	# walk per value node (SHACL-A-0002), and six of them nesting through each
+	# other is the easiest place in the engine to strand memory.
 	sh:node ex:Nested ;
 	sh:and ( ex:Nested ex:AlsoNested ) ;
+	sh:or ( ex:Nested ex:AlsoNested ) ;
+	sh:xone ( ex:Nested ex:AlsoNested ) ;
 	sh:name "an annotation" ;
-	sh:minInclusive 2 .
+	sh:sparql "not implemented, and not going to be here" .
 
 ex:Nested sh:path ex:p ; sh:minCount 1 ; sh:maxLength 5 .
 ex:AlsoNested sh:not ex:Nested .
@@ -338,7 +360,41 @@ ex:S a sh:NodeShape ; sh:targetClass ex:Super ; sh:targetSubjectsOf ex:p ;
 	sh:property [ sh:path [ sh:alternativePath ( ex:p ex:q ) ] ; sh:hasValue ex:never ] ;
 	sh:property [ sh:path [ sh:zeroOrMorePath ex:p ] ; sh:class ex:Missing ] ;
 	sh:property [ sh:path [ sh:oneOrMorePath ex:p ] ; sh:in ( ex:a ) ] ;
-	sh:property [ sh:path [ sh:zeroOrOnePath ex:p ] ; sh:minCount 9 ] .
+	sh:property [ sh:path [ sh:zeroOrOnePath ex:p ] ; sh:minCount 9 ] ;
+	# All six shape-expecting parameters, over data that reaches them, because
+	# each one runs a suppressed sub-walk per node it is asked about
+	# (SHACL-A-0002) and that is a whole allocation path this fixture did not
+	# cover until SHACL-T-0019. The other guard on suppression asks
+	# conforms_node directly, which is the top-level entry point; this is the
+	# nested case, where a sub-walk unwinds inside a walk that carries on.
+	#
+	# Deliberately no cycle among these: a shape reaching itself ends the
+	# traversal in Failure.Recursive_Shape, which would quietly shrink what this
+	# guard covers. That path has its own test.
+	sh:node ex:Inner ;
+	sh:not ex:Unsatisfiable ;
+	sh:and ( ex:Inner ex:Other ) ;
+	sh:or ( ex:Inner ex:Other ) ;
+	sh:xone ( ex:Inner ex:Other ) ;
+	# Two sibling qualified shapes rather than one, so
+	# sh:qualifiedValueShapesDisjoint has a sibling to walk — with one, the
+	# disjointness test allocates nothing and the guard covers the cheap half.
+	sh:property [
+		sh:path ex:p ;
+		sh:qualifiedValueShape ex:Inner ;
+		sh:qualifiedMinCount 1 ;
+		sh:qualifiedValueShapesDisjoint true ;
+	] ;
+	sh:property [
+		sh:path ex:p ;
+		sh:qualifiedValueShape ex:Other ;
+		sh:qualifiedMaxCount 1 ;
+		sh:qualifiedValueShapesDisjoint true ;
+	] .
+
+ex:Inner a sh:NodeShape ; sh:property [ sh:path ex:p ; sh:minCount 1 ; sh:nodeKind sh:IRI ] .
+ex:Other a sh:NodeShape ; sh:property [ sh:path ex:q ; sh:datatype xsd:string ] .
+ex:Unsatisfiable a sh:NodeShape ; sh:property [ sh:path ex:p ; sh:minCount 99 ] .
 `
 
 VALIDATION_DATA :: `
@@ -405,6 +461,64 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 			)
 		}
 	})
+}
+
+// The guard above covers whatever the walk reached, and says nothing about how
+// much that was — `track` hands its body an allocator and no `testing.T`, so a
+// validation that ended two shapes in has no way to complain. That is a real
+// hazard rather than a hypothetical one: `Failure.Recursive_Shape` abandons the
+// traversal, and a fixture edit that accidentally made a shape reach itself
+// would shrink the guard's coverage to nothing while leaving it green.
+//
+// So the same fixture is walked once more, outside the tracking allocator, and
+// the two things that would make the guard vacuous are asserted: the walk ran
+// to completion, and it produced results. Cheap, and it is the difference
+// between "nothing leaked" and "nothing leaked, over the shapes we think it
+// covered".
+@(test)
+test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
+	s: shacl.Shapes
+	defer shacl.shapes_destroy(&s)
+	err, _ := shacl_memstore.compile_turtle(&s, transmute([]byte)string(VALIDATION_SHAPES), "")
+	if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
+		return
+	}
+
+	dictionary: memstore.Dictionary
+	memstore.dictionary_init(&dictionary)
+	defer memstore.dictionary_destroy(&dictionary)
+	dataset: memstore.Dataset
+	memstore.dataset_init(&dataset)
+	defer memstore.dataset_destroy(&dataset)
+	_, _ = memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(VALIDATION_DATA))
+
+	b: shacl.Bindings
+	shacl_memstore.bind(&b, &s, &dictionary)
+	defer shacl.bindings_destroy(&b)
+
+	count := 0
+	visit :: proc(data: rawptr, result: shacl.Result) -> bool {
+		n := cast(^int)data
+		n^ += 1
+		return true
+	}
+	failure := shacl_memstore.validate(
+		&s,
+		&b,
+		&dictionary,
+		&dataset,
+		visit,
+		&count,
+		store.DEFAULT_GRAPH,
+	)
+	testing.expectf(
+		t,
+		failure == .None,
+		"the validation guard's fixture no longer completes (%s) — whatever it "+
+		"stopped at is no longer guarded",
+		shacl.failure_message(failure),
+	)
+	testing.expect(t, count > 0, "the validation guard's fixture produced no results at all")
 }
 
 // The abnormal exits have to free like the normal one, and they are the paths

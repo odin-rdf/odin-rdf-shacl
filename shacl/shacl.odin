@@ -95,12 +95,23 @@
 // exactly when the data is worst. A `Report` is the one thing that grows with
 // the violation count — it is a graph, and that is what it is for.
 //
+// **Suppressed validation adds no budget of its own** (SHACL-A-0002), which is
+// the practical payoff of reusing the in-flight `Validation` rather than
+// building a second one. A `sh:not`, an `sh:or` branch, or a
+// `sh:qualifiedValueShape` check costs the same per-focus-node and per-shape
+// allocations any other walk of those shapes would, and nothing besides: the
+// probe that stands in for the caller's visitor is three saved fields and holds
+// no results, and the subclass cache, the recursion set, and the allocator are
+// shared rather than duplicated. Six components nesting arbitrarily deep was the
+// easiest place in the engine to strand memory, so `tests/guards` runs a
+// tracking allocator over the nested forms as well as the flat ones.
 //
-// # Eight contracts a caller should know
 //
-// The first three are this engine's answers to being incomplete or to being
-// written in Odin, the next two are SHACL-A-0001 decisions, and the rest are the
-// spec's; each surprises someone otherwise.
+// # Nine contracts a caller should know
+//
+// The first four are this engine's answers to being incomplete, to being
+// written in Odin, or to what RDF leaves open, the next two are SHACL-A-0001
+// decisions, and the rest are the spec's; each surprises someone otherwise.
 //
 // **An unimplemented constraint parameter is ignored, and `shapes_ignored`
 // says which.** Erroring on an unrecognised `sh:` parameter would reject the
@@ -113,8 +124,24 @@
 // empty**.
 //
 // SHACL Core's catalogue is complete as of SHACL-T-0018, so a non-empty list now
-// means a vendor extension or a SHACL-SPARQL parameter (`sh:sparql`,
-// `sh:shapesGraph`, `sh:entailment`) rather than a missing Core component.
+// means a vendor extension or `sh:sparql` rather than a missing Core component.
+// The record covers `sh:` predicates on the nodes compilation recognised as
+// shapes (§2.1.1) and nothing else, which is the right scope and worth saying
+// plainly: a `sh:` predicate on a node that is not a shape is not a parameter
+// anybody skipped. It is empty for all 98 entries of the vendored suite, and
+// `test_enabled_suites_are_green` asserts that rather than trusting it.
+//
+// **Blank nodes in a report come from three graphs and are standardised apart.**
+// A report names its own structure, nodes of the data graph (`sh:focusNode`,
+// `sh:value`), and nodes of the shapes graph (`sh:sourceShape`) — three separate
+// label spaces merged into one graph, and both backends start every store's
+// labels at `b0`. So the labels are made disjoint on the way in: a data-graph
+// blank node keeps the label the store gave it, because that is what lets a
+// consumer say *which* unnamed node failed; a shapes-graph blank node is
+// prefixed with `s`; and the report's own are `r0`, `r1`, …. Reading a
+// blank-node `sh:sourceShape` back against the shapes graph means stripping the
+// `s`. A caller supplying its own `Term_Loader` owes the other half of this:
+// borrowed labels must not begin with `r` or `s`.
 //
 // **`sh:datatype` skips the lexical check for datatypes it does not model.**
 // §4.1.2 requires the value's lexical form to lie in the datatype's lexical

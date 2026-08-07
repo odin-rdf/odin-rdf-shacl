@@ -273,18 +273,28 @@ test_expected_report_extraction :: proc(t: ^testing.T) {
 // one on is a deliberate act with a task behind it, so it has to be a visible
 // change here as well as in the table.
 //
-// Four came from the spine (SHACL-T-0007 and SHACL-T-0008) and cover what its
-// seven constraint components could green. **`core/node` joined them at
-// SHACL-T-0018**, when the last of §4's non-SPARQL catalogue landed and its
-// thirty-two entries went green together — the first directory the catalogue
-// initiative enabled, and the first that needed more than the spine.
+// **At SHACL-T-0019 that is all seven of them**, which makes this test read as a
+// tautology and is exactly why it is kept rather than deleted. The claim it
+// carries is not "some directories are enabled" but "no directory was quietly
+// switched off" — the cheapest way to make a suite go green is to stop running
+// the part that is red, and from here that is the only way left. A future
+// directory (the SHACL-SPARQL phase vendors `sparql/`) arrives disabled and has
+// to be named here to come on.
 //
-// `core/property` is deliberately still out at 37 of 38: `nodeKind-001` is red
-// and uses nothing beyond the spine, so it is a separate diagnosis rather than a
-// missing component. `core/complex` needs SHACL-SPARQL.
+// See the SUITES table for what each directory cost to enable, and in
+// particular for `core/complex`, which was carried for the whole of
+// SHACL-I-0002 as belonging to the SHACL-SPARQL phase and turned out not to.
 @(test)
 test_exactly_the_green_directories_are_enabled :: proc(t: ^testing.T) {
-	GREEN :: []string{"core/targets", "core/path", "core/misc", "core/validation-reports", "core/node"}
+	GREEN :: []string {
+		"core/targets",
+		"core/path",
+		"core/misc",
+		"core/validation-reports",
+		"core/node",
+		"core/property",
+		"core/complex",
+	}
 
 	for suite in SUITES {
 		want := false

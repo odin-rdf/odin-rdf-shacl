@@ -9,19 +9,22 @@ through [odin-rdf-store](../odin-rdf-store)'s match interface alone, so the
 same shapes validate in-memory and LMDB-backed data identically. Written in
 Odin with no external dependencies.
 
-**Status: SHACL Core's constraint catalogue is complete.** Every constraint
-component of §4 that does not need SPARQL is implemented — the value-type,
-cardinality, value-range, string-based, property-pair, logical, shape-based and
-"other" families, twenty-nine components in all — alongside shapes compilation,
-target resolution, property paths, and `sh:ValidationReport` emission.
+**Status: SHACL Core is complete and the vendored W3C suite is green.** Every
+constraint component of §4 that does not need SPARQL is implemented — the
+value-type, cardinality, value-range, string-based, property-pair, logical,
+shape-based and "other" families, twenty-nine components in all — alongside
+shapes compilation, target resolution, property paths, and
+`sh:ValidationReport` emission.
 
-Five of the W3C SHACL suite's seven `core/` directories are green:
-`core/targets`, `core/path`, `core/misc`, `core/validation-reports`, and
-`core/node`, every entry, against both storage backends, at both `Term_ID`
-widths. `core/property` stands at 37 of 38 and `core/complex` needs
-SHACL-SPARQL, so both remain disabled — this repository claims conformance only
-for directories where *every* entry passes. See `.metis/` for the vision, the
-initiative, and the ADRs.
+**All 98 entries of the W3C SHACL 1.0 suite's `core/` tree pass**, across all
+seven directories, against both storage backends, at both `Term_ID` widths.
+There is no skip list and no expected-failure file: this repository claims
+conformance only for directories where *every* entry passes, and every directory
+is now one of them. See `.metis/` for the vision, the initiatives, and the ADRs.
+
+What is left is SHACL-SPARQL — `sh:sparql` and SPARQL-based constraint
+components — which is a later phase and the only thing that would add
+odin-rdf-sparql as a dependency. SHACL Core does not depend on it and will not.
 
 **A constraint this engine does not implement is ignored, and the compile says
 so.** Erroring instead would reject the spec's own non-validating annotations
@@ -33,8 +36,9 @@ before trusting a `sh:conforms true`**: a report with no results and a non-empty
 ignored list is not a validated graph.
 
 Now that SHACL Core's catalogue is complete, a non-empty list means a vendor
-extension or a SHACL-SPARQL parameter (`sh:sparql`, `sh:shapesGraph`,
-`sh:entailment`) — not a missing Core component.
+extension or `sh:sparql` — not a missing Core component. It is empty for all 98
+entries of the vendored suite, and the suite runner asserts that rather than
+assuming it.
 
 **`sh:datatype` checks the lexical form, but only for the datatypes it
 models.** §4.1.2 asks two things — that the datatype IRI matches, and that the
@@ -229,6 +233,22 @@ not a result: `.None` means the traversal completed or your visitor stopped it,
 and anything else means the processor could not answer — which is not the same
 as "no".
 
+**Reading blank nodes back out of a report.** A report names nodes in three
+graphs at once, so their blank-node labels are kept apart — otherwise the data
+graph's first blank node and the shapes graph's first blank node, both `_:b0` as
+the store labels them, would merge into one node in the report:
+
+| Label   | Comes from                                             |
+| ------- | ------------------------------------------------------ |
+| `_:b…`  | the **data graph**, exactly as the store labelled it — `sh:focusNode`, `sh:value` |
+| `_:s…`  | the **shapes graph**, its store label prefixed with `s` — `sh:sourceShape` |
+| `_:r…`  | the **report itself**: the report node, each result, and blank-node `sh:resultPath` structures |
+
+So `sh:value _:b0` is the data graph's `_:b0` and can be looked up there
+directly, which is the point — it is how a result says *which* unnamed node
+failed. A blank-node `sh:sourceShape _:sb3` is the shapes graph's `_:b3`, with
+the `s` stripped.
+
 There is a fourth, narrower question: **does one node conform to one shape?**
 
 ```odin
@@ -307,9 +327,11 @@ valid on re-entry") stays addable later if evidence asks for it.
 to. A graph where `ex:a` is `ex:partOf` `ex:b` which is `ex:partOf` `ex:a` is
 ordinary, and validates: recursion is a property of the *shapes*, detected on
 the set of shapes currently being validated. What triggers it is a shape that
-reaches itself — through `sh:property` today, and through `sh:node` once the
-catalogue initiative adds it. Every property-path form is separately cycle-safe
-over data, so `sh:zeroOrMorePath` over the graph above terminates.
+reaches itself — through `sh:property`, through any of the logical combinators,
+through `sh:node`, or through `sh:qualifiedValueShape`. **`sh:node` is how you
+write one by accident**, on data where an asset points at an asset. Every
+property-path form is separately cycle-safe over data, so `sh:zeroOrMorePath`
+over the graph above terminates.
 
 ## License
 

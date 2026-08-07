@@ -18,69 +18,64 @@ SUITE_ROOT :: #directory + ".."
 // There is no skip list and no expected-failure file; a directory is either
 // entirely passing or entirely off, and turning one on is a deliberate act
 // recorded in the task that did it.
-//
-// `floor` is how many entries a **disabled** directory passes today, pinned as
-// a minimum rather than an equality. It enables nothing and excuses nothing; it
-// exists because the catalogue initiative would otherwise run most of its
-// length with no measured progress at all. An enabled directory leaves it 0 —
-// it is fully green by definition. See floor_test.odin for what the number does
-// and, more importantly, does not mean.
 Suite :: struct {
 	dir:      string,
 	includes: int,
 	entries:  int,
 	enabled:  bool,
-	floor:    int,
 }
 
 // The inventory, pinned at the commit recorded in tests/w3c/README.md.
 //
-// `core/targets` and `core/path` are the spine's exit criteria, enabled in
-// SHACL-T-0007 when the validator that greens them landed.
+// **Every directory is enabled at SHACL-T-0019, and the corpus is 98 of 98.**
+// The order they came on records what each one cost:
 //
-// `core/misc` and `core/validation-reports` joined them in SHACL-T-0008.
-// Neither exercises a constraint component outside the spine's seven, and the
-// verification pass found both green — `core/misc` only after three bugs it
-// alone catches were fixed: `sh:resultMessage` (the report renames
-// `sh:message`), `sh:severity` accepting any IRI rather than three, and
-// `sh:conforms` being false for *any* result rather than only violations.
-// Leaving a green directory disabled would misstate the position as surely as
-// enabling a broken one, so they are on.
+//   - `core/targets` and `core/path` were the spine's exit criteria
+//     (SHACL-T-0007), green when the validator that produces a report landed.
+//   - `core/misc` and `core/validation-reports` joined at SHACL-T-0008, and
+//     `core/misc` only after three bugs it alone catches were fixed:
+//     `sh:resultMessage` (the report renames `sh:message`), `sh:severity`
+//     accepting any IRI rather than three, and `sh:conforms` being false for
+//     *any* result rather than only violations.
+//   - `core/node` joined at SHACL-T-0018 — the first directory the catalogue
+//     initiative enabled, and the first needing more than the spine's seven
+//     components. All thirty-two entries went green at once when the
+//     shape-based constraints landed.
+//   - `core/property` and `core/complex` joined here, at SHACL-T-0019, and
+//     **both were blocked by the same defect rather than by any missing
+//     component**. A report names blank nodes from three graphs — its own, the
+//     data graph's, and the shapes graph's — and both stores label loaded blank
+//     nodes `b0`, `b1`, … from zero, per store. The report merged all three
+//     namespaces without standardising them apart, so `property/nodeKind-001`
+//     came out asserting `_:b3 sh:sourceShape _:b3` (a result node and the shape
+//     it blamed collapsed into one node) and `complex/personexample` conflated a
+//     blank-node source shape with a data-graph value. See `shacl/report.odin`
+//     — `fresh_blank` and `shape_term` — for the fix and for the namespaces.
 //
-// **`core/node` joined them at SHACL-T-0018**, the first directory the catalogue
-// initiative enabled and the first that needs more than the spine's seven
-// components: with the shape-based constraints landed, all thirty-two entries
-// went green at once.
+// **`core/complex` is the entry in this table that changed meaning, and it is
+// worth reading before the SHACL-SPARQL phase starts.** It was carried through
+// SHACL-I-0002 as belonging to that phase, on the documented belief that its two
+// entries need `sh:sparql`, `sh:shapesGraph`, and `sh:entailment` — and that
+// `shacl-shacl` passed only because an engine that ignores a constraint produces
+// the conforming report it expects. Reading the corpus at SHACL-T-0019 says
+// otherwise. `sh:sparql` occurs exactly once in `shacl-shacl-data-shapes.ttl`,
+// as an object of `sh:targetSubjectsOf`; `sh:shapesGraph` and `sh:entailment`
+// occur as objects of `sh:targetObjectsOf`. All three are *targeted vocabulary*,
+// not constraint parameters, and nothing in that file asks for a query engine.
 //
-// The two that remain need nothing further from the catalogue. `core/property`
-// is at 37 of 38 and the missing entry is `nodeKind-001`, which uses only
-// components the spine shipped — a diagnosis rather than a component, and
-// SHACL-T-0019's. `core/complex` needs `sh:sparql`, so it belongs to the
-// SHACL-SPARQL phase.
-// The floors were measured by this table's own instrumentation at SHACL-T-0009,
-// and they reproduce the diagnostic figure SHACL-I-0001 closed on: 18 of the 69
-// entries in `core/node` and `core/property`, which is why the catalogue's real
-// work is 51 entries rather than 69.
-//
-// **`core/complex` is pinned at 0 deliberately, and it is the exception worth
-// reading.** It scores 1 of 2 today, and that entry — `shacl-shacl`, SHACL's own
-// shapes validating SHACL's own shapes — expects `sh:conforms true`. It needs
-// `sh:sparql`, `sh:shapesGraph`, and `sh:entailment`, none of which exist here,
-// so what the engine is doing is not validating it but ignoring most of it and
-// finding nothing to report. Pinning that as a floor would pin the clearest
-// example in the tree of an entry passing for the wrong reason — and it is
-// fragile in the other direction too: as the catalogue lands components, that
-// shapes graph starts producing real results and the entry may well go red
-// before it goes green for the right reason. It belongs to the SHACL-SPARQL
-// phase, and it is counted and printed here without being pinned.
+// The green is not inaction either, which was the standing worry and is now
+// measured rather than argued: the ignored-parameter record is empty for both
+// entries, and breaking `sh:datatype` or `sh:nodeKind` in the evaluator turns
+// **both** of them red. An engine that was doing nothing would leave
+// `shacl-shacl` green under any breakage at all.
 SUITES := []Suite {
-	{"core/targets", 7, 7, true, 0},
-	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, true, 0},
-	{"core/property", 38, 38, false, 37},
-	{"core/misc", 5, 5, true, 0},
-	{"core/complex", 2, 2, false, 0},
-	{"core/validation-reports", 1, 1, true, 0},
+	{"core/targets", 7, 7, true},
+	{"core/path", 13, 13, true},
+	{"core/node", 32, 32, true},
+	{"core/property", 38, 38, true},
+	{"core/misc", 5, 5, true},
+	{"core/complex", 2, 2, true},
+	{"core/validation-reports", 1, 1, true},
 }
 
 // TOTAL_ENTRIES is asserted against the sum of the table above, so adding a
@@ -92,92 +87,27 @@ TOTAL_ENTRIES :: 98
 // A directory that quietly stopped being enabled, or a runner that quietly
 // skipped an entry, has to fail somewhere; this is where.
 //
-// **58 at SHACL-T-0018**, up from the spine's 26: `core/node`'s thirty-two
-// entries went green when the shape-based constraints landed, so the directory
-// is on. It is the first one the catalogue initiative enabled and the first that
-// needs more than the spine's seven components — every one of §4's twenty-nine
-// non-SPARQL components is exercised by something in it.
-ENABLED_ENTRIES :: 58
+// **98 at SHACL-T-0019**, up from 58: the whole vendored corpus. It stayed
+// separate from TOTAL_ENTRIES rather than being replaced by it, because the
+// SHACL-SPARQL phase vendors `sparql/` and the two part company again on that
+// day.
+ENABLED_ENTRIES :: 98
 
-// PROGRESS_FLOOR is the sum of the disabled directories' floors, pinned
-// separately from them for the same reason ENABLED_ENTRIES is pinned separately
-// from `enabled`: a number that can be edited in one place only is not a pin.
-// Raising a directory's floor without raising this fails.
+// **The progress floor was retired at SHACL-T-0019**, along with
+// `floor_test.odin` and the `floor` field on Suite. It was SHACL-T-0009's whole
+// task and it did the job it was built for: per-directory enablement gave the
+// catalogue initiative no signal until nearly every component of §4 existed, so
+// a non-gating per-entry count filled ten tasks' worth of silence, moving 18 →
+// 21 → 31 → 42 → 49 → 51 → 63 as the families landed.
 //
-// It starts at the catalogue initiative's measured 18 — `core/node` 7 plus
-// `core/property` 11 — and every component task is expected to move it.
+// It is gone because a floor measures *disabled* directories and there are none
+// left. A floor over an empty set is a test that asserts nothing while looking
+// like a scoreboard, which is the exact failure mode the floor's own header
+// spent a page warning about.
 //
-// **21 at SHACL-T-0012**, and the four entries it moved split two ways, which is
-// worth recording because only two of them are the engine getting better.
-// `sh:datatype` gaining its §4.3.1 lexical check took `property/datatype-ill-formed`
-// and `node/datatype-001`. The other two — `node/class-002` and the rest of
-// `node/datatype-001`'s expected graph — came from a defect in this harness:
-// `expected_report` followed `sh:focusNode` into the *data* graph whenever an
-// entry's focus node was a blank node, so it demanded triples no report can
-// contain. Every `core/node` value-range entry has that shape, so it would have
-// been read as an engine failure for the whole of SHACL-T-0013.
-//
-// **31 at SHACL-T-0013**, which is every one of the ten value-range entries in
-// the corpus and nothing else: `core/node` gained its six `min`/`maxInclusive`
-// and `min`/`maxExclusive` entries, `core/property` its four.
-//
-// **42 at SHACL-T-0014**, again the whole family at once: the eleven remaining
-// `minLength`, `maxLength`, `pattern`, `languageIn`, and `uniqueLang` entries.
-// `property/uniqueLang-002` was already in the floor and stayed there for a
-// different reason — it used to pass because nothing implemented `sh:uniqueLang`,
-// and now passes because the implementation reads `"1"^^xsd:boolean` as not
-// switching the component on, which is what that entry exists to check. It is
-// the one entry in the tree that went from passing-by-inaction to
-// passing-by-validation, which is the transition the note above `core/complex`
-// warns can go the other way.
-//
-// **49 at SHACL-T-0015** — the seven property-pair entries. It moved by nothing
-// at all on the first run, which is the failure mode worth recording here as
-// well as in the code: `bindings_init` resolves a constraint's parameter to a
-// data-store ID from a kind-switch, a component missing from it reads its
-// parameter as unbound rather than erroring, and four components therefore
-// dispatched, ran, and found an empty second set on every focus node. Twenty
-// entries of the original 51 remain.
-//
-// **51 at SHACL-T-0016** — `node/closed-001` and `closed-002`, the whole of
-// `sh:closed` in the two catalogue directories. It is the smallest move any
-// component task has made and the only one that needed a new way to read the
-// data graph: `Access` gained a fourth verb, because its three existing ones
-// each yield a single quad position and this component wants a predicate and its
-// object together. `core/complex` is unchanged at 1 of 2, still pinned at 0.
-// Eighteen entries of the original 51 remain, all of them behind the logical
-// combinators and the shape-based constraints.
-//
-// **63 at SHACL-T-0017**, the largest single move of the initiative: `core/node`
-// 24 → 31 of 32 and `core/property` 27 → 32 of 38. Twelve entries, not the
-// eleven the task predicted — `property/datatype-003` is a `sh:or` entry named
-// after what its branches contain, so counting by filename undercounts the
-// family by one.
-//
-// **What remains is six entries, and only five of them are SHACL-T-0018's.**
-// `core/node` is one away and it is `node-001`. `core/property` is six away:
-// `node-001`, `node-002`, and the three `qualified*` entries are the shape-based
-// constraints, and the sixth is **`property/nodeKind-001`, which uses nothing
-// beyond the spine** — six plain `sh:nodeKind` property shapes. It has been red
-// since the floor was first measured and nothing has moved it. So enabling
-// `core/property` needs that entry diagnosed as well as SHACL-T-0018 landed, and
-// SHACL-T-0019 should not assume the catalogue closing is enough. The first
-// place to look is report comparison rather than the engine: its expected report
-// carries eighteen results whose `sh:sourceShape` are shapes-graph blank nodes
-// and whose `sh:value` are *data*-graph blank nodes, which is the hardest
-// isomorphism case in the corpus and the shape of the harness defect
-// SHACL-T-0012 already found once.
-//
-// **37 at SHACL-T-0018, and the number going down is the good news.** All five
-// of that task's entries went green, which took `core/node` to 32 of 32 and
-// `core/property` to 37 of 38. A green directory is **enabled**, and an enabled
-// directory carries no floor — so `core/node`'s thirty-two entries left this sum
-// and joined `ENABLED_ENTRIES` instead, where they are a conformance claim
-// rather than a direction of travel. The floor now measures one directory:
-// `core/property`, one entry short.
-//
-// The arithmetic, since a falling monotonic-looking number deserves it:
-// 63 = node 31 + property 32; 37 = property 37, with node's 32 promoted. The
-// catalogue's original 51 entries of work are 50 done and one left, and the one
-// left is `nodeKind-001`, which is not a component at all.
-PROGRESS_FLOOR :: 37
+// **The SHACL-SPARQL phase will want it back** the day it vendors `sparql/`, and
+// should restore it rather than reinvent it: `git show SHACL-T-0019~1 --
+// tests/w3c/harness/floor_test.odin`. What is worth carrying back with it is the
+// caveat it printed on every run — a count is a direction of travel, not a
+// conformance claim, because an entry expecting `sh:conforms true` passes
+// whether it was validated or ignored.

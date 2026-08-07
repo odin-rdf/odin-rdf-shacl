@@ -4,17 +4,17 @@ level: initiative
 title: "The SHACL Core constraint catalogue: the rest of §4"
 short_code: "SHACL-I-0002"
 created_at: 2026-08-06T19:09:51.760962+00:00
-updated_at: 2026-08-06T20:45:33.206531+00:00
+updated_at: 2026-08-07T10:39:45.213399+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 estimated_complexity: XL
 initiative_id: the-shacl-core-constraint
 ---
@@ -298,6 +298,81 @@ odin-rdf-sparql; public API documented to the family contract standard; the stor
 language-tag write-ups brought to review.
 
 ## Status Updates
+
+- **2026-08-07 — Completed. SHACL Core is done and the vendored corpus is 98 of 98.**
+
+  Every exit criterion met, and two exceeded. Eleven tasks, SHACL-T-0009 through
+  SHACL-T-0019, in the risk-first order decided at design.
+
+  **What shipped.** All twenty-nine of §4's non-SPARQL constraint components; shape
+  discovery widened to §2.1.1; suppressed validation and SHACL-A-0002; lexical-to-value
+  conversion and the `sh:datatype` well-formedness debt the spine left; the
+  ignored-parameter record. Validation still reads the data graph through the published
+  match interface alone, and still has zero dependency on odin-rdf-sparql — asserted by
+  `tests/purity`, not trusted.
+
+  **The exit criteria said `core/node` and `core/property`. The suite is all seven
+  directories, 98 of 98**, both backends, both `Term_ID` widths, no skip list. Two
+  surprises took it past the target, and both are SHACL-T-0019's:
+
+  1. **`core/property` and `core/complex` were blocked by the same defect, and it was
+     neither a component nor the harness.** A report merges blank nodes from three graphs —
+     its own, the data graph's, the shapes graph's — and both stores label loaded blank
+     nodes densely from `b0`, *per store*. The emitter merged all three namespaces. One
+     half the suite caught (`property/nodeKind-001` asserting `_:b3 sh:sourceShape _:b3`);
+     the other half it structurally could not, because every `core/` entry names one file
+     as both graphs, so conflating them is accidentally correct. Both fixed.
+  2. **`core/complex` was never a SHACL-SPARQL directory**, contrary to this document's
+     Non-Goals. `sh:sparql`, `sh:shapesGraph`, and `sh:entailment` appear in
+     `shacl-shacl-data-shapes.ttl` only as *targeted vocabulary* — objects of
+     `sh:targetSubjectsOf` and `sh:targetObjectsOf` — not as constraint parameters. The
+     belief survived discovery, design, decomposition, and ten task write-ups because each
+     was reading the previous one; nobody read the file until the closing task. Enabled,
+     with its green measured rather than asserted: the ignored record is empty for both
+     entries, and breaking `sh:datatype` or `sh:nodeKind` turns both red.
+
+  **What the initiative's own design got right, and it is worth recording.** Two calls
+  decided at design paid off exactly as argued:
+
+  - **Risk-first ordering.** SHACL-A-0002 landed third, before any of its six consumers
+    existed. Its cost was visible — the progress floor barely moved for three tasks — and
+    the payoff is that no component was retrofitted onto it. SHACL-T-0017 moved the floor
+    by twelve entries in one task, the largest single move of the initiative.
+  - **The progress floor itself.** Built as SHACL-T-0009 because per-directory enablement
+    gave this initiative no signal until nearly every component existed. It moved 18 → 21 →
+    31 → 42 → 49 → 51 → 63 and did exactly what it was for. **Retired at SHACL-T-0019**,
+    with no disabled directories left to measure; the SHACL-SPARQL phase restores it from
+    `git show SHACL-T-0019~1 -- tests/w3c/harness/floor_test.odin`.
+
+  **Where the design was wrong, recorded rather than absorbed.** `core/complex` above is
+  the big one. Smaller: the seam was documented as four edits and is five — `bindings_init`
+  resolves a constraint's parameter to a data-store ID from a kind-switch, and a component
+  missing from it reads its parameter as unbound and silently reports nothing
+  (SHACL-T-0015, four components affected). And `sh:closed` needed a fourth `Access` verb,
+  which the store served with one ordinary `match`.
+
+  **The two write-ups, both refreshed for review.** `docs/store-evidence.md`: two findings
+  in eleven tasks, neither a capability gap, and **no proposal to odin-rdf-store**. The
+  second is the first that is about the store at all — a *contract* rather than a missing
+  verb: blank-node labels are dense from `b0` per dictionary, so two dictionaries collide
+  by construction, and any consumer merging terms from both must standardise them apart.
+  Documented only in the store's own `load.odin`; one sentence of upstream documentation is
+  the only thing on offer, and it is a suggestion, not a proposal.
+  `docs/language-tag-status.md`: the trigger did not fire and now cannot — the corpus runs
+  in full, and the two components that read a tag fold at comparison because SHACL requires
+  it. Residual exposure is `sh:hasValue` and `sh:in`, which compare terms. **Recommendation
+  changed** to extending the trigger to "a suite entry fails *or* a user reports it".
+
+  **Left open, deliberately.** No benchmark — `bench/` does not exist, so SHACL-A-0002's
+  memoisation review trigger (*measured* cost) still cannot be pulled, and the qualified
+  family provably asks the same `(shape, node)` question twice. Duplicate results are not
+  deduplicated, and no entry in all 98 exercises it. `sh:detail` is absent and appears
+  nowhere in the corpus. All three are in `docs/handover-sparql.md`.
+
+  **Handover.** `docs/handover-sparql.md` — what the SPARQL phase inherits, where the
+  `sparql:` collection goes in all three places, the seam as it actually is, and the two
+  practices that paid: read the corpus entries before writing the component, and confirm
+  the tests bite by breaking the implementation.
 
 - **2026-08-06 — Transitioned to active; SHACL-T-0009 implemented and awaiting review.**
   The progress floor exists and is pinned, so every task after this one has a number that

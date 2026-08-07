@@ -435,6 +435,134 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 	)
 }
 
+// Blank nodes from three graphs meet in one report, and they have to stay
+// apart (SHACL-T-0019). This is the test the suite could not be: every `core/`
+// entry names one file as both its data graph and its shapes graph, so the two
+// loads assign identical labels and a report that merged the two namespaces
+// would be accidentally right. Here they are two files, written so that both
+// stores hand out `b0` for nodes that have nothing to do with each other — the
+// shapes graph's blank property shape and the data graph's blank value.
+//
+// The property asserted is the merge rule itself rather than the labels that
+// implement it: no blank node the report *borrowed* may be a blank node the
+// report *built*, and the two borrowed graphs may not share one either. It
+// bites in both directions — swapping `fresh_blank`'s prefix back to `b` fails
+// it on the first clause, and dropping `shape_term`'s prefix fails it on the
+// second.
+@(test)
+test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
+	shapes_src := `
+		@prefix sh: <http://www.w3.org/ns/shacl#> .
+		@prefix ex: <http://example.org/> .
+		ex:Shape a sh:NodeShape ;
+			sh:targetClass ex:Thing ;
+			sh:property [ sh:path ex:p ; sh:nodeKind sh:IRI ] .`
+	data_src := `
+		@prefix ex: <http://example.org/> .
+		ex:thing a ex:Thing ; ex:p _:anon .`
+
+	model: shacl.Shapes
+	defer shacl.shapes_destroy(&model)
+	{
+		dictionary: memstore.Dictionary
+		memstore.dictionary_init(&dictionary)
+		defer memstore.dictionary_destroy(&dictionary)
+		dataset: memstore.Dataset
+		memstore.dataset_init(&dataset)
+		defer memstore.dataset_destroy(&dataset)
+		_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)shapes_src)
+		if !testing.expectf(t, load_err.message == "", "shapes load: %s", load_err.message) {
+			return
+		}
+		err := shacl_memstore.compile(&model, &dictionary, &dataset)
+		if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
+			return
+		}
+	}
+
+	dictionary: memstore.Dictionary
+	memstore.dictionary_init(&dictionary)
+	defer memstore.dictionary_destroy(&dictionary)
+	dataset: memstore.Dataset
+	memstore.dataset_init(&dataset)
+	defer memstore.dataset_destroy(&dataset)
+	_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)data_src)
+	if !testing.expectf(t, load_err.message == "", "data load: %s", load_err.message) {
+		return
+	}
+
+	bindings: shacl.Bindings
+	shacl_memstore.bind(&bindings, &model, &dictionary)
+	defer shacl.bindings_destroy(&bindings)
+
+	r: shacl.Report
+	shacl.report_init(&r)
+	defer shacl.report_destroy(&r)
+	failure := shacl_memstore.validate_report(&r, &model, &bindings, &dictionary, &dataset)
+	if !testing.expectf(t, failure == .None, "validate: %s", shacl.failure_message(failure)) {
+		return
+	}
+
+	// A blank node the report built is one it ever used as a subject; a report
+	// never asserts anything about a node it borrowed.
+	built: map[string]bool
+	defer delete(built)
+	for tr in shacl.report_triples(&r) {
+		if b, is_blank := tr.subject.(rdf.Blank_Node); is_blank {
+			built[string(b)] = true
+		}
+	}
+
+	source_shape, value: string
+	for tr in shacl.report_triples(&r) {
+		pred, is_iri := tr.predicate.(rdf.IRI)
+		if !is_iri {
+			continue
+		}
+		b, is_blank := tr.object.(rdf.Blank_Node)
+		if !is_blank {
+			continue
+		}
+		switch string(pred) {
+		case shacl.SOURCE_SHAPE:
+			source_shape = string(b)
+		case shacl.VALUE:
+			value = string(b)
+		}
+	}
+
+	// Vacuously passing is the failure mode worth guarding: if the entry stopped
+	// producing a blank source shape or a blank value, the rest proves nothing.
+	if !testing.expect(t, source_shape != "", "expected a blank-node sh:sourceShape") {
+		return
+	}
+	if !testing.expect(t, value != "", "expected a blank-node sh:value") {
+		return
+	}
+
+	testing.expectf(
+		t,
+		!built[source_shape],
+		"sh:sourceShape _:%s is also a node the report built — the shapes graph's "+
+		"blank nodes and the report's own share a label space",
+		source_shape,
+	)
+	testing.expectf(
+		t,
+		!built[value],
+		"sh:value _:%s is also a node the report built — the data graph's blank "+
+		"nodes and the report's own share a label space",
+		value,
+	)
+	testing.expectf(
+		t,
+		source_shape != value,
+		"sh:sourceShape and sh:value are both _:%s — a shape in one graph and a "+
+		"value in another, merged into one node",
+		source_shape,
+	)
+}
+
 // The conformance-only consumer: it stops at the first result, which is what
 // early exit is for. Asserted here on a synthetic stream;
 // `shacl/memstore/validate_test.odin` asserts it end to end, on a traversal

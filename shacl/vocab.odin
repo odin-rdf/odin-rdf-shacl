@@ -101,7 +101,8 @@ IGNORED_PROPERTIES :: NS + "ignoredProperties"
 // `sh:and`, `sh:or`, and `sh:xone` take an RDF list and the *members* are the
 // shapes; the other three name a shape directly. Four of the six are the logical
 // combinators of §4.6 and validate as of SHACL-T-0017; `sh:node` and
-// `sh:qualifiedValueShape` are §4.7 and still only discovered.
+// `sh:qualifiedValueShape` are §4.7 and validate as of SHACL-T-0018. All six are
+// both discovered and implemented.
 NODE :: NS + "node"
 NOT :: NS + "not"
 AND :: NS + "and"

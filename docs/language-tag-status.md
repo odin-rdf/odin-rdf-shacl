@@ -1,7 +1,12 @@
-# Language-tag case: status at the end of SHACL-I-0001
+# Language-tag case: status at the end of SHACL-I-0002
 
-**From:** odin-rdf-shacl, SHACL-I-0001 (the SHACL Core spine)
+**From:** odin-rdf-shacl, SHACL-I-0002 (the SHACL Core constraint catalogue)
 **Status:** for review. **odin-rdf-parser was not touched, and the trigger did not fire.**
+
+Refreshed at SHACL-T-0019. The verdict is unchanged from SHACL-I-0001's, and it is now
+unchanged *with the components that were supposed to change it built* — which is the
+only thing this revision adds and the reason it was an acceptance criterion rather
+than a note.
 
 ## The short version
 
@@ -77,23 +82,58 @@ bench numbers showing the hot path unchanged.
    `sh:message` handling, so if language tags were going to matter to the report path,
    that is where it would have shown.
 
+3. **SHACL-T-0014, the only task that could have fired it.** The string components
+   landed — `sh:languageIn` and `sh:uniqueLang` among them — and the trigger stayed
+   silent. This is the finding the decomposition asked for by name, because the corpus
+   survey above is a prediction until the components that read language tags exist.
+
+   Two of them read a tag, and **neither reads it as a term**:
+
+   - `sh:languageIn` implements RFC 4647 §3.3.1 basic filtering (`language_matches` in
+     `shacl/check.odin`), which is case-insensitive and prefix-based *by specification*.
+     It is immune to interning by construction, not by luck, and `property/languageIn-001`
+     — `"Hill"@en-NZ` against the range `en` — is the entry that would catch a
+     case-sensitive implementation of it.
+   - `sh:uniqueLang` compares tags to each other with `strings.equal_fold`, for the same
+     reason and stated at the same place in the code. Two literals whose tags differ only
+     in case *are* the same language, and this component has to say so whatever the
+     parser interns.
+
+   So the two components that touch language tags both fold at the point of comparison,
+   because SHACL requires it of them. That is worth stating plainly, because it means the
+   suite's silence is not evidence about the parser at all in these two cases — they
+   would pass under either interning scheme.
+
+4. **SHACL-T-0019, at the whole corpus.** All 98 entries of `core/` are green, both
+   backends, both widths. Every directory the design phase named as the likely site of
+   exposure — the ones exercising `sh:hasValue`, `sh:in`, `sh:uniqueLang`, and
+   `sh:languageIn` against language-tagged literals — now runs, and none of them
+   depends on folding.
+
 ## Where the exposure passes
 
-**Nowhere, on current evidence.** The catalogue initiative inherits the *decision*, not a
-problem: it will implement `sh:uniqueLang`, `sh:hasValue`, and `sh:in` against
-language-tagged literals, and the corpus survey says none of the entries exercising them
-depends on case folding.
+**Nowhere in the corpus, and the corpus is now fully run.** SHACL-I-0001's answer was a
+prediction about components that did not exist; this is the same answer with all of them
+built and every entry green. The prediction held.
+
+Where the exposure does still sit is `sh:hasValue` and `sh:in`, which compare **terms**
+and therefore would see `"x"@EN` and `"x"@en` as different. No suite entry exercises that
+combination, so nothing here fails — but that is a fact about the corpus rather than
+about the semantics, and it is the exact case the parser-side fix would settle.
 
 That is a statement about this corpus, not about the world. A user's shapes graph writing
-`"x"@EN` where their data writes `"x"@en` gets a spurious violation today, and the family
-has already decided that is a bug in the parser. What is missing is not a decision but a
-reason to spend the change now.
+`sh:hasValue "x"@EN` where their data writes `"x"@en` gets a spurious violation today,
+and the family has already decided that is a bug in the parser. What is missing is not a
+decision but a reason to spend the change now.
 
 ## Recommendation
 
-Leave it. Keep the decision and this design recorded, and keep the trigger — extended, if
-you want, from "a suite entry fails" to "a suite entry fails **or** a user reports it",
-since the suite has now demonstrated it will not be the one to raise the alarm.
+Leave it. Keep the decision and this design recorded, and **extend the trigger**, which
+is the one recommendation that changed at SHACL-T-0019: from "a suite entry fails" to "a
+suite entry fails **or** a user reports it". At SHACL-I-0001 that was offered as an
+option; now that the whole corpus runs green, the suite has demonstrated it will not be
+the one to raise the alarm, and a trigger that can only be pulled by something that
+cannot happen is not a trigger.
 
 If the family would rather close the question than carry it, the change is small,
 designed, and hot-path-neutral by construction — but it belongs in odin-rdf-parser's own

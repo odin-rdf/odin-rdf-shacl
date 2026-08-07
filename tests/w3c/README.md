@@ -20,38 +20,66 @@ odin-rdf-parser and odin-rdf-sparql share, so it carries its own pin.
 98 entries across seven directories, every one `sht:Validate` with
 `mf:status sht:approved` — no proposed entries, no other entry type.
 
-| Directory | Entries | State | Owner |
-| --- | ---: | --- | --- |
-| `core/targets/` | 7 | **enabled** (SHACL-T-0007) | **SHACL-I-0001** (spine exit criteria) |
-| `core/path/` | 13 | **enabled** (SHACL-T-0007) | **SHACL-I-0001** (spine exit criteria) |
-| `core/node/` | 32 | disabled, floor 7 | **SHACL-I-0002** (catalogue) |
-| `core/property/` | 38 | disabled, floor 11 | **SHACL-I-0002** (catalogue) |
-| `core/misc/` | 5 | **enabled** (SHACL-T-0008) | **SHACL-I-0001** |
-| `core/complex/` | 2 | disabled, floor 0 | SHACL-SPARQL phase |
-| `core/validation-reports/` | 1 | **enabled** (SHACL-T-0008) | **SHACL-I-0001** |
+| Directory | Entries | Enabled by |
+| --- | ---: | --- |
+| `core/targets/` | 7 | SHACL-T-0007 (spine exit criteria) |
+| `core/path/` | 13 | SHACL-T-0007 (spine exit criteria) |
+| `core/node/` | 32 | SHACL-T-0018 (shape-based constraints) |
+| `core/property/` | 38 | SHACL-T-0019 |
+| `core/misc/` | 5 | SHACL-T-0008 |
+| `core/complex/` | 2 | SHACL-T-0019 |
+| `core/validation-reports/` | 1 | SHACL-T-0008 |
 
-**26 entries enabled.** The family's rule holds — enabled means fully green, no
-skip list, no expected-failure file — and `ENABLED_ENTRIES` is pinned against
-both the table and the number the runner actually ran.
+**All 98 entries are enabled and green**, against both storage backends at both
+`Term_ID` widths. The family's rule holds unchanged — enabled means fully green,
+no skip list, no expected-failure file — and `ENABLED_ENTRIES` is pinned against
+both the table and the number the runner actually ran, so an entry that stopped
+being executed fails rather than disappears.
 
-### The progress floor
+`ENABLED_ENTRIES` stays a separate pin from `TOTAL_ENTRIES` even though they are
+equal today: the SHACL-SPARQL phase vendors `sparql/`, and on that day the two
+part company again.
 
-The three disabled directories additionally carry a **floor**: how many of their
-entries pass today, pinned as a *minimum* and asserted to only ever go up
-(SHACL-T-0009). It exists because per-directory enablement gives the catalogue
-initiative no signal at all until nearly every constraint component of §4 is
-built — two directories remain, and neither can be enabled before then.
+### `core/complex` changed meaning at SHACL-T-0019
 
-It **enables nothing and excuses nothing**: a directory in the floor is still
-disabled, and the only conformance claim this repository makes is the set of
-enabled directories. Raising a floor is a deliberate edit, exactly as enabling a
-directory is, and the counts are printed on every run whether they pass or not.
+It is worth reading before the SHACL-SPARQL phase starts, because the
+documentation was wrong about it for the whole of SHACL-I-0002. That initiative
+carried `core/complex` as belonging to the SPARQL phase on the belief that its
+two entries need `sh:sparql`, `sh:shapesGraph`, and `sh:entailment`, and that
+`shacl-shacl` passed only because an engine that ignores a constraint produces
+the conforming report it expects.
 
-**A floor is not a scoreboard**, and the reason is worth carrying with the
-number: an entry expecting `sh:conforms true` passes whether it was validated or
-merely ignored. `core/complex/shacl-shacl` is the clearest case — it needs
-`sh:sparql`, `sh:shapesGraph`, and `sh:entailment`, none of which exist here, and
-it passes anyway — which is why that directory is counted but pinned at 0.
+Reading the corpus says otherwise. `sh:sparql` occurs exactly once in
+`shacl-shacl-data-shapes.ttl`, as an object of `sh:targetSubjectsOf`;
+`sh:shapesGraph` and `sh:entailment` occur as objects of `sh:targetObjectsOf`.
+All three are *targeted vocabulary* — SHACL's own shapes saying "anything that
+is the subject of a `sh:sparql` triple is a shape" — not constraint parameters,
+and nothing in that file asks for a query engine.
+
+The green is not inaction either, which was the standing worry and is now
+measured rather than argued. The ignored-parameter record is empty for both
+entries, and breaking `sh:datatype` or `sh:nodeKind` in the evaluator turns
+**both** of them red — an engine that was doing nothing would leave
+`shacl-shacl` green under any breakage at all.
+
+### The progress floor, retired
+
+SHACL-T-0009 added a **floor**: how many entries each *disabled* directory
+passed, pinned as a minimum and asserted to only ever go up. It existed because
+per-directory enablement gave the catalogue initiative no signal at all until
+nearly every constraint component of §4 was built, and it moved 18 → 21 → 31 →
+42 → 49 → 51 → 63 across the component tasks.
+
+**SHACL-T-0019 retired it**, along with `floor_test.odin` and the `floor` field
+on `Suite`: a floor measures disabled directories and there are none left, so
+what remained was a test that asserted nothing while looking like a scoreboard.
+
+The SHACL-SPARQL phase will want it back the day it vendors `sparql/`, and
+should restore rather than reinvent it —
+`git show SHACL-T-0019~1 -- tests/w3c/harness/floor_test.odin`. What must come
+back with it is the caveat it printed on every run: **a count is a direction of
+travel, not a conformance claim**, because an entry expecting `sh:conforms true`
+passes whether it was validated or ignored.
 
 ## Exclusions
 
@@ -122,6 +150,16 @@ Two consequences for the harness:
 - **`sht:Failure` is a `mf:result` *value*, not an entry type**, and it does
   not occur in `core/` at all — only in `sparql/pre-binding/`, which is
   excluded. Nothing in the vendored corpus expects a processor failure.
+- **One file for both graphs is also a blind spot**, found at SHACL-T-0019 and
+  worth carrying forward. The runner loads that file into *two* stores, so the
+  two loads assign blank-node labels identically — which means an engine that
+  merges the data graph's and the shapes graph's blank-node namespaces is
+  accidentally right on every entry in this corpus. It was wrong, and the suite
+  could not have said so; a unit test in `tests/w3c/harness/report_test.odin`
+  covers it with the two graphs in separate files, which is what a real consumer
+  has. The suite still caught the *other* half of the same defect
+  (`property/nodeKind-001`), because that one collided with the report's own
+  blank nodes rather than across the two graphs.
 
 ## Language-tag exposure survey
 
