@@ -89,7 +89,10 @@ check: ## Vet every package at the default Term_ID width, then check core purity
 		echo "-- $$pkg --"; \
 		odin check $$pkg -vet -strict-style $(COLL) || exit 1; \
 	done
-	@test -d $(BENCH) && odin check $(BENCH) -vet -strict-style $(COLL) || true
+	@if [ -d $(BENCH) ]; then \
+		echo "-- $(BENCH) --"; \
+		odin check $(BENCH) -vet -strict-style $(COLL) || exit 1; \
+	fi
 	@$(MAKE) --no-print-directory purity
 
 # SHACL-A-0001's linkage property, asserted rather than trusted: a consumer of
@@ -120,9 +123,22 @@ purity: ## Assert the core links no LMDB (builds tests/purity and inspects it)
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.
-bench: ## Build and run the benchmarks with release flags
+#
+# **Run at every Term_ID width, like the suite**, and for a reason beyond
+# symmetry: the benchmark pins the number of store reads each configuration
+# makes, and that number must be identical at 64- and 32-bit because ID width
+# cannot reach the backend-independent core's control flow. Within one run the
+# bench asserts the same pin across both *backends*; running the binary at each
+# width is what asserts it across both widths. One integer, four ways -- and
+# only this loop closes the second half.
+bench: ## Build and run the benchmarks at both Term_ID widths, with release flags
 	@test -d $(BENCH) || { echo "no $(BENCH)/ package yet"; exit 0; }; \
-	mkdir -p build && odin run $(BENCH) -out:$(OUT) -o:speed -no-bounds-check $(COLL)
+	mkdir -p build; \
+	for width in $(WIDTHS); do \
+		echo "== Term_ID $$width-bit =="; \
+		odin run $(BENCH) -out:$(OUT) -o:speed -no-bounds-check $(COLL) \
+			-define:RDF_STORE_TERM_ID_BITS=$$width || exit 1; \
+	done
 
 build-bench: ## Build the benchmark binary without running it
 	@test -d $(BENCH) || { echo "no $(BENCH)/ package yet"; exit 0; }; \
