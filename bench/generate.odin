@@ -52,6 +52,32 @@ Path_Form :: enum {
 	Zero_Or_More,
 }
 
+// Qualified_Form is which shape of the qualified family a configuration
+// carries. An enum rather than a bool since SHACL-T-0025, because the family
+// has two *different* costs and lumping them together cannot answer that task's
+// question.
+//
+//	None           absent entirely — the control that lets a measurement say no
+//	Min            one property shape, one bound. The cheapest form that
+//	               exercises the machinery at all
+//	Min_And_Max    one property shape, both bounds, **sharing one
+//	               sh:qualifiedValueShape**. This is the structural duplicate
+//	               SHACL-T-0018 found and SHACL-A-0002 declined to memoise:
+//	               check_qualified walks the value nodes once per bound, so the
+//	               same (shape, node) question is asked twice with an answer that
+//	               cannot have changed in between
+//	Disjoint_Pair  two sibling shapes with sh:qualifiedValueShapesDisjoint, which
+//	               multiplies the walk by the sibling count instead
+//
+// `Min_And_Max` minus `Min` is therefore the exact cost of the duplicate, and
+// the only difference between those two configurations is the second bound.
+Qualified_Form :: enum {
+	None,
+	Min,
+	Min_And_Max,
+	Disjoint_Pair,
+}
+
 // Config is the seven knobs, plus the seed and a name to report under.
 //
 // `violation_percent` is an integer rather than a fraction so that a
@@ -68,7 +94,7 @@ Config :: struct {
 	nesting:           int,
 	path_form:         Path_Form,
 	violation_percent: int,
-	qualified:         bool,
+	qualified:         Qualified_Form,
 }
 
 // Rng is splitmix64, written here rather than taken from `core:math/rand`.
@@ -156,7 +182,25 @@ generate_shapes :: proc(c: Config) -> string {
 	// sibling shapes rather than one, so `sh:qualifiedValueShapesDisjoint` has a
 	// sibling to walk — with one, the disjointness test is free and the knob
 	// would understate the cost it exists to expose.
-	if c.qualified {
+	switch c.qualified {
+	case .None:
+	case .Min:
+		fmt.sbprintln(&sb, "\tsh:property [")
+		fmt.sbprintln(&sb, "\t\tsh:path ex:q ;")
+		fmt.sbprintln(&sb, "\t\tsh:qualifiedValueShape [ sh:class ex:Good ] ;")
+		fmt.sbprintln(&sb, "\t\tsh:qualifiedMinCount 1 ;")
+		fmt.sbprintln(&sb, "\t] ;")
+	case .Min_And_Max:
+		// One shape, two bounds, one sh:qualifiedValueShape between them. The
+		// engine walks the value nodes once per bound; this configuration
+		// exists so that the second walk has a price attached to it.
+		fmt.sbprintln(&sb, "\tsh:property [")
+		fmt.sbprintln(&sb, "\t\tsh:path ex:q ;")
+		fmt.sbprintln(&sb, "\t\tsh:qualifiedValueShape [ sh:class ex:Good ] ;")
+		fmt.sbprintln(&sb, "\t\tsh:qualifiedMinCount 1 ;")
+		fmt.sbprintln(&sb, "\t\tsh:qualifiedMaxCount 2 ;")
+		fmt.sbprintln(&sb, "\t] ;")
+	case .Disjoint_Pair:
 		fmt.sbprintln(&sb, "\tsh:property [")
 		fmt.sbprintln(&sb, "\t\tsh:path ex:q ;")
 		fmt.sbprintln(&sb, "\t\tsh:qualifiedValueShape [ sh:class ex:Good ] ;")

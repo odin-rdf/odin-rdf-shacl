@@ -53,7 +53,7 @@ CONFIGS := []Config {
 		nesting = 0,
 		path_form = .Predicate,
 		violation_percent = 20,
-		qualified = false,
+		qualified = .None,
 	},
 
 	// The same workload with the qualified family switched on, and nothing else
@@ -68,7 +68,7 @@ CONFIGS := []Config {
 		nesting = 0,
 		path_form = .Predicate,
 		violation_percent = 20,
-		qualified = true,
+		qualified = .Disjoint_Pair,
 	},
 
 	// Nesting exercises suppressed validation through `sh:node` — a sub-walk per
@@ -82,7 +82,7 @@ CONFIGS := []Config {
 		nesting = 3,
 		path_form = .Predicate,
 		violation_percent = 20,
-		qualified = false,
+		qualified = .None,
 	},
 
 	// Violation density at both ends. `dense` is what tests the package doc's
@@ -107,7 +107,7 @@ CONFIGS := []Config {
 		nesting = 0,
 		path_form = .Predicate,
 		violation_percent = 100,
-		qualified = false,
+		qualified = .None,
 	},
 	{
 		name = "clean",
@@ -118,7 +118,7 @@ CONFIGS := []Config {
 		nesting = 0,
 		path_form = .Predicate,
 		violation_percent = 0,
-		qualified = false,
+		qualified = .None,
 	},
 
 	// One non-trivial path form in the standing set. Alternative was chosen over
@@ -135,7 +135,35 @@ CONFIGS := []Config {
 		nesting = 0,
 		path_form = .Alternative,
 		violation_percent = 20,
-		qualified = false,
+		qualified = .None,
+	},
+
+	// **The pair SHACL-T-0025 exists to measure.** Identical in every knob but
+	// the qualified form: one bound against two bounds sharing a single
+	// `sh:qualifiedValueShape`. The difference is the structural duplicate and
+	// nothing else, which is what makes it a measurement rather than an
+	// argument.
+	{
+		name = "qualified-min",
+		seed = 0x5EED_0001,
+		focus_nodes = 500,
+		fan_out = 4,
+		shapes = 3,
+		nesting = 0,
+		path_form = .Predicate,
+		violation_percent = 20,
+		qualified = .Min,
+	},
+	{
+		name = "qualified-minmax",
+		seed = 0x5EED_0001,
+		focus_nodes = 500,
+		fan_out = 4,
+		shapes = 3,
+		nesting = 0,
+		path_form = .Predicate,
+		violation_percent = 20,
+		qualified = .Min_And_Max,
 	},
 }
 
@@ -172,6 +200,14 @@ Pin :: struct {
 //	                         family costs when it is present at all
 //	nested           11596   +4093 for three levels of sh:node, each a
 //	                         suppressed sub-walk per focus node
+//
+// And the pair SHACL-T-0025 measured, which differ only in the second bound:
+//
+//	qualified-min     9003   one bound, one walk of the value nodes
+//	qualified-minmax 10003   two bounds sharing one sh:qualifiedValueShape.
+//	                         +1000 reads -- exactly the 1000 ex:q value nodes,
+//	                         walked a second time to answer a question whose
+//	                         answer cannot have changed
 PINNED_READS := []Pin {
 	{"baseline", 7503},
 	{"qualified", 11504},
@@ -179,6 +215,8 @@ PINNED_READS := []Pin {
 	{"dense", 7503},
 	{"clean", 7503},
 	{"alternative-path", 9003},
+	{"qualified-min", 9003},
+	{"qualified-minmax", 10003},
 }
 
 pinned_reads :: proc(name: string) -> (reads: int, found: bool) {

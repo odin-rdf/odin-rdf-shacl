@@ -278,8 +278,17 @@ Recorded so the log's silence is legible rather than ambiguous:
   `sh:qualifiedValueShapesDisjoint` multiplies it again by asking each sibling's
   shape per value node.
 
-  Still not a store gap, and deliberately not fixed here: SHACL-A-0002's review
-  trigger is *measured* cost, and there is no benchmark yet. Recorded so that
-  when one exists, the reader knows the duplicate is structural rather than
-  incidental — a `(shape, node)` conformance cache in `Validation` would collapse
-  it, and the ADR already says where the reasoning lives.
+  Still not a store gap. **And now measured, at SHACL-T-0025**: the duplicate is
+  real and is the size this note assumed — one extra walk of every value node,
+  +1000 reads and +2000 allocations on a 500-focus-node configuration, about 11%
+  of validation time. **The conformance cache was decided against**, and on a
+  number this log is the right place to repeat: peak memory does not move with
+  the duplicate, because each suppressed sub-walk allocates and frees, so the
+  cache would trade a working set that is flat in the data for one that grows
+  with it. SHACL-A-0002's "As Measured" section carries the full reasoning and
+  the alternative that should be preferred — sharing one walk between the two
+  bounds rather than remembering the first.
+
+  So the read volume this section worried about is unchanged and will stay
+  unchanged: **the engine still asks the store nothing it did not ask before**,
+  and nothing here becomes a request upstream.

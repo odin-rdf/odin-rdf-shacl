@@ -196,3 +196,73 @@ Permanent as a design, but two parts of it are open to evidence.
 - **Measured cost of repeated asks.** `sh:qualifiedValueShape` runs one suppressed validation
   per value node; if that shows up in the benchmarks against a large data graph, memoisation
   is the thing to consider, and this ADR is where the reasoning for not having it lives.
+  **Pulled and answered at SHACL-T-0025 — see As Measured below. The answer is no.**
+
+## As Measured (SHACL-T-0025, 2026-08-07)
+
+The memoisation trigger above was unpullable for as long as this project had no benchmark.
+SHACL-I-0003 built one, and this is what it said.
+
+### The duplicate, isolated
+
+Two configurations identical in every knob but one — `qualified-min` carries
+`sh:qualifiedMinCount` alone, `qualified-minmax` adds `sh:qualifiedMaxCount` on the **same**
+`sh:qualifiedValueShape`. `check_qualified` walks the value nodes once per bound, so the
+difference between them is the structural duplicate and nothing else. 500 focus nodes,
+1000 `ex:q` value nodes, memstore, 64-bit `Term_ID`, seed `0x5EED0001`:
+
+| | reads | allocations | peak | validate |
+| --- | ---: | ---: | ---: | ---: |
+| `qualified-min` | 9003 | 9018 | 27078 B | 930 µs |
+| `qualified-minmax` | 10003 | 11018 | 27078 B | 1043 µs |
+| **the duplicate** | **+1000** | **+2000** | **+0** | **+113 µs (11%)** |
+
++1000 reads is exactly the 1000 value nodes, asked a second time for an answer that cannot
+have changed. The duplicate is real, it is the size the code comment said it was, and it
+costs about 11% of validation on a shapes graph that carries both bounds.
+
+### The decision: no `(shape, node)` cache
+
+**The third column is why.** Peak memory does not move — 27078 bytes with the duplicate and
+without it — because each suppressed sub-walk allocates and frees. The engine's working set
+is *bounded and flat in the data*, which SHACL-T-0024 measured as byte-identical at 27076
+across 0, 1181, and 6000 results, and which the `shacl` package doc promises in as many
+words.
+
+A `(shape, node)` conformance cache would trade exactly that away. Its entries are distinct
+(shape, node) pairs asked, which is proportional to focus nodes times shapes: 1000 entries
+on this 500-focus-node configuration, so tens of kilobytes against a 27 KB working set — it
+would **more than double** the footprint here, and grow without bound on real data where
+today's figure does not move at all. At the deployment this family is designed around —
+~200 processes per machine, each embedding a store, CPU and memory frugality both
+first-order — that is the wrong side of the trade.
+
+The rest reinforces it rather than carrying it:
+
+- **The saving is narrow.** It exists only for a shapes graph putting two bounds on one
+  `sh:qualifiedValueShape`. `qualified-min`, `baseline`, `nested`, and every other
+  configuration measured gain nothing.
+- **The cost is broad.** A cache is a lookup on *every* `node_conforms` call — `sh:not`,
+  `sh:or`, `sh:xone`, `sh:node`, and the qualified family alike. Shapes graphs that cannot
+  benefit would pay on the hot path.
+- **11% is not nothing, and is not decisive either.** It is one ninth of validation on the
+  configuration built to favour it.
+
+### What should be done instead, and it is not memoisation
+
+The duplicate is worth removing; a cache is simply the wrong instrument. **Both bounds of one
+property shape share one `sh:qualifiedValueShape` and one value-node set, so they could share
+one walk** — compile them into a single constraint carrying both bounds, count once, test the
+count twice. That removes the whole +1000 with no lookup on any hot path and no memory at
+all, because it deletes the second walk rather than remembering the first.
+
+It is a change to `compile_constraints` and `check_qualified`, not to SHACL-A-0002's
+mechanism, and it is **not** made here: SHACL-T-0025 was scoped to decide the cache, and
+implementing a different engine change under a task that says "decide" is how scope creep
+starts. Recorded as an evidence-backed proposal with its numbers already measured.
+
+### Status of the trigger
+
+**Discharged.** Memoisation is decided against on measured cost rather than deferred again.
+Reopening it needs new evidence of a different kind — a workload where the repeated ask
+dominates *and* the working-set growth is affordable — not a repeat of this measurement.
