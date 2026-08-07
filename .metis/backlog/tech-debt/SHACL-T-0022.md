@@ -4,18 +4,18 @@ level: task
 title: "Refresh the vision's Current State, two initiatives stale"
 short_code: "SHACL-T-0022"
 created_at: 2026-08-07T10:50:38.110262+00:00
-updated_at: 2026-08-07T10:50:38.110262+00:00
+updated_at: 2026-08-07T11:53:37.497463+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#tech-debt"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -50,28 +50,28 @@ constraint-catalogue initiative". Two initiatives have completed since.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] Current State reflects the position at SHACL-I-0002's close: SHACL Core complete,
+- [x] Current State reflects the position at SHACL-I-0002's close: SHACL Core complete,
       all twenty-nine non-SPARQL constraint components of §4, **all 98 entries of the
       vendored `core/` suite green** across all seven directories, both backends, both
       `Term_ID` widths.
-- [ ] The `core/complex` correction is carried up: it was never a SHACL-SPARQL directory.
+- [x] The `core/complex` correction is carried up: it was never a SHACL-SPARQL directory.
       `sh:sparql`, `sh:shapesGraph`, and `sh:entailment` appear in
       `shacl-shacl-data-shapes.ttl` only as targeted vocabulary — objects of
       `sh:targetSubjectsOf` and `sh:targetObjectsOf` — not as constraint parameters. The
       vision does not state this belief itself, but the documents it points at do.
-- [ ] SHACL-A-0002 is named alongside SHACL-A-0001; the vision predates it and mentions
+- [x] SHACL-A-0002 is named alongside SHACL-A-0001; the vision predates it and mentions
       only the first.
-- [ ] **The two "turned out otherwise" notes are kept and updated, not deleted.** They are
+- [x] **The two "turned out otherwise" notes are kept and updated, not deleted.** They are
       the most useful thing the section records. The store prediction stayed retired
       through the whole catalogue — a validator with all twenty-nine components reaches
       odin-rdf-store through `match` and `find_term` and nothing else — and the
       language-tag trigger still has not fired, now with the corpus fully run. The
       recommendation to widen that trigger to "a suite entry fails **or** a user reports
       it" has been taken in `docs/language-tag-status.md`.
-- [ ] "**Next:**" points at what is actually next — [[SHACL-I-0003]] and the SHACL-SPARQL
+- [x] "**Next:**" points at what is actually next — [[SHACL-I-0003]] and the SHACL-SPARQL
       phase — with `docs/handover-sparql.md` as the starting point rather than
       `docs/handover-catalogue.md`.
-- [ ] The remaining sections (Purpose, Future State, Major Features, Success Criteria,
+- [x] The remaining sections (Purpose, Future State, Major Features, Success Criteria,
       Principles, Constraints) are checked and left alone unless something in them is now
       false. They were written to outlast initiatives and mostly have.
 
@@ -96,4 +96,38 @@ tidiness.
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-07 — Current State rewritten. Awaiting review.**
+
+  Rewritten from SHACL-I-0002's closing update, `docs/handover-sparql.md`, and the two
+  write-ups. Every acceptance criterion met.
+
+  **What it now says:** SHACL Core complete, all twenty-nine non-SPARQL components of §4,
+  **all 98 entries of the vendored `core/` suite green** across all seven directories, both
+  backends, both `Term_ID` widths, no skip list and an empty ignored-parameter record.
+  SHACL-A-0002 named alongside SHACL-A-0001. The `core/complex` correction carried up,
+  because it changes what the SHACL-SPARQL phase is *for* rather than merely being a fact
+  about one directory.
+
+  **The two "turned out otherwise" notes are kept and strengthened, not deleted** — the
+  criterion that mattered most. Both predictions held through the catalogue, and both are
+  now stated against a fully-run corpus rather than a partial one:
+
+  - The store predictions stay retired, and the evidence log's two findings are summarised
+    with the second one named for what it is: a **contract** (labels dense from `b0` per
+    dictionary, so two dictionaries collide by construction), not a capability gap.
+  - The language-tag exposure is zero, and the *reason* is now stronger than "no entry
+    happens to exercise it": the two components that read a tag fold at comparison because
+    SHACL requires it of them. The widened trigger is recorded.
+
+  **"Next:" now points at SHACL-I-0003 and the SHACL-SPARQL phase**, with
+  `docs/handover-sparql.md` as the starting point rather than `docs/handover-catalogue.md`,
+  and notes that the phase's first task is vendoring `tests/sparql/` rather than fixing
+  `core/complex`.
+
+  **Everything else was checked and left alone**, which was the other half of the brief.
+  Purpose, Product/Solution Overview, Future State, Major Features, Success Criteria,
+  Principles, and Constraints contain nothing that is now false — they were written to
+  outlast initiatives and they have. The temptation the Risk Considerations named was to
+  tidy them anyway; it was not acted on.
+
+  No code touched. Nothing in `shacl/`, `tests/`, or the build changed.

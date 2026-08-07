@@ -35,27 +35,91 @@ The library is deliberately validation-only: inference/entailment, SHACL rules (
 
 ## Current State
 
-**The SHACL Core spine is built (SHACL-I-0001, completed 2026-08-06).** Shapes compilation, target resolution, property paths, constraint dispatch, validation results, and `sh:ValidationReport` emission all work end to end, against both storage backends, at both `Term_ID` widths.
+**SHACL Core is complete, and the vendored W3C corpus is fully green.** Two initiatives
+delivered it: SHACL-I-0001 (the spine, completed 2026-08-06) and SHACL-I-0002 (the
+constraint catalogue, completed 2026-08-07).
 
-- **Four of the W3C suite's seven `core/` directories are green** — `core/targets`, `core/path`, `core/misc`, `core/validation-reports`: 26 entries, no skip list, reports compared by blank-node isomorphism. 72 entries remain.
-- **Seven constraint components** of the Core catalogue: `sh:minCount`, `sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, `sh:in` — the set those four directories exercise. The rest of the catalogue is the second initiative.
-- **The suite target is SHACL 1.0** (2026-08-06), not 1.2. 1.2 is still moving in the W3C, and a suite that goes green against a specification that can change under it is worth less than it looks. Review trigger and reasoning in `tests/w3c/README.md`.
+- **All 98 entries of the vendored W3C SHACL 1.0 `core/` suite pass**, across all seven
+  directories, against both storage backends, at both `Term_ID` widths. No skip list, no
+  expected-failure file, and an empty ignored-parameter record throughout — the family's
+  rule is unchanged, and every directory now satisfies it.
+- **All twenty-nine constraint components** of §4 that do not require SPARQL: value-type,
+  cardinality, value-range, string-based, property-pair, logical, shape-based, and
+  `sh:closed`. Alongside them: shape discovery to §2.1.1, all five target forms, all seven
+  path forms, and `sh:ValidationReport` emission.
+- **Suppressed validation** — asking whether a node conforms without reporting why — is the
+  one architectural addition the catalogue needed, and it has its own ADR (**SHACL-A-0002**)
+  because six components depend on it and a mechanism retrofitted from whichever landed
+  first would have carried that one's assumptions. **SHACL-A-0001** still records the
+  shapes model, term ownership, and graph scoping.
+- **The suite target is SHACL 1.0** (2026-08-06), not 1.2. 1.2 is still moving in the W3C,
+  and a suite that goes green against a specification that can change under it is worth
+  less than it looks. Review trigger and reasoning in `tests/w3c/README.md`.
 
-Packages: `shacl` (backend-independent core), `shacl/memstore`, `shacl/kvstore`. The core names no backend and imports none, asserted rather than trusted — `make check` builds a core-plus-memstore consumer and fails if the binary carries LMDB symbols. **SHACL-A-0001** records the shapes model, term ownership, and graph scoping.
+Packages: `shacl` (backend-independent core), `shacl/memstore`, `shacl/kvstore`. The core
+names no storage backend and imports none, asserted rather than trusted — `make check`
+builds a core-plus-memstore consumer and fails if the binary carries LMDB symbols.
 
-The dependencies are unchanged and all complete:
+The dependencies are unchanged and all complete: **odin-rdf-parser** and
+**odin-rdf-store** at v0.1.0, and **odin-rdf-sparql** at v0.1.0, relevant here only for
+the later SHACL-SPARQL phase.
 
-- **odin-rdf-parser** — done and tagged v0.1.0. All 1045 W3C conformance tests pass, RDF 1.2/RDF-star included, on Linux, macOS, and Windows. Shapes graphs and validation reports both parse and emit through it.
-- **odin-rdf-store** — done and tagged v0.1.0. The match interface is published (STORE-A-0002, `store/interface.odin`) with **two** conforming backends, memstore and kvstore-over-LMDB, verified by one shared conformance suite passing verbatim against both at both `Term_ID` widths. LMDB archives are vendored for five platforms (STORE-A-0004), so a persistent SHACL run works everywhere CI does.
-- **odin-rdf-sparql** — done and tagged v0.1.0, relevant here only for the later SHACL-SPARQL phase, which it is ready to serve.
+**`core/complex` was never a SHACL-SPARQL directory, and the correction is worth carrying
+up to this level** because it changes what that phase is for. It was documented for the
+whole of SHACL-I-0002 as needing `sh:sparql`, `sh:shapesGraph`, and `sh:entailment`. All
+three appear in `shacl-shacl-data-shapes.ttl` only as *targeted vocabulary* — objects of
+`sh:targetSubjectsOf` and `sh:targetObjectsOf` — not as constraint parameters. Nothing in
+that file asks for a query engine, and both entries are green for the right reason: the
+ignored-parameter record is empty for each, and breaking `sh:datatype` or `sh:nodeKind` in
+the evaluator turns both red. The belief survived a discovery phase, a design phase, a
+decomposition, and ten task write-ups because each was reading the previous one; nobody read
+the file until the closing task.
 
-**Both things this section told the project to expect turned out otherwise, and that is the most useful thing it now records:**
+**Both things this section originally told the project to expect turned out otherwise, and
+that is still the most useful thing it records:**
 
-- **The store capabilities this project would "probably pull" were not pulled.** Both predicted items are retired rather than pending. *A named-graph wildcard for the graph position* (STORE-T-0017) cannot become needed without reversing SHACL-A-0001 decision 5, which validates one caller-named graph because the spec defines no semantics for a union — and the core cannot even express a wildcard graph, since neither of the two procedure pointers it reads through takes one. *Dataset introspection* (STORE-T-0016) was wanted for target resolution, and all five Core target forms turned out to be ordinary match patterns. A whole validator reaches odin-rdf-store through `match` and `find_term` and nothing else. The write-up is `docs/store-proposal.md`; it proposes no change.
+- **The store capabilities this project would "probably pull" were not pulled**, and the
+  catalogue did not change that. Both predicted items stay retired. *A named-graph wildcard*
+  (STORE-T-0017) cannot become needed without reversing SHACL-A-0001 decision 5, and the
+  core cannot express one — neither procedure pointer it reads through takes a graph.
+  *Dataset introspection* (STORE-T-0016) was wanted for target resolution, and all five
+  target forms turned out to be ordinary match patterns; `sh:closed`, the last thing
+  predicted to want it, did not either. **A validator with all twenty-nine components
+  reaches odin-rdf-store through `match` and `find_term` and nothing else.**
 
-- **The term-identity question is decided but was never forced.** The decision: **fold language tags to lowercase at literal construction in odin-rdf-parser** — what BCP 47 case-insensitivity implies, what §3.3's "the value space of language tags is always lower case" points at, and what Jena and RDF4J do. The implementation is designed (detect in the scanner, fold in the constructor, hot path unchanged) and **not built**, because surveying the entire vendored corpus found the exposure is zero: no suite entry can fail for this reason, in any directory. The rest of term identity was settled by spec rather than by us — IRIs are never normalized, lexical forms compare code-point-wise, and `"1"^^xsd:integer` versus `"01"^^xsd:integer` is the term/value distinction. `docs/language-tag-status.md` has the evidence and recommends widening the trigger from "a suite entry fails" to "a suite entry fails **or** a user reports it", since the suite has demonstrated it will not raise the alarm.
+  The evidence log has produced two findings in eleven tasks and neither is a capability
+  gap. The first was a narrowing this project wrote — `Access` had three read verbs and
+  `sh:closed` needed a fourth. The second is the only one about odin-rdf-store at all, and
+  it is a **contract** rather than a missing verb: blank-node labels are generated densely
+  from `b0` *per dictionary*, so two dictionaries collide by construction, and a consumer
+  merging terms from both into one graph must standardise them apart. This engine did not,
+  and shipped two bugs for it. `docs/store-proposal.md` carries it as a documentation
+  suggestion — the only thing that document has ever asked upstream for.
 
-**Next:** the constraint-catalogue initiative — the rest of SHACL Core, scoped against the 1.0 corpus's remaining 72 entries. `docs/handover-catalogue.md` is its starting point: the four-edit shape of the dispatch seam, the per-directory component inventory, and what the spine deliberately left open. One item there is load-bearing and easy to miss: **shape discovery is narrower than §2.1.1**, and widening it is the catalogue's *first* job rather than a consequence of the components it adds.
+- **The term-identity question is decided and still has not been forced.** The decision
+  stands: **fold language tags to lowercase at literal construction in odin-rdf-parser**.
+  The implementation is designed and not built, because the exposure is zero — and that is
+  now measured against a fully-run corpus rather than predicted against a partial one. The
+  two components that read a language tag both fold at the point of comparison because
+  SHACL requires it of them: `sh:languageIn` is RFC 4647 basic filtering, `sh:uniqueLang`
+  compares with `equal_fold`. The residual exposure is `sh:hasValue` and `sh:in`, which
+  compare terms; no corpus entry pairs them with a mixed-case tag.
+  **The trigger is now widened** (2026-08-07) from "a suite entry fails" to "a suite entry
+  fails **or** a user reports it", because the corpus runs green in full and will not be
+  the thing that raises the alarm. `docs/language-tag-status.md` has the evidence.
+
+**Next**, and neither is about correctness:
+
+- **SHACL-I-0003 — performance evidence.** `bench/` does not exist, so the library has no
+  evidence about cost, and SHACL-A-0002's review trigger for memoising conformance answers
+  requires *measured* cost — a trigger that cannot currently be pulled. Active, decomposed
+  into three tasks. The `v0.1.0` tag waits for it, because every sibling shipped `v0.1.0`
+  with performance evidence.
+- **The SHACL-SPARQL phase.** `docs/handover-sparql.md` is its starting point:
+  what it inherits, where the `sparql:` collection goes in all three places, the dispatch
+  seam as it actually is (five edits, not the four `docs/handover-catalogue.md` described),
+  and what SHACL-I-0002 left open. Its first task is vendoring
+  `data-shapes-test-suite/tests/sparql/`, not fixing `core/complex`.
 
 ## Future State
 
