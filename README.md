@@ -15,14 +15,14 @@ end to end, and four of the W3C SHACL suite's seven `core/` directories are
 green — `core/targets`, `core/path`, `core/misc`, and
 `core/validation-reports`, every entry, against both storage backends, at both
 `Term_ID` widths. What is missing is most of the SHACL Core constraint
-catalogue. Sixteen components validate: the spine's `sh:minCount`,
+catalogue. Twenty components validate: the spine's `sh:minCount`,
 `sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
 `sh:in`, which is exactly what those four directories exercise; the four
 value-range bounds `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and
 `sh:maxExclusive`; and the string-based `sh:minLength`, `sh:maxLength`,
-`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`. The
-property-pair components (`sh:equals`, `sh:disjoint`, `sh:lessThan`,
-`sh:lessThanOrEquals`), `sh:closed`, the logical combinators
+`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`; and the
+property-pair `sh:equals`, `sh:disjoint`, `sh:lessThan`, and
+`sh:lessThanOrEquals`. `sh:closed`, the logical combinators
 (`sh:and`/`sh:or`/`sh:not`/`sh:xone`), and the shape-based constraints
 (`sh:node`, `sh:qualifiedValueShape`) are the rest of the second initiative,
 and the remaining suite directories stay disabled until they land. See

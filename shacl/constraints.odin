@@ -67,7 +67,7 @@ compile_constraints :: proc(
 	// bounds join them unchanged: what differs is how the term is *compared*,
 	// which is the evaluator's business and not this table's — SHACL-T-0013
 	// added four lines here and nothing else in this file.
-	terms := [7]struct {
+	terms := [11]struct {
 		iri:  string,
 		kind: Constraint_Kind,
 	} {
@@ -78,6 +78,13 @@ compile_constraints :: proc(
 		{MAX_INCLUSIVE, .Max_Inclusive},
 		{MIN_EXCLUSIVE, .Min_Exclusive},
 		{MAX_EXCLUSIVE, .Max_Exclusive},
+		// The property-pair parameters are predicates rather than values, and
+		// they compile the same way regardless: a term the model interns and the
+		// bindings resolve to a data-store ID.
+		{EQUALS, .Equals},
+		{DISJOINT, .Disjoint},
+		{LESS_THAN, .Less_Than},
+		{LESS_THAN_OR_EQUALS, .Less_Than_Or_Equals},
 	}
 	for entry in terms {
 		if !v.found[entry.iri] {
@@ -290,6 +297,11 @@ IMPLEMENTED_PARAMETERS := []string {
 	FLAGS,
 	LANGUAGE_IN,
 	UNIQUE_LANG,
+	// The property-pair components (SHACL-T-0015).
+	EQUALS,
+	DISJOINT,
+	LESS_THAN,
+	LESS_THAN_OR_EQUALS,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately

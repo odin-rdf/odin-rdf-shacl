@@ -72,8 +72,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 20},
-	{"core/property", 38, 38, false, 22},
+	{"core/node", 32, 32, false, 22},
+	{"core/property", 38, 38, false, 27},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -119,6 +119,13 @@ ENABLED_ENTRIES :: 26
 // switching the component on, which is what that entry exists to check. It is
 // the one entry in the tree that went from passing-by-inaction to
 // passing-by-validation, which is the transition the note above `core/complex`
-// warns can go the other way. The catalogue's remaining work is 27 entries of
-// the original 51.
-PROGRESS_FLOOR :: 42
+// warns can go the other way.
+//
+// **49 at SHACL-T-0015** — the seven property-pair entries. It moved by nothing
+// at all on the first run, which is the failure mode worth recording here as
+// well as in the code: `bindings_init` resolves a constraint's parameter to a
+// data-store ID from a kind-switch, a component missing from it reads its
+// parameter as unbound rather than erroring, and four components therefore
+// dispatched, ran, and found an empty second set on every focus node. Twenty
+// entries of the original 51 remain.
+PROGRESS_FLOOR :: 49

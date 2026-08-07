@@ -78,6 +78,14 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 		return LANGUAGE_IN_COMPONENT
 	case .Unique_Lang:
 		return UNIQUE_LANG_COMPONENT
+	case .Equals:
+		return EQUALS_COMPONENT
+	case .Disjoint:
+		return DISJOINT_COMPONENT
+	case .Less_Than:
+		return LESS_THAN_COMPONENT
+	case .Less_Than_Or_Equals:
+		return LESS_THAN_OR_EQUALS_COMPONENT
 	}
 	return ""
 }

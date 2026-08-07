@@ -90,9 +90,27 @@ bindings_init :: proc(
 
 	b.constraint = make([]store.Term_ID, len(s.constraints), allocator)
 	b.constraint_bound = make([]bool, len(s.constraints), allocator)
+	// Only the components that compare their parameter **by ID** need it bound.
+	// The value-range components hold a term too and never look here: they
+	// compare by value, so an ID would tell them nothing.
+	//
+	// **This switch is a fifth edit the seam's own documentation does not
+	// mention**, and it fails quietly — a component left out of it reads
+	// `constraint_bound` as false, treats its parameter as a term the data store
+	// has never seen, and reports *nothing at all* rather than erroring.
+	// SHACL-T-0015 lost a diagnostic round to exactly that: the property-pair
+	// components compiled, dispatched, ran, and produced an empty second set on
+	// every focus node. If a component's check reads `v.b.constraint`, its kind
+	// belongs here.
 	for c, i in s.constraints {
 		#partial switch c.kind {
-		case .Class, .Datatype, .Has_Value:
+		case .Class,
+		     .Datatype,
+		     .Has_Value,
+		     .Equals,
+		     .Disjoint,
+		     .Less_Than,
+		     .Less_Than_Or_Equals:
 			id, found := find(find_data, c.term)
 			b.constraint[i] = id
 			b.constraint_bound[i] = found

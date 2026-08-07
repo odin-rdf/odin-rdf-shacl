@@ -75,6 +75,15 @@ FLAGS :: NS + "flags"
 LANGUAGE_IN :: NS + "languageIn"
 UNIQUE_LANG :: NS + "uniqueLang"
 
+// The property-pair components (§4.7), SHACL-T-0015. Their parameter is a
+// *predicate*, not a value: it names a second set of nodes at the same focus
+// node, which is why these are the first components to read the data graph
+// twice.
+EQUALS :: NS + "equals"
+DISJOINT :: NS + "disjoint"
+LESS_THAN :: NS + "lessThan"
+LESS_THAN_OR_EQUALS :: NS + "lessThanOrEquals"
+
 // The shape-expecting parameters (§2.1.1). A node that is the value of one of
 // these **is a shape**, which is why they land here in SHACL-T-0010 — before
 // the constraint components that read them (SHACL-T-0017 and SHACL-T-0018).
@@ -132,6 +141,10 @@ MAX_LENGTH_COMPONENT :: NS + "MaxLengthConstraintComponent"
 PATTERN_COMPONENT :: NS + "PatternConstraintComponent"
 LANGUAGE_IN_COMPONENT :: NS + "LanguageInConstraintComponent"
 UNIQUE_LANG_COMPONENT :: NS + "UniqueLangConstraintComponent"
+EQUALS_COMPONENT :: NS + "EqualsConstraintComponent"
+DISJOINT_COMPONENT :: NS + "DisjointConstraintComponent"
+LESS_THAN_COMPONENT :: NS + "LessThanConstraintComponent"
+LESS_THAN_OR_EQUALS_COMPONENT :: NS + "LessThanOrEqualsConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"

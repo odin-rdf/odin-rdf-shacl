@@ -118,6 +118,13 @@ Constraint_Kind :: enum u8 {
 	Pattern,
 	Language_In,
 	Unique_Lang,
+	// The property-pair components (SHACL-T-0015). `term` is a predicate rather
+	// than a value: these compare the shape's value nodes against the values of
+	// that predicate at the same focus node.
+	Equals,
+	Disjoint,
+	Less_Than,
+	Less_Than_Or_Equals,
 }
 
 // Node_Kind is `sh:nodeKind` (§4.4.2), as a set of the three primitive kinds
@@ -142,7 +149,9 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 // carries the parameter depends on kind: `count` for the cardinality components
 // and the two lengths, `term` for Class/Datatype/Has_Value and the four
 // value-range bounds, `node_kind` for Node_Kind, `values` — a range into
-// Shapes.values — for In and Language_In, and `pattern` for Pattern.
+// Shapes.values — for In and Language_In, and `pattern` for Pattern. The four
+// property-pair components also use `term`, but it holds a *predicate* rather
+// than something to compare against.
 //
 // `Unique_Lang` carries nothing at all. Its parameter is the boolean that
 // switches it on, and a constraint that is switched off is simply not compiled,

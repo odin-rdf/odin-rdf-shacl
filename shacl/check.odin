@@ -10,19 +10,40 @@ import store "store:store"
 
 // Constraint dispatch: the seam the catalogue initiative fills.
 //
-// Adding a constraint component is three edits and none of them is in the
-// evaluator: a `Constraint_Kind`, its parameter in `compile_constraints`, and a
-// case here — plus its scope, below, which says *how often* it is asked.
+// Adding a constraint component is four edits: a `Constraint_Kind`, its
+// parameter in `compile_constraints`, its scope below — which says *how often*
+// it is asked — and a case in `check_value` or `check_node_set`.
 //
-// **Scope is the thing worth naming.** SHACL's components divide into two
-// shapes, and getting one wrong produces plausible results that are wrong in a
-// way the suite catches immediately. A value-scoped component is asked once per
-// value node and blames that node, so its result carries `sh:value`. A
-// set-scoped component is asked once about the whole value-node set and has no
-// single node to blame, so its result carries none — which is exactly why
-// `path-complex-001` expects an `sh:hasValue` violation with a `sh:resultPath`
-// and no `sh:value`, while `targetClassImplicit-001` expects an `sh:in`
-// violation that names one.
+// **There is a fifth, for components that compare their parameter by ID**, and
+// SHACL-T-0015 found it the hard way: `bindings_init` in `validate.odin` resolves
+// a constraint's term to a data-store `Term_ID`, and it does so from a
+// kind-switch. A component left out of that switch does not fail — it reads its
+// parameter as unbound, concludes the data store has never seen it, and reports
+// nothing at all. The four property-pair components compiled, dispatched, ran,
+// and produced an empty second set on every focus node until their kinds were
+// added there. So the earlier claim that no edit is in the evaluator held for
+// the spine's seven and does not hold in general.
+//
+// **Scope is the thing worth naming**, and it answers exactly one question:
+// how often is the component asked? A value-scoped one is asked once per value
+// node; a set-scoped one is asked once about the whole value-node set. Getting
+// it wrong produces plausible results that are wrong in a way the suite catches
+// immediately.
+//
+// **What a result blames is a separate question, and the two are not the same
+// question.** The spine's seven made them look identical — every value-scoped
+// component named its node in `sh:value` and every set-scoped one named none,
+// which is why `path-complex-001` expects an `sh:hasValue` violation with no
+// `sh:value` while `targetClassImplicit-001` expects an `sh:in` violation that
+// names one. That correlation was a property of those seven, not a rule, and
+// SHACL-T-0015 is where it breaks: `sh:equals` is asked once about the set and
+// reports **one result per member of the symmetric difference**, each naming
+// that member — including members that are not value nodes at all, because they
+// came from the other predicate. `node/equals-001` expects exactly that.
+//
+// So scope decides the call, and `emit_result`'s `has_value` decides the blame.
+// A component reaching for a third scope is probably reaching for this
+// distinction instead.
 //
 // Dispatch is a switch rather than a table of procedure pointers. That is
 // SPARQL-T-0011's finding applied unchanged: the family's no-dynamic-dispatch
@@ -46,7 +67,19 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	// least like it: it looks per-value — "is this literal's tag unique?" — and
 	// is not, because uniqueness is a property of the set. §4.5.5 asks for one
 	// result per language used twice, which no per-value check could produce.
-	case .Min_Count, .Max_Count, .Has_Value, .Unique_Lang:
+	// The property-pair components are set-scoped for two reasons. `sh:equals`
+	// and `sh:disjoint` compare set against set and could not be answered from
+	// one node; the ordering pair could be, but the second read of the data
+	// graph is per *focus* node, so asking per value node would repeat it once
+	// for every value.
+	case .Min_Count,
+	     .Max_Count,
+	     .Has_Value,
+	     .Unique_Lang,
+	     .Equals,
+	     .Disjoint,
+	     .Less_Than,
+	     .Less_Than_Or_Equals:
 		return .Node_Set
 	case .Class,
 	     .Datatype,
@@ -133,7 +166,171 @@ check_node_set :: proc(
 
 	case .Unique_Lang:
 		check_unique_lang(v, shape_index, values)
+
+	case .Equals, .Disjoint, .Less_Than, .Less_Than_Or_Equals:
+		check_property_pair(v, shape_index, c, constraint_index, values)
 	}
+}
+
+// check_property_pair is the four components of §4.7, which compare a shape's
+// value nodes against the values of another predicate **at the same focus
+// node**.
+//
+// This is the first place the engine reads the data graph a second time from
+// the focus node, and it does so through `Access.step` — the same procedure a
+// predicate path uses, with the graph bound by the instantiation package. No new
+// store capability was wanted and none is used, so `docs/store-evidence.md` gains
+// nothing from this task.
+//
+// **Absence is emptiness here, not failure.** A predicate the data store has
+// never seen, or an unbound focus node, can appear in no triple, so the second
+// set is empty — and an empty second set is a real answer: `sh:equals` on it
+// reports every value node, `sh:lessThan` on it reports nothing, and
+// `property/equals-001` and `lessThan-001` expect exactly those two.
+@(private = "file")
+check_property_pair :: proc(
+	v: ^Validation,
+	shape_index: int,
+	c: Constraint,
+	constraint_index: int,
+	values: Value_Set,
+) {
+	// §4.7.3–4.7.4: the ordering pair may be used at property shapes only.
+	// `sh:equals` and `sh:disjoint` carry no such restriction — `node/equals-001`
+	// puts one on a node shape.
+	if c.kind == .Less_Than || c.kind == .Less_Than_Or_Equals {
+		if v.s.shapes[shape_index].path < 0 {
+			return
+		}
+	}
+
+	others := make([dynamic]store.Term_ID, v.allocator)
+	defer delete(others)
+	if values.focus.bound && v.b.constraint_bound[constraint_index] {
+		v.access.step(v.access.data, values.focus.id, v.b.constraint[constraint_index], false, &others)
+	}
+
+	count := value_set_count(values)
+	#partial switch c.kind {
+	case .Equals:
+		// §4.7.1: the two sets must be equal, so every member of the symmetric
+		// difference is a result naming itself — in both directions. The second
+		// loop is the one that surprises: it reports a node that is *not* a value
+		// node, which is why `property/equals-001` expects a result for a focus
+		// node whose value-node set is empty.
+		for n in 0 ..< count {
+			value := value_set_at(values, n)
+			if !node_among(value, others[:]) {
+				emit_result(v, shape_index, values.focus, value, true, .Equals)
+				if v.stopped {
+					return
+				}
+			}
+		}
+		for id in others {
+			if !id_among(values, id) {
+				emit_result(v, shape_index, values.focus, Node_Ref{id = id, bound = true}, true, .Equals)
+				if v.stopped {
+					return
+				}
+			}
+		}
+
+	case .Disjoint:
+		// §4.7.2: the sets must share nothing, so every member of the
+		// intersection is a result. One direction is enough — a shared node is a
+		// value node by definition.
+		for n in 0 ..< count {
+			value := value_set_at(values, n)
+			if node_among(value, others[:]) {
+				emit_result(v, shape_index, values.focus, value, true, .Disjoint)
+				if v.stopped {
+					return
+				}
+			}
+		}
+
+	case .Less_Than, .Less_Than_Or_Equals:
+		// §4.7.3–4.7.4: every value node must compare against **every** member of
+		// the other set, and a result is emitted **per failing pair** rather than
+		// per failing value node.
+		//
+		// That is not the natural reading and `property/lessThan-002` is what
+		// forces it: two values against two incomparable others produce *four*
+		// results, with `sh:value` repeated twice for each value node. A
+		// per-node loop with a break would produce two and look right.
+		for n in 0 ..< count {
+			value := value_set_at(values, n)
+			for id in others {
+				if !pair_ordered(v, c.kind, value, id) {
+					emit_result(v, shape_index, values.focus, value, true, c.kind)
+					if v.stopped {
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+// pair_ordered compares one value node against one member of the other set,
+// by **value** — which is what makes `sh:lessThan` a consumer of SHACL-T-0012
+// rather than of term comparison.
+//
+// `.Incomparable` fails, and it fails for the same reason the value-range
+// components treat it that way: the spec's condition is that the comparison
+// holds. `property/lessThan-002` is the entry that measures it — integers
+// against strings, where every pair is incomparable and every pair is a result.
+@(private = "file")
+pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: store.Term_ID) -> bool {
+	left, left_owned := materialize(v, value)
+	defer if left_owned {
+		rdf.destroy_term(left, v.allocator)
+	}
+	right, right_owned := v.access.load(v.access.load_data, other, v.allocator)
+	defer if right_owned {
+		rdf.destroy_term(right, v.allocator)
+	}
+
+	order := compare_values(value_of(left), value_of(right))
+	#partial switch kind {
+	case .Less_Than:
+		return order == .Less
+	case .Less_Than_Or_Equals:
+		return order == .Less || order == .Equal
+	}
+	return false
+}
+
+// node_among and id_among are the set membership the equality pair needs, both
+// by `Term_ID` — which is the whole point of STORE-A-0001 on a comparison that
+// runs once per value node per focus node.
+//
+// An unbound value node is in no set of IDs: a term the data store has never
+// seen cannot be the object of any triple, so it cannot be among the values of
+// the other predicate.
+@(private = "file")
+node_among :: proc(value: Node_Ref, ids: []store.Term_ID) -> bool {
+	if !value.bound {
+		return false
+	}
+	for id in ids {
+		if id == value.id {
+			return true
+		}
+	}
+	return false
+}
+
+@(private = "file")
+id_among :: proc(values: Value_Set, id: store.Term_ID) -> bool {
+	for n in 0 ..< value_set_count(values) {
+		ref := value_set_at(values, n)
+		if ref.bound && ref.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // check_unique_lang is `sh:uniqueLang` (§4.5.5): no two value nodes may carry
@@ -229,7 +426,14 @@ check_value :: proc(
 		ok = check_string(v, c, value)
 	case .Language_In:
 		ok = check_language_in(v, c, value)
-	case .Min_Count, .Max_Count, .Has_Value, .Unique_Lang:
+	case .Min_Count,
+	     .Max_Count,
+	     .Has_Value,
+	     .Unique_Lang,
+	     .Equals,
+	     .Disjoint,
+	     .Less_Than,
+	     .Less_Than_Or_Equals:
 		return
 	}
 	if !ok {

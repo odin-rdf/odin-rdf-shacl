@@ -1080,3 +1080,131 @@ test_unique_lang_is_switched_on_by_the_term_true :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
 	expect_results(t, &seen, []string{}, "uniqueLang \"1\" is not true")
 }
+
+// ---- The property-pair components (SHACL-T-0015) -------------------------
+
+@(private = "file")
+PAIR_SHAPES :: PREFIX + `
+# A node shape: the value-node set is the focus node itself, compared against
+# the values of ex:q at that same node.
+ex:NodeEquals a sh:NodeShape ; sh:equals ex:q ;
+	sh:targetNode ex:same, ex:extra, ex:none .
+
+ex:PropEquals a sh:NodeShape ; sh:targetNode ex:pairs ;
+	sh:property [ sh:path ex:p ; sh:equals ex:q ] .
+
+ex:PropDisjoint a sh:NodeShape ; sh:targetNode ex:pairs ;
+	sh:property [ sh:path ex:p ; sh:disjoint ex:q ] .
+
+# The parameter names a predicate the data graph never mentions, so the second
+# set is empty rather than unknown.
+ex:MissingPredicate a sh:NodeShape ; sh:targetNode ex:pairs ;
+	sh:property [ sh:path ex:p ; sh:equals ex:never_mentioned ] .
+`
+
+@(private = "file")
+PAIR_DATA :: PREFIX + `
+ex:same  ex:q ex:same .
+ex:extra ex:q ex:extra ; ex:q ex:other .
+# ex:none has no ex:q at all.
+ex:none  ex:unrelated ex:x .
+
+ex:pairs ex:p "A" ; ex:p "B" ; ex:q "B" ; ex:q "C" .
+`
+
+// sh:equals and sh:disjoint, and the thing about them that breaks the seam's
+// old rule: a set-scoped component whose results name a node.
+//
+// The `sh:equals` results include **`ex:other` and `"C"`, which are not value
+// nodes** — they are members of the other predicate's set, reported because the
+// symmetric difference runs in both directions. An implementation that only
+// walked the value nodes would produce a strict subset of this and look right.
+@(test)
+test_property_pair_equality :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, PAIR_SHAPES, PAIR_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// ex:same equals its own ex:q, so nothing. ex:extra has one extra.
+			"NodeEquals|EqualsConstraintComponent|extra|other",
+			// ex:none has no ex:q, so the focus node itself is the difference.
+			"NodeEquals|EqualsConstraintComponent|none|none",
+			// {"A","B"} against {"B","C"}: "A" is only a value node, "C" is only
+			// in the other set, and both are reported.
+			"_:|EqualsConstraintComponent|pairs|\"A\"",
+			"_:|EqualsConstraintComponent|pairs|\"C\"",
+			// Disjointness fails on the shared "B", and on nothing else.
+			"_:|DisjointConstraintComponent|pairs|\"B\"",
+			// An absent predicate is an empty set, so every value node differs.
+			"_:|EqualsConstraintComponent|pairs|\"A\"",
+			"_:|EqualsConstraintComponent|pairs|\"B\"",
+		},
+		"equals and disjoint",
+	)
+}
+
+@(private = "file")
+ORDER_SHAPES :: PREFIX + `
+ex:Order a sh:NodeShape ; sh:targetNode ex:ok, ex:bad, ex:mixed ;
+	sh:property [ sh:path ex:p ; sh:lessThan ex:q ] ;
+	sh:property [ sh:path ex:p ; sh:lessThanOrEquals ex:q ] .
+
+# §4.7.3: a node shape may not use the ordering pair, so this asks nothing.
+ex:OrderOnANodeShape a sh:NodeShape ; sh:targetNode ex:bad ; sh:lessThan ex:q .
+`
+
+@(private = "file")
+ORDER_DATA :: PREFIX + `
+ex:ok    ex:p 1 ; ex:q 2 .
+ex:bad   ex:p 2 ; ex:q 2 .
+ex:mixed ex:p 1 ; ex:p 2 ; ex:q "a" ; ex:q "b" .
+`
+
+// The ordering pair: value comparison, one result per **failing pair**, and the
+// property-shape restriction.
+//
+// ex:mixed is the shape of `property/lessThan-002` — two numbers against two
+// strings, every pair incomparable — and it is what makes the per-pair rule
+// visible: four results from two value nodes, with each `sh:value` repeated. A
+// per-value-node loop that stopped at the first failure would produce two.
+@(test)
+test_property_pair_ordering :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, ORDER_SHAPES, ORDER_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// ex:ok: 1 < 2 and 1 <= 2, so nothing.
+			// ex:bad: 2 < 2 is false; 2 <= 2 holds, so only lessThan reports.
+			"_:|LessThanConstraintComponent|bad|\"2\"",
+			// ex:mixed: numbers against strings are incomparable, so every pair
+			// fails for both components — four results each.
+			"_:|LessThanConstraintComponent|mixed|\"1\"",
+			"_:|LessThanConstraintComponent|mixed|\"1\"",
+			"_:|LessThanConstraintComponent|mixed|\"2\"",
+			"_:|LessThanConstraintComponent|mixed|\"2\"",
+			"_:|LessThanOrEqualsConstraintComponent|mixed|\"1\"",
+			"_:|LessThanOrEqualsConstraintComponent|mixed|\"1\"",
+			"_:|LessThanOrEqualsConstraintComponent|mixed|\"2\"",
+			"_:|LessThanOrEqualsConstraintComponent|mixed|\"2\"",
+		},
+		"lessThan and lessThanOrEquals",
+	)
+}
