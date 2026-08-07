@@ -37,8 +37,8 @@
 // A fourth entry point answers a narrower question: `conforms_node` asks whether
 // one node conforms to one *named* shape, producing no results at all. It is the
 // public face of suppressed validation (SHACL-A-0002), which is also what
-// `sh:not`, `sh:or`, `sh:xone`, `sh:node`, and `sh:qualifiedValueShape` are built
-// on — the reason it exists before they do.
+// `sh:not`, `sh:and`, `sh:or`, `sh:xone`, `sh:node`, and `sh:qualifiedValueShape`
+// are built on — the reason it exists before they do.
 //
 //
 // # Memory contract
@@ -113,7 +113,7 @@
 // means what it says only if `shapes_ignored` is empty**.
 //
 // **`sh:datatype` skips the lexical check for datatypes it does not model.**
-// §4.3.1 requires the value's lexical form to lie in the datatype's lexical
+// §4.1.2 requires the value's lexical form to lie in the datatype's lexical
 // space as well as the IRI to match, and this engine enforces it — for
 // xsd:string, xsd:boolean, the integer tower with its derived ranges,
 // xsd:decimal, xsd:float, xsd:double, xsd:dateTime, xsd:date, and
@@ -179,9 +179,12 @@
 // `ex:b` which is `ex:partOf` `ex:a` is ordinary, and validates: recursion is
 // a property of the *shapes*, and detection is on the set of shapes currently
 // on the stack. What triggers it is a shape that reaches itself — through
-// `sh:property` today, and through `sh:node` when the catalogue initiative
-// adds it. Every path form is separately cycle-safe over data, by a visited
-// set, so `sh:zeroOrMorePath` over the graph above terminates.
+// `sh:property`, through any of the logical combinators, and through `sh:node`
+// when the catalogue initiative adds it. A suppressed run shares the outer
+// walk's stack (SHACL-A-0002), so `ex:S sh:not ex:S` is recursion exactly as
+// `ex:S sh:property [ ... ex:S ... ]` is. Every path form is separately
+// cycle-safe over data, by a visited set, so `sh:zeroOrMorePath` over the graph
+// above terminates.
 //
 // Cycle-breaking ("assume valid on re-entry") remains addable later without
 // redesign if evidence asks for it.

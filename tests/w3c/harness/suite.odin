@@ -48,8 +48,8 @@ Suite :: struct {
 // enabling a broken one, so they are on.
 //
 // The three that remain need constraint components the spine deliberately does
-// not implement, and after SHACL-T-0016 the list is down to the two structural
-// families: the logical combinators and the shape-based constraints. They belong
+// not implement, and after SHACL-T-0017 the list is down to one family: the
+// shape-based constraints, `sh:node` and `sh:qualifiedValueShape`. They belong
 // to the catalogue initiative, which turns the directories on one at a time under
 // the same rule. `core/complex` additionally needs `sh:sparql`, so it belongs to
 // the SHACL-SPARQL phase rather than to the catalogue.
@@ -72,8 +72,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 24},
-	{"core/property", 38, 38, false, 27},
+	{"core/node", 32, 32, false, 31},
+	{"core/property", 38, 38, false, 32},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -137,4 +137,24 @@ ENABLED_ENTRIES :: 26
 // object together. `core/complex` is unchanged at 1 of 2, still pinned at 0.
 // Eighteen entries of the original 51 remain, all of them behind the logical
 // combinators and the shape-based constraints.
-PROGRESS_FLOOR :: 51
+//
+// **63 at SHACL-T-0017**, the largest single move of the initiative: `core/node`
+// 24 → 31 of 32 and `core/property` 27 → 32 of 38. Twelve entries, not the
+// eleven the task predicted — `property/datatype-003` is a `sh:or` entry named
+// after what its branches contain, so counting by filename undercounts the
+// family by one.
+//
+// **What remains is six entries, and only five of them are SHACL-T-0018's.**
+// `core/node` is one away and it is `node-001`. `core/property` is six away:
+// `node-001`, `node-002`, and the three `qualified*` entries are the shape-based
+// constraints, and the sixth is **`property/nodeKind-001`, which uses nothing
+// beyond the spine** — six plain `sh:nodeKind` property shapes. It has been red
+// since the floor was first measured and nothing has moved it. So enabling
+// `core/property` needs that entry diagnosed as well as SHACL-T-0018 landed, and
+// SHACL-T-0019 should not assume the catalogue closing is enough. The first
+// place to look is report comparison rather than the engine: its expected report
+// carries eighteen results whose `sh:sourceShape` are shapes-graph blank nodes
+// and whose `sh:value` are *data*-graph blank nodes, which is the hardest
+// isomorphism case in the corpus and the shape of the harness defect
+// SHACL-T-0012 already found once.
+PROGRESS_FLOOR :: 63

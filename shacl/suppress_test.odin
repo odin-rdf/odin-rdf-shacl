@@ -8,22 +8,38 @@ import store "store:store"
 // Suppressed validation, tested where it lives.
 //
 // These are the tests SHACL-I-0002 called out as carrying unusual weight, and
-// the reason is that **no suite entry reaches this code until SHACL-T-0017**.
-// The six components that consume it are two tasks away, so until then the only
+// the reason was that **no suite entry reached this code until SHACL-T-0017**.
+// The components that consume it were two tasks away, so until then the only
 // thing standing between a subtly wrong mechanism and a stranger's report
-// containing results for a shape they never targeted is this file.
+// containing results for a shape they never targeted was this file.
 //
-// They are in package `shacl` rather than in a backend package because the
-// property under test is internal: `node_conforms` takes an in-flight
-// `Validation`, and what has to be asserted is that the caller's three fields
-// come back exactly as they were. A test in `shacl/memstore` can only reach the
-// public `conforms_node`, which builds its own `Validation` and therefore cannot
-// see the save/restore at all — that is what the backend tests cover instead.
+// **Reviewed at SHACL-T-0017, as its acceptance criteria required, and kept.**
+// The question was whether a hand-built model still earns its place once real
+// consumers exist, and the risk named against it was drift: nothing here checks
+// the model against what `compile` actually produces. Two things settled it.
 //
-// The store is a fake: `Access` is four procedure pointers, so a hand-built
-// triple list satisfies it, and the model is built field by field rather than
-// compiled. That is the point — no shapes graph has to exist for this
-// mechanism to be wrong.
+// The drift risk is now covered from the other side — `shacl/memstore`'s
+// `test_inner_results_do_not_reach_the_caller` and
+// `test_an_inner_stop_does_not_truncate_the_outer_traversal` assert the same two
+// properties through a compiled shapes graph and a real backend, so a model here
+// that stopped resembling a compiled one would no longer be the only evidence.
+// And what is left is genuinely unreachable from outside: the assertions below
+// name `v.visit`, `v.visit_data`, `v.stopped`, `v.on_stack` and
+// `Suppressed_Probe` directly. SHACL-A-0002 records the save/restore as **a
+// discipline rather than a type** — a future field belonging to the caller's
+// stream must be added to `node_conforms`'s three and nothing in the compiler
+// will say so — and these are what would notice. A test that can only see
+// results cannot.
+//
+// They are in package `shacl` rather than in a backend package for that reason:
+// `node_conforms` takes an in-flight `Validation`, and a test in
+// `shacl/memstore` can only reach the public `conforms_node`, which builds its
+// own `Validation` and therefore cannot see the save/restore at all.
+//
+// The store is a fake: `Access` is a handful of procedure pointers, so a
+// hand-built triple list satisfies it, and the model is built field by field
+// rather than compiled. That is the point — no shapes graph has to exist for
+// this mechanism to be wrong.
 
 // ---- A fake data graph, and a model built by hand -------------------------
 

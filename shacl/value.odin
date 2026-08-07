@@ -30,7 +30,7 @@ import rdf "rdf:rdf"
 //     when there is no value this engine can produce. This is what the
 //     value-range components compare.
 //   - **Is its lexical form in its datatype's lexical space?** `lexical_status`
-//     answers that, and it is the §4.3.1 half of `sh:datatype` the spine
+//     answers that, and it is the §4.1.2 half of `sh:datatype` the spine
 //     recorded as debt: `"300"^^xsd:byte` and `"c"^^xsd:byte` must both violate
 //     `sh:datatype xsd:byte` even though the datatype IRI matches exactly.
 //
@@ -189,7 +189,7 @@ value_of :: proc(term: rdf.Term) -> Value {
 }
 
 // lexical_status reports whether a literal's lexical form lies in its datatype's
-// lexical space — the §4.3.1 question `sh:datatype` asks after the datatype IRI
+// lexical space — the §4.1.2 question `sh:datatype` asks after the datatype IRI
 // has already matched.
 @(private)
 lexical_status :: proc(literal: rdf.Literal) -> Lexical_Status {

@@ -447,11 +447,14 @@ compile :: proc(
 					enqueue(&pending, &pending_kind, &queued, id, .Node)
 					continue
 				}
-				// A malformed list is not rejected here. Whether `sh:and ( )`
-				// with a broken list is an ill-formed shapes graph is the
-				// logical combinators' question (SHACL-T-0017), and answering it
-				// from discovery would reject graphs whose sh:and this engine
-				// does not yet enforce at all.
+				// A malformed list is not rejected *here*. SHACL-T-0017
+				// answered the question this comment used to leave open — a
+				// broken `sh:and` list is an ill-formed shapes graph — and put
+				// the answer in `compile_shape_operands`, which is the pass that
+				// has to read the list anyway. Deciding it in one place rather
+				// than two is the whole of the reason; discovery skipping a list
+				// it cannot walk is harmless, because that pass then errors on
+				// it before anything validates.
 				items, list_ok := list_items(r, id, MATCH, NEXT, DESTROY)
 				defer delete(items)
 				if !list_ok {
@@ -487,12 +490,28 @@ compile :: proc(
 		}
 	}
 
-	// ---- The one constraint that had to wait for the fixup -----------------
+	// ---- The constraints that had to wait for every shape to exist ---------
 	//
-	// `sh:closed`'s allowed-predicate set is a statement about a shape's
-	// *children*, so it cannot be compiled until they are linked. Everything else
-	// about the component was decided in `compile_constraints`; this only fills in
-	// `Constraint.values`.
+	// Two components cannot finish compiling where their parameters are read.
+	// The logical combinators name *other shapes*, whose indices are unknown
+	// until the worklist has drained; `sh:closed`'s allowed-predicate set is a
+	// statement about a shape's `sh:property` children, which are linked by the
+	// fixup above. Both were created in `compile_constraints`, because
+	// `Shape.constraints` is a contiguous span; these two passes only fill in
+	// what they could not.
+	if err := compile_shape_operands(
+		s,
+		r,
+		pending[:len(s.shapes)],
+		&compiled,
+		&v,
+		MATCH,
+		NEXT,
+		DESTROY,
+	); err.kind != .None {
+		return err
+	}
+
 	if err := compile_closed_sets(
 		s,
 		r,

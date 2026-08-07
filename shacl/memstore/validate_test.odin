@@ -836,7 +836,7 @@ ex:NoBound a sh:NodeShape ; sh:targetNode 4 ; sh:minInclusive ex:NotANumber .
 // `sh:minInclusive 4`, and term equality would have failed both.
 //
 // The second is that everything the comparison *cannot* place violates:
-// §4.6.2's condition is that the comparison holds, and one that could not be
+// §4.3's condition is that the comparison holds, and one that could not be
 // made does not hold. It applies to a value node with no value and equally to a
 // bound with none, which is the case the suite never exercises.
 @(test)
@@ -867,7 +867,7 @@ test_value_range_incomparable_violates :: proc(t: ^testing.T) {
 
 @(private = "file")
 STRING_SHAPES :: PREFIX + `
-# §4.5 asks all three of these for the value node's *string*, and the answer is
+# §4.4 asks all three of these for the value node's *string*, and the answer is
 # not the same shape as "the lexical form": an IRI contributes itself, a blank
 # node contributes nothing.
 ex:Length a sh:NodeShape ; sh:minLength 4 ; sh:maxLength 5 ;
@@ -891,7 +891,7 @@ STRING_DATA :: PREFIX + `
 ex:hasBlank ex:p [ ex:q "irrelevant" ] .
 `
 
-// What §4.5 means by a value node's string, which is the part of these three
+// What §4.4 means by a value node's string, which is the part of these three
 // components that is not obvious.
 //
 // A blank node has no string and so violates **even `sh:minLength 0`**, which
@@ -1013,7 +1013,7 @@ ex:Langs a sh:NodeShape ; sh:languageIn ( "en" "mi" ) ;
 ex:Unique a sh:NodeShape ; sh:targetNode ex:one, ex:two, ex:three ;
 	sh:property [ sh:path ex:p ; sh:uniqueLang true ] .
 
-# §4.5.5 is a property-shape component; on a node shape it asks nothing.
+# §4.4.5 is a property-shape component; on a node shape it asks nothing.
 ex:UniqueOnANodeShape a sh:NodeShape ; sh:targetNode ex:one ; sh:uniqueLang true .
 `
 
@@ -1067,7 +1067,7 @@ test_language_in_and_unique_lang :: proc(t: ^testing.T) {
 // `sh:uniqueLang "1"^^xsd:boolean` does not switch the component on, though "1"
 // is the same *value* as "true".
 //
-// §4.5.5 names the value `true`, and `property/uniqueLang-002` exists to pin
+// §4.4.5 names the value `true`, and `property/uniqueLang-002` exists to pin
 // exactly this: it declares the "1" form over two `@en` literals and expects a
 // conforming report, with a comment in the corpus saying why. It is the one
 // place in this engine where a boolean parameter is read as a term rather than
@@ -1166,7 +1166,7 @@ ex:Order a sh:NodeShape ; sh:targetNode ex:ok, ex:bad, ex:mixed ;
 	sh:property [ sh:path ex:p ; sh:lessThan ex:q ] ;
 	sh:property [ sh:path ex:p ; sh:lessThanOrEquals ex:q ] .
 
-# §4.7.3: a node shape may not use the ordering pair, so this asks nothing.
+# §4.5.3: a node shape may not use the ordering pair, so this asks nothing.
 ex:OrderOnANodeShape a sh:NodeShape ; sh:targetNode ex:bad ; sh:lessThan ex:q .
 `
 
@@ -1302,4 +1302,324 @@ test_closed :: proc(t: ^testing.T) {
 		},
 		"closed and ignoredProperties",
 	)
+}
+
+// ---- The logical combinators, and the mechanism under them ----------------
+//
+// These are the first consumers of suppressed validation (SHACL-A-0002), so
+// this section tests two things at once: that §4.6 is implemented, and that the
+// mechanism SHACL-T-0011 built holds up when something real drives it.
+// `shacl/suppress_test.odin` asserts the same properties against a hand-built
+// model and a fake store; what these add is a shapes graph that `compile`
+// actually produced.
+
+@(private = "file")
+LOGICAL_SHAPES :: PREFIX + `
+ex:And a sh:NodeShape ; sh:targetNode ex:both, ex:onlyA, ex:neither ;
+	sh:and ( ex:HasA ex:HasB ) .
+ex:Or a sh:NodeShape ; sh:targetNode ex:both, ex:onlyA, ex:neither ;
+	sh:or ( ex:HasA ex:HasB ) .
+ex:Not a sh:NodeShape ; sh:targetNode ex:both, ex:onlyA, ex:neither ;
+	sh:not ex:HasA .
+
+# Shapes only because they are named by a shape-expecting parameter (§2.1.1),
+# with no rdf:type and no target of their own.
+ex:HasA sh:property [ sh:path ex:a ; sh:minCount 1 ] .
+ex:HasB sh:property [ sh:path ex:b ; sh:minCount 1 ] .
+
+# At a property shape, where the value node and the focus node come apart.
+ex:PropOr a sh:NodeShape ; sh:targetNode ex:holder ;
+	sh:property [ sh:path ex:p ;
+		sh:or ( [ sh:datatype xsd:string ] [ sh:class ex:C ] ) ] .
+`
+
+@(private = "file")
+LOGICAL_DATA :: PREFIX + `
+ex:both    ex:a 1 ; ex:b 2 .
+ex:onlyA   ex:a 1 .
+ex:neither ex:x 1 .
+
+ex:holder ex:p "text" ; ex:p 42 ; ex:p ex:inC .
+ex:inC a ex:C .
+`
+
+// sh:and, sh:or and sh:not, at a node shape and at a property shape.
+//
+// Two things the corpus fixes and this pins. The result names the shape that
+// **carries** the combinator, never the branch that failed — `node/and-001`
+// expects `sh:sourceShape ex:Rectangle` though the failing branch is anonymous
+// inside its list. And they are value-scoped: `ex:PropOr` has three value nodes
+// and produces one result, naming the value node rather than the focus node,
+// which is `property/or-datatypes-001`'s shape in miniature.
+@(test)
+test_logical_combinators :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, LOGICAL_SHAPES, LOGICAL_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// sh:and: ex:both satisfies both branches; the other two miss one each.
+			"And|AndConstraintComponent|onlyA|onlyA",
+			"And|AndConstraintComponent|neither|neither",
+			// sh:or: only the node satisfying neither branch reports.
+			"Or|OrConstraintComponent|neither|neither",
+			// sh:not: inverted, so the two nodes that *do* conform to ex:HasA are
+			// the ones that violate.
+			"Not|NotConstraintComponent|both|both",
+			"Not|NotConstraintComponent|onlyA|onlyA",
+			// At the property shape: 42 is neither a string nor an ex:C. The
+			// result names the value node, and the source shape is the anonymous
+			// property shape rather than either branch.
+			"_:|OrConstraintComponent|holder|\"42\"",
+		},
+		"and, or and not",
+	)
+}
+
+@(private = "file")
+XONE_SHAPES :: PREFIX + `
+ex:Xone a sh:NodeShape ; sh:targetNode ex:none, ex:justC1, ex:bothC ;
+	sh:xone ( ex:IsC1 ex:IsC2 ) .
+
+# The shape of node/xone-duplicate: the same branch twice, which a node
+# conforming to it satisfies twice.
+ex:XoneDuplicate a sh:NodeShape ; sh:targetNode ex:justC1 ;
+	sh:xone ( ex:IsC1 ex:IsC1 ) .
+
+ex:IsC1 sh:class ex:C1 .
+ex:IsC2 sh:class ex:C2 .
+`
+
+@(private = "file")
+XONE_DATA :: PREFIX + `
+ex:none   a ex:Other .
+ex:justC1 a ex:C1 .
+ex:bothC  a ex:C1 , ex:C2 .
+`
+
+// sh:xone is **exactly** one, and the two readings that are not are both
+// distinguished here.
+//
+// `ex:bothC` conforms to two branches and must violate, which an at-least-one
+// reading passes. `ex:XoneDuplicate` names one shape twice and `ex:justC1`
+// satisfies both copies, which a reading that deduplicated the list before
+// counting would pass — `node/xone-duplicate` is the corpus entry that exists
+// for exactly this, and it expects a violation.
+@(test)
+test_xone_is_exactly_one :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, XONE_SHAPES, XONE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// Zero branches conformed.
+			"Xone|XoneConstraintComponent|none|none",
+			// Two branches conformed, which is not one.
+			"Xone|XoneConstraintComponent|bothC|bothC",
+			// The same branch, listed twice, conformed twice.
+			"XoneDuplicate|XoneConstraintComponent|justC1|justC1",
+			// ex:justC1 against the two distinct branches conforms to exactly
+			// one, and produces nothing.
+		},
+		"xone",
+	)
+}
+
+@(private = "file")
+NEST_SHAPES :: PREFIX + `
+ex:Nest a sh:NodeShape ; sh:targetNode ex:ok, ex:isBad, ex:neitherAB ;
+	sh:and (
+		[ sh:not [ sh:class ex:Bad ] ]
+		[ sh:or ( [ sh:class ex:A ] [ sh:class ex:B ] ) ]
+	) .
+`
+
+@(private = "file")
+NEST_DATA :: PREFIX + `
+ex:ok        a ex:A .
+ex:isBad     a ex:Bad , ex:A .
+ex:neitherAB a ex:Other .
+`
+
+// A combinator inside a combinator, which is where a suppression mechanism that
+// leaked state would fail first: each `sh:and` branch runs a suppressed
+// validation that itself runs one, so the save/restore has to unwind in the
+// order it entered.
+//
+// `ex:isBad` fails the nested `sh:not` and `ex:neitherAB` fails the nested
+// `sh:or`, so both arms of the conjunction are exercised in the failing
+// direction, and `ex:ok` passes through both.
+@(test)
+test_combinators_nest :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, NEST_SHAPES, NEST_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Nest|AndConstraintComponent|isBad|isBad",
+			"Nest|AndConstraintComponent|neitherAB|neitherAB",
+		},
+		"nested combinators",
+	)
+}
+
+@(private = "file")
+NO_LEAK_SHAPES :: PREFIX + `
+ex:NoLeak a sh:NodeShape ; sh:targetNode ex:iri ;
+	sh:not ex:Impossible .
+
+# Three ways to fail, none of which may be seen by anybody.
+ex:Impossible sh:nodeKind sh:Literal ;
+	sh:property [ sh:path ex:missing ; sh:minCount 3 ] ;
+	sh:property [ sh:path ex:alsoMissing ; sh:minCount 3 ] .
+
+# The same node against a shape it *does* conform to, so this graph produces
+# exactly one result. Without it the test would pass on an engine where sh:not
+# did nothing at all, which is the way a zero-result expectation usually lies.
+ex:Live a sh:NodeShape ; sh:targetNode ex:iri ;
+	sh:not ex:Trivial .
+ex:Trivial sh:nodeKind sh:IRI .
+`
+
+@(private = "file")
+NO_LEAK_DATA :: PREFIX + `
+ex:iri ex:something 1 .
+`
+
+// **Nothing a suppressed run produced reaches the caller**, asserted through a
+// real shapes graph rather than inferred from a report that happened to match.
+//
+// This is the failure mode SHACL-A-0002 was written around, and it is invisible
+// from inside the engine: it shows up as a stranger's report containing results
+// for a shape they never targeted. `ex:iri` violates `ex:Impossible` three ways
+// over, so that `sh:not` is *satisfied* and contributes nothing, while
+// `ex:Live`'s contributes one — and **one** is the whole assertion. A leak shows
+// up here as `NodeKind` and `MinCount` results for a shape nothing targeted,
+// which is exactly how it would show up in a caller's report.
+//
+// The hand-built twin is `test_a_suppressed_run_emits_nothing_to_the_caller` in
+// `shacl/suppress_test.odin`. That one can see the `Validation`'s fields; this
+// one can see what a caller sees.
+@(test)
+test_inner_results_do_not_reach_the_caller :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, NO_LEAK_SHAPES, NO_LEAK_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string{"Live|NotConstraintComponent|iri|iri"},
+		"only the sh:not's own result, never the inner shape's",
+	)
+}
+
+@(private = "file")
+STREAM_SHAPES :: PREFIX + `
+# Every focus node runs a suppressed validation that stops internally — the
+# inner shape rejects an IRI — and then has to keep reporting.
+ex:Stream a sh:NodeShape ; sh:targetNode ex:a1, ex:a2, ex:a3 ;
+	sh:not [ sh:nodeKind sh:Literal ] ;
+	sh:nodeKind sh:Literal .
+`
+
+@(private = "file")
+STREAM_DATA :: PREFIX + `
+ex:a1 ex:p 1 .
+ex:a2 ex:p 1 .
+ex:a3 ex:p 1 .
+`
+
+// **The inner stop does not stop the outer**, through a real shapes graph.
+//
+// The probe returns false at its first result, which is the same flag a caller's
+// visitor sets to abandon a traversal. If it survived the sub-run, the first
+// focus node's `sh:not` would silently truncate the whole validation — one
+// result instead of three, and a report that looked complete. Three is the
+// number that says the flag was restored.
+@(test)
+test_an_inner_stop_does_not_truncate_the_outer_traversal :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, STREAM_SHAPES, STREAM_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Stream|NodeKindConstraintComponent|a1|a1",
+			"Stream|NodeKindConstraintComponent|a2|a2",
+			"Stream|NodeKindConstraintComponent|a3|a3",
+		},
+		"every focus node still reported after a suppressed run stopped internally",
+	)
+}
+
+@(private = "file")
+SELF_NOT_SHAPES :: PREFIX + `
+ex:SelfNot a sh:NodeShape ; sh:targetNode ex:n ; sh:not ex:SelfNot .
+`
+
+@(private = "file")
+SELF_NOT_DATA :: PREFIX + `
+ex:n ex:p 1 .
+`
+
+// Recursion **through** a suppressed run is recursion (SHACL-A-0002): the
+// `on_stack` set is shared, so a shape a combinator re-enters is caught exactly
+// as one re-entered through `sh:property` is.
+//
+// The ADR's own example is `ex:S sh:not [ sh:node ex:S ]`, which needs `sh:node`
+// and therefore SHACL-T-0018; this is the same graph one level shallower and
+// tests the same bit. The alternative the ADR rejected — a fresh recursion set
+// per suppressed run — would not give a different answer here, it would give
+// none: this shapes graph would nest until the process died.
+@(test)
+test_recursion_through_a_combinator_is_a_failure :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, SELF_NOT_SHAPES, SELF_NOT_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.Recursive_Shape)
+
+	// A failure is not a conformance answer, and it must not have left a result
+	// behind that a caller could mistake for one.
+	expect_results(t, &seen, []string{}, "a failed validation reported a violation")
 }

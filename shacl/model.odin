@@ -131,9 +131,18 @@ Constraint_Kind :: enum u8 {
 	// paths of the shape's `sh:property` children, so it cannot be filled until
 	// those children are linked. See the closing pass in `compile`.
 	Closed,
+	// The logical combinators (SHACL-T-0017). They carry no parameter of their
+	// own: `shapes` names the operand shapes by index, and every one of them is
+	// evaluated by running the ordinary walk with the visitor suppressed
+	// (SHACL-A-0002). `Not` has exactly one operand; the other three have as many
+	// as their RDF list had, including none.
+	And,
+	Or,
+	Not,
+	Xone,
 }
 
-// Node_Kind is `sh:nodeKind` (§4.4.2), as a set of the three primitive kinds
+// Node_Kind is `sh:nodeKind` (§4.1.3), as a set of the three primitive kinds
 // so the six spec values are one representation.
 Node_Kind :: distinct bit_set[Node_Kind_Bit;u8]
 
@@ -170,12 +179,18 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 // expression is an allocation, made once at compile time so that matching a
 // value node costs no compilation, and freed by `shapes_destroy` with the
 // model's own allocator.
+// `shapes` is the fourth kind of parameter and the only one that names other
+// *shapes*: a range into Shapes.shape_children, whose entries are indices back
+// into Shapes.shapes, exactly as a shape's `sh:property` children are. The four
+// logical combinators use it and nothing else does yet — the shape-based
+// constraints will.
 Constraint :: struct {
 	kind:      Constraint_Kind,
 	count:     int,
 	term:      rdf.Term,
 	node_kind: Node_Kind,
 	values:    Span,
+	shapes:    Span,
 	pattern:   regex.Regular_Expression,
 }
 
@@ -218,10 +233,11 @@ Shapes :: struct {
 	paths:          [dynamic]Path_Node,
 	messages:       [dynamic]Message,
 
-	// Child index arrays. `shape_children` holds indices into `shapes`
-	// (a shape's sh:property values); `path_children` holds indices into
-	// `paths` (a path node's operands); `values` holds terms (sh:in,
-	// sh:languageIn, sh:closed's allowed predicates).
+	// Child index arrays. `shape_children` holds indices into `shapes` — a
+	// shape's sh:property values, and the operands of a logical combinator;
+	// `path_children` holds indices into `paths` (a path node's operands);
+	// `values` holds terms (sh:in, sh:languageIn, sh:closed's allowed
+	// predicates).
 	shape_children: [dynamic]int,
 	path_children:  [dynamic]int,
 	values:         [dynamic]rdf.Term,
@@ -346,4 +362,11 @@ shapes_ignored :: proc(s: ^Shapes) -> []rdf.Term {
 // `sh:in`'s and `sh:languageIn`'s members, and `sh:closed`'s allowed predicates.
 constraint_values :: proc(s: ^Shapes, c: Constraint) -> []rdf.Term {
 	return s.values[c.values.start:][:c.values.count]
+}
+
+// constraint_shapes returns the operand shapes of a shape-valued constraint, as
+// indices into `Shapes.shapes` — the branches of `sh:and`, `sh:or`, `sh:xone`,
+// and the single shape of `sh:not`.
+constraint_shapes :: proc(s: ^Shapes, c: Constraint) -> []int {
+	return s.shape_children[c.shapes.start:][:c.shapes.count]
 }

@@ -43,6 +43,9 @@ Error_Kind :: enum {
 	Unique_Lang_Not_Boolean, // sh:uniqueLang whose value is not an xsd:boolean
 	Closed_Not_Boolean, // sh:closed whose value is not an xsd:boolean
 	Ignored_Properties_Not_A_List, // sh:ignoredProperties whose value is not an RDF list
+	// One kind for sh:and, sh:or and sh:xone rather than three: the Error names
+	// the parameter at fault, so three kinds would say the same thing twice.
+	Shape_List_Not_A_List, // sh:and / sh:or / sh:xone whose value is not an RDF list
 }
 
 // error_message returns a static description of kind. Allocation-free, and
@@ -64,7 +67,7 @@ error_message :: proc(kind: Error_Kind) -> string {
 	case .Path_List_Too_Short:
 		return "sh:alternativePath needs at least two members (§2.3.1.4)"
 	case .Node_Kind_Unknown:
-		return "sh:nodeKind is not one of the six node kinds (§4.4.2)"
+		return "sh:nodeKind is not one of the six node kinds (§4.1.3)"
 	case .Count_Not_Integer:
 		return "cardinality parameter is not an xsd:integer (§4.2)"
 	case .Count_Negative:
@@ -74,25 +77,27 @@ error_message :: proc(kind: Error_Kind) -> string {
 	case .Deactivated_Not_Boolean:
 		return "sh:deactivated is not an xsd:boolean (§2.1.1.4)"
 	case .In_Not_A_List:
-		return "sh:in value is not an RDF list (§4.6.1)"
+		return "sh:in value is not an RDF list (§4.8.3)"
 	case .Shape_Expected:
 		return "value must be a shape, an IRI or a blank node (§2.1.1)"
 	case .Length_Not_Integer:
-		return "length parameter is not an xsd:integer (§4.5)"
+		return "length parameter is not an xsd:integer (§4.4)"
 	case .Length_Negative:
-		return "length parameter is negative (§4.5)"
+		return "length parameter is negative (§4.4)"
 	case .Pattern_Ill_Formed:
-		return "sh:pattern is not a regular expression this engine can compile (§4.5.3)"
+		return "sh:pattern is not a regular expression this engine can compile (§4.4.3)"
 	case .Flags_Unsupported:
-		return "sh:flags names a flag this engine does not support (§4.5.3)"
+		return "sh:flags names a flag this engine does not support (§4.4.3)"
 	case .Language_In_Not_A_List:
-		return "sh:languageIn value is not an RDF list (§4.5.4)"
+		return "sh:languageIn value is not an RDF list (§4.4.4)"
 	case .Unique_Lang_Not_Boolean:
-		return "sh:uniqueLang is not an xsd:boolean (§4.5.5)"
+		return "sh:uniqueLang is not an xsd:boolean (§4.4.5)"
 	case .Closed_Not_Boolean:
 		return "sh:closed is not an xsd:boolean (§4.8.1)"
 	case .Ignored_Properties_Not_A_List:
 		return "sh:ignoredProperties value is not an RDF list (§4.8.1)"
+	case .Shape_List_Not_A_List:
+		return "logical constraint value is not an RDF list of shapes (§4.6)"
 	}
 	return "unknown error"
 }

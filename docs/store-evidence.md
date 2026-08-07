@@ -197,3 +197,15 @@ Recorded so the log's silence is legible rather than ambiguous:
   whether a caller can pin a read view. Left as it is because no consumer has
   asked, and inventing the requirement here would be the opposite of
   evidence-driven.
+
+  **SHACL-T-0017 sharpens it again, and this time by a multiplier.** The logical
+  combinators run a whole suppressed validation *per branch per value node*, and
+  they nest: `sh:and ( [ sh:not … ] [ sh:or ( … ) ] )` is four sub-walks for one
+  value node, each re-reading the paths it needs. Nothing new is asked of the
+  interface — a suppressed run is the ordinary walk with the visitor swapped, so
+  every read it makes is a read the engine already made — but the number of reads
+  over one validation is no longer proportional to the data. It is proportional
+  to the shapes graph times the data, and SHACL-A-0002 explicitly declined to
+  memoise conformance answers until a consumer showed it was needed. If the read
+  window ever becomes a real complaint, this is the task that widened it, and the
+  answer is likelier to be memoisation here than a snapshot verb upstream.

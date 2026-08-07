@@ -36,7 +36,7 @@ import store "store:store"
 //     node. `property/lessThan-002` expects four results from two value nodes.
 //   - `sh:equals` reports members of the *other* predicate's set, which are not
 //     value nodes at all. `node/equals-001` expects one.
-//   - `sh:datatype` needs §4.3.1's lexical check, which the spine deferred for a
+//   - `sh:datatype` needs §4.1.2's lexical check, which the spine deferred for a
 //     whole initiative because its enabled directories only ever used
 //     `xsd:string`, whose lexical space is every string.
 //   - `sh:closed` reports `sh:resultPath <the offending predicate>` — a term of
@@ -120,7 +120,7 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	switch kind {
 	// `sh:uniqueLang` is the third set-scoped component and the one that reads
 	// least like it: it looks per-value — "is this literal's tag unique?" — and
-	// is not, because uniqueness is a property of the set. §4.5.5 asks for one
+	// is not, because uniqueness is a property of the set. §4.4.5 asks for one
 	// result per language used twice, which no per-value check could produce.
 	// The property-pair components are set-scoped for two reasons. `sh:equals`
 	// and `sh:disjoint` compare set against set and could not be answered from
@@ -144,6 +144,12 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	// indistinguishable, since the single value node is the focus node, and that
 	// is every entry the corpus has; on a property shape they differ, and the
 	// spec's wording is what decides it rather than the corpus.
+	//
+	// The four logical combinators are value-scoped, and the corpus is
+	// unambiguous about it in both directions: `node/*`'s entries put them on
+	// node shapes and name the focus node in `sh:value`, while
+	// `property/or-datatypes-001` puts one on a property shape with four value
+	// nodes and expects **three** results, one per value node that fails.
 	case .Class,
 	     .Datatype,
 	     .Node_Kind,
@@ -156,7 +162,11 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Max_Length,
 	     .Pattern,
 	     .Language_In,
-	     .Closed:
+	     .Closed,
+	     .And,
+	     .Or,
+	     .Not,
+	     .Xone:
 		return .Value
 	}
 	return .Value
@@ -164,6 +174,13 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 
 // check_shape runs every constraint a shape declares against one focus node's
 // value nodes.
+//
+// A failure abandons the remaining constraints as a stop does. That mattered
+// from SHACL-T-0017 rather than from the spine: until the logical combinators,
+// the only failure was shape recursion, which `push_frame` raises *after* this
+// procedure has run, so nothing here could ever see one. A suppressed run raises
+// it from inside a constraint check, and the constraints after it would
+// otherwise keep reporting into a report the caller must already discard.
 @(private)
 check_shape :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
 	shape := v.s.shapes[shape_index]
@@ -175,12 +192,12 @@ check_shape :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
 		case .Value:
 			for n in 0 ..< value_set_count(values) {
 				check_value(v, shape_index, c, start + i, values.focus, value_set_at(values, n))
-				if v.stopped {
+				if v.stopped || v.failure != .None {
 					return
 				}
 			}
 		}
-		if v.stopped {
+		if v.stopped || v.failure != .None {
 			return
 		}
 	}
@@ -219,7 +236,7 @@ check_node_set :: proc(
 		}
 
 	case .Has_Value:
-		// §4.5.1: the term must be *among* the value nodes. One violation for
+		// §4.8.2: the term must be *among* the value nodes. One violation for
 		// the shape, not one per node that is not it.
 		for n in 0 ..< count {
 			if node_is_term(v, value_set_at(values, n), constraint_index, c.term) {
@@ -236,7 +253,7 @@ check_node_set :: proc(
 	}
 }
 
-// check_property_pair is the four components of §4.7, which compare a shape's
+// check_property_pair is the four components of §4.5, which compare a shape's
 // value nodes against the values of another predicate **at the same focus
 // node**.
 //
@@ -259,7 +276,7 @@ check_property_pair :: proc(
 	constraint_index: int,
 	values: Value_Set,
 ) {
-	// §4.7.3–4.7.4: the ordering pair may be used at property shapes only.
+	// §4.5.3–4.5.4: the ordering pair may be used at property shapes only.
 	// `sh:equals` and `sh:disjoint` carry no such restriction — `node/equals-001`
 	// puts one on a node shape.
 	if c.kind == .Less_Than || c.kind == .Less_Than_Or_Equals {
@@ -277,7 +294,7 @@ check_property_pair :: proc(
 	count := value_set_count(values)
 	#partial switch c.kind {
 	case .Equals:
-		// §4.7.1: the two sets must be equal, so every member of the symmetric
+		// §4.5.1: the two sets must be equal, so every member of the symmetric
 		// difference is a result naming itself — in both directions. The second
 		// loop is the one that surprises: it reports a node that is *not* a value
 		// node, which is why `property/equals-001` expects a result for a focus
@@ -301,7 +318,7 @@ check_property_pair :: proc(
 		}
 
 	case .Disjoint:
-		// §4.7.2: the sets must share nothing, so every member of the
+		// §4.5.2: the sets must share nothing, so every member of the
 		// intersection is a result. One direction is enough — a shared node is a
 		// value node by definition.
 		for n in 0 ..< count {
@@ -315,7 +332,7 @@ check_property_pair :: proc(
 		}
 
 	case .Less_Than, .Less_Than_Or_Equals:
-		// §4.7.3–4.7.4: every value node must compare against **every** member of
+		// §4.5.3–4.5.4: every value node must compare against **every** member of
 		// the other set, and a result is emitted **per failing pair** rather than
 		// per failing value node.
 		//
@@ -397,7 +414,7 @@ id_among :: proc(values: Value_Set, id: store.Term_ID) -> bool {
 	return false
 }
 
-// check_unique_lang is `sh:uniqueLang` (§4.5.5): no two value nodes may carry
+// check_unique_lang is `sh:uniqueLang` (§4.4.5): no two value nodes may carry
 // the same non-empty language tag.
 //
 // **One result per language used twice, not one per shape and not one per
@@ -499,6 +516,8 @@ check_value :: proc(
 		ok = check_string(v, c, value)
 	case .Language_In:
 		ok = check_language_in(v, c, value)
+	case .And, .Or, .Not, .Xone:
+		ok = check_logical(v, c, value)
 	case .Min_Count,
 	     .Max_Count,
 	     .Has_Value,
@@ -513,6 +532,108 @@ check_value :: proc(
 	if !ok {
 		emit_result(v, shape_index, focus, value, true, c.kind)
 	}
+}
+
+// check_logical is the four logical combinators of §4.6: `sh:not`, `sh:and`,
+// `sh:or`, and `sh:xone`.
+//
+// **The value node becomes the inner shape's focus node.** That is the sentence
+// the whole family turns on, and it is what makes these components a consumer of
+// suppressed validation rather than of anything new: each operand is asked
+// "does *this node* conform to you?" through `node_conforms` (SHACL-A-0002),
+// which is the ordinary walk with the visitor swapped for a probe. None of the
+// operands' own results reaches the caller — `property/not-001`'s inner shape
+// produces a `sh:datatype` violation for every value node that is not an
+// integer, and the report contains exactly one result, a `sh:not`.
+//
+// **The result names the shape that carries the combinator, not the branch that
+// failed.** `node/and-001` expects `sh:sourceShape ex:Rectangle` even though the
+// branch that failed is an anonymous shape inside its list, which falls out of
+// `emit_result` taking the enclosing shape — but it is worth saying, because a
+// reader looking for `sh:detail`-style nesting will not find it and it is not an
+// omission (SHACL-I-0002 measured `sh:detail` as absent from the corpus).
+//
+// **A failure answers nothing.** If a suppressed run hit shape recursion it
+// could not establish conformance, so this returns "satisfied" and emits no
+// result; the failure is already on the `Validation` and the walk abandons at
+// the next check. Reporting a violation instead would put a result in the
+// caller's report that the engine never established.
+//
+// Short-circuiting is not an optimisation here so much as the natural reading:
+// `sh:and` stops at the first branch that fails, `sh:or` at the first that
+// holds, and `sh:xone` at the second — after two, "exactly one" is settled
+// whatever the rest do. Each branch skipped is a whole suppressed walk not run.
+@(private = "file")
+check_logical :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
+	operands := constraint_shapes(v.s, c)
+
+	// An empty list is not an error and the three answers differ: the conjunction
+	// of nothing holds, the disjunction of nothing does not, and exactly-one of
+	// nothing does not. No corpus entry writes one; these fall out of the loops
+	// below rather than being special-cased, and are recorded here because a
+	// reader will wonder.
+	#partial switch c.kind {
+	case .Not:
+		// One operand, and the polarity inverted: this violates when the value
+		// node *did* conform. A `sh:not` with several values compiles to several
+		// constraints, so the loop still runs exactly once.
+		for index in operands {
+			conforms := node_conforms(v, index, value)
+			if v.failure != .None {
+				return true
+			}
+			if conforms {
+				return false
+			}
+		}
+		return true
+
+	case .And:
+		for index in operands {
+			conforms := node_conforms(v, index, value)
+			if v.failure != .None {
+				return true
+			}
+			if !conforms {
+				return false
+			}
+		}
+		return true
+
+	case .Or:
+		for index in operands {
+			conforms := node_conforms(v, index, value)
+			if v.failure != .None {
+				return true
+			}
+			if conforms {
+				return true
+			}
+		}
+		return false
+
+	case .Xone:
+		// **Exactly one, counted rather than found**, and `node/xone-duplicate`
+		// is the entry that makes the difference visible: `sh:xone ( ex:s2 ex:s2 )`
+		// over a node that conforms to `ex:s2` conforms to *both* copies, and is
+		// expected to violate. An at-least-one reading passes it, and so does a
+		// reading that deduplicates the list before counting.
+		conformed := 0
+		for index in operands {
+			conforms := node_conforms(v, index, value)
+			if v.failure != .None {
+				return true
+			}
+			if conforms {
+				conformed += 1
+				if conformed > 1 {
+					return false
+				}
+			}
+		}
+		return conformed == 1
+	}
+	return true
 }
 
 // check_closed is `sh:closed` with `sh:ignoredProperties` (§4.8.1): the value
@@ -603,7 +724,7 @@ closed_visit :: proc(data: rawptr, predicate, object: store.Term_ID) -> bool {
 	return !v.stopped
 }
 
-// check_class is `sh:class` (§4.4.1): the value node must be a SHACL instance
+// check_class is `sh:class` (§4.1.1): the value node must be a SHACL instance
 // of the class — it must carry an `rdf:type` that is the class or a subclass of
 // it, transitively, **in the data graph**.
 //
@@ -649,7 +770,7 @@ class_check_visit :: proc(data: rawptr, id: store.Term_ID) -> bool {
 	return true
 }
 
-// check_datatype is `sh:datatype` (§4.3.1): the value node must be a literal
+// check_datatype is `sh:datatype` (§4.1.2): the value node must be a literal
 // whose datatype IRI is exactly the parameter **and whose lexical form lies in
 // that datatype's lexical space**.
 //
@@ -689,7 +810,7 @@ check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	return lexical_status(literal) != .Ill_Formed
 }
 
-// check_in is `sh:in` (§4.6.1): the value node must be a member of the list.
+// check_in is `sh:in` (§4.8.3): the value node must be a member of the list.
 @(private = "file")
 check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	for i in 0 ..< c.values.count {
@@ -705,7 +826,7 @@ check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	return false
 }
 
-// check_range is the four value-range components (§4.6.2–4.6.5):
+// check_range is the four value-range components (§4.3.1–4.3.4):
 // `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and `sh:maxExclusive`.
 // One procedure rather than four, because they differ only in which of the four
 // answers they accept.
@@ -746,10 +867,10 @@ check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 }
 
 // check_string is the three components that work on a value node's **string**:
-// `sh:minLength`, `sh:maxLength` (§4.5.1–4.5.2), and `sh:pattern` (§4.5.3).
+// `sh:minLength`, `sh:maxLength` (§4.4.1–4.4.2), and `sh:pattern` (§4.4.3).
 //
 // They share a procedure because they share the hard part, which is deciding
-// what a node's string *is*. §4.5 answers it the same way for all three, and it
+// what a node's string *is*. §4.4 answers it the same way for all three, and it
 // is not the answer a reader expects: a literal contributes its lexical form,
 // **an IRI contributes the IRI itself**, and a blank node contributes nothing
 // and therefore always violates.
@@ -760,7 +881,7 @@ check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 // violates. `node/pattern-001` does the same for the regular expression, down to
 // matching `"777777"@mi` on its lexical form and ignoring the tag.
 //
-// **Length is in code points, not bytes.** §4.5.1 counts the string length as
+// **Length is in code points, not bytes.** §4.4.1 counts the string length as
 // XPath's `fn:string-length` does, which counts characters; a byte count would
 // make any non-ASCII lexical form longer than it is. No corpus entry is
 // non-ASCII, so this is the spec being followed rather than a test passing.
@@ -795,7 +916,7 @@ check_string :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	return false
 }
 
-// node_string is what §4.5 means by a value node's string: a literal's lexical
+// node_string is what §4.4 means by a value node's string: a literal's lexical
 // form, an IRI's own text, and nothing at all for a blank node — which is how
 // the spec makes a blank node violate every string component without any of
 // them naming it.
@@ -810,7 +931,7 @@ node_string :: proc(term: rdf.Term) -> (text: string, ok: bool) {
 	return "", false
 }
 
-// check_language_in is `sh:languageIn` (§4.5.4): the value node must be a
+// check_language_in is `sh:languageIn` (§4.4.4): the value node must be a
 // language-tagged literal whose tag matches one of the listed language ranges.
 //
 // **Matching is RFC 4647 basic filtering**, not equality, which is why

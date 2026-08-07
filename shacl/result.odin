@@ -101,6 +101,14 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 	// widens what `sh:closed` allows, and a result from the pair names this.
 	case .Closed:
 		return CLOSED_COMPONENT
+	case .And:
+		return AND_COMPONENT
+	case .Or:
+		return OR_COMPONENT
+	case .Not:
+		return NOT_COMPONENT
+	case .Xone:
+		return XONE_COMPONENT
 	}
 	return ""
 }

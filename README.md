@@ -15,16 +15,16 @@ end to end, and four of the W3C SHACL suite's seven `core/` directories are
 green — `core/targets`, `core/path`, `core/misc`, and
 `core/validation-reports`, every entry, against both storage backends, at both
 `Term_ID` widths. What is missing is most of the SHACL Core constraint
-catalogue. Twenty-one components validate: the spine's `sh:minCount`,
+catalogue. Twenty-five components validate: the spine's `sh:minCount`,
 `sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
 `sh:in`, which is exactly what those four directories exercise; the four
 value-range bounds `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and
 `sh:maxExclusive`; the string-based `sh:minLength`, `sh:maxLength`,
 `sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`; the
 property-pair `sh:equals`, `sh:disjoint`, `sh:lessThan`, and
-`sh:lessThanOrEquals`; and `sh:closed` with `sh:ignoredProperties`. The logical
-combinators (`sh:and`/`sh:or`/`sh:not`/`sh:xone`) and the shape-based
-constraints (`sh:node`, `sh:qualifiedValueShape`) are the rest of the second
+`sh:lessThanOrEquals`; `sh:closed` with `sh:ignoredProperties`; and the logical
+combinators `sh:and`, `sh:or`, `sh:not`, and `sh:xone`. The shape-based
+constraints (`sh:node`, `sh:qualifiedValueShape`) are what is left of the second
 initiative, and the remaining suite directories stay disabled until they land.
 See `.metis/` for the vision, the initiative, and SHACL-A-0001.
 
@@ -38,7 +38,7 @@ before trusting a `sh:conforms true`** while the catalogue is incomplete: a
 report with no results and a non-empty ignored list is not a validated graph.
 
 **`sh:datatype` checks the lexical form, but only for the datatypes it
-models.** §4.3.1 asks two things — that the datatype IRI matches, and that the
+models.** §4.1.2 asks two things — that the datatype IRI matches, and that the
 value's lexical form lies in that datatype's lexical space — so
 `"abc"^^xsd:integer` and `"300"^^xsd:byte` both violate `sh:datatype` even
 though the IRI is right. The lexical spaces this engine knows are xsd:string,

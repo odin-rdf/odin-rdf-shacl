@@ -30,11 +30,11 @@ stands — reaching the store's iterators rather than being simulated above them
 what makes `Conformance` cost one triple on badly broken data, and what keeps memory flat when
 the data is worst.
 
-**Six of SHACL Core's constraint components need the opposite of a report.** `sh:not` (§4.6.2)
+**Six of SHACL Core's constraint components need the opposite of a report.** `sh:not` (§4.6.1)
 validates a node against a shape and violates precisely when the inner shape was *satisfied*,
 emitting none of the inner shape's results. `sh:or` (§4.6.3) and `sh:xone` (§4.6.4) need the
-same per branch, and count how many branches conformed. `sh:node` (§4.8.1) needs it directly.
-`sh:qualifiedValueShape` with `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` (§4.8.2) needs it
+same per branch, and count how many branches conformed. `sh:node` (§4.7.1) needs it directly.
+`sh:qualifiedValueShape` with `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` (§4.7.3) needs it
 per value node, and counts.
 
 The engine has no way to do this today, and none of the six can be built without it. That is

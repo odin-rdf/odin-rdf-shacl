@@ -42,7 +42,7 @@ component, so widening discovery is the catalogue's first job**, not an
 afterthought once the components are written. `compile.odin`'s discovery block
 is where it goes, and the worklist already handles shapes found late.
 
-**`sh:datatype` does not check the lexical form.** §4.3.1 requires the value's
+**`sh:datatype` does not check the lexical form.** §4.1.2 requires the value's
 lexical form to be well-formed for its datatype, so `"abc"^^xsd:integer` should
 violate even though the datatype IRI matches. The spine compares datatype IRIs
 only. This needs the same lexical-to-value machinery the value-range components

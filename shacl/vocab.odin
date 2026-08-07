@@ -57,7 +57,7 @@ NODE_KIND :: NS + "nodeKind"
 HAS_VALUE :: NS + "hasValue"
 IN :: NS + "in"
 
-// The value-range components (§4.6.2–4.6.5), SHACL-T-0013. Their parameter is a
+// The value-range components (§4.3.1–4.3.4), SHACL-T-0013. Their parameter is a
 // single term compared by **value** rather than by term, which is the whole
 // reason SHACL-T-0012 came first.
 MIN_INCLUSIVE :: NS + "minInclusive"
@@ -65,7 +65,7 @@ MAX_INCLUSIVE :: NS + "maxInclusive"
 MIN_EXCLUSIVE :: NS + "minExclusive"
 MAX_EXCLUSIVE :: NS + "maxExclusive"
 
-// The string-based components (§4.5), SHACL-T-0014. `sh:flags` is the only
+// The string-based components (§4.4), SHACL-T-0014. `sh:flags` is the only
 // parameter here with no component of its own: it modifies `sh:pattern`, and a
 // result from the pair names `sh:PatternConstraintComponent`.
 MIN_LENGTH :: NS + "minLength"
@@ -75,7 +75,7 @@ FLAGS :: NS + "flags"
 LANGUAGE_IN :: NS + "languageIn"
 UNIQUE_LANG :: NS + "uniqueLang"
 
-// The property-pair components (§4.7), SHACL-T-0015. Their parameter is a
+// The property-pair components (§4.5), SHACL-T-0015. Their parameter is a
 // *predicate*, not a value: it names a second set of nodes at the same focus
 // node, which is why these are the first components to read the data graph
 // twice.
@@ -99,7 +99,9 @@ IGNORED_PROPERTIES :: NS + "ignoredProperties"
 // are compiled as shapes.
 //
 // `sh:and`, `sh:or`, and `sh:xone` take an RDF list and the *members* are the
-// shapes; the other three name a shape directly.
+// shapes; the other three name a shape directly. Four of the six are the logical
+// combinators of §4.6 and validate as of SHACL-T-0017; `sh:node` and
+// `sh:qualifiedValueShape` are §4.7 and still only discovered.
 NODE :: NS + "node"
 NOT :: NS + "not"
 AND :: NS + "and"
@@ -122,7 +124,7 @@ ORDER :: NS + "order"
 GROUP :: NS + "group"
 DEFAULT_VALUE :: NS + "defaultValue"
 
-// Node kinds (§4.4.2).
+// Node kinds (§4.1.3).
 IRI_KIND :: NS + "IRI"
 BLANK_NODE_KIND :: NS + "BlankNode"
 LITERAL_KIND :: NS + "Literal"
@@ -154,6 +156,10 @@ DISJOINT_COMPONENT :: NS + "DisjointConstraintComponent"
 LESS_THAN_COMPONENT :: NS + "LessThanConstraintComponent"
 LESS_THAN_OR_EQUALS_COMPONENT :: NS + "LessThanOrEqualsConstraintComponent"
 CLOSED_COMPONENT :: NS + "ClosedConstraintComponent"
+AND_COMPONENT :: NS + "AndConstraintComponent"
+OR_COMPONENT :: NS + "OrConstraintComponent"
+NOT_COMPONENT :: NS + "NotConstraintComponent"
+XONE_COMPONENT :: NS + "XoneConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"

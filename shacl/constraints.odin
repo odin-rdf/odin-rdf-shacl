@@ -30,7 +30,7 @@ compile_constraints :: proc(
 	$DESTROY: proc(it: ^It),
 ) -> Error {
 	// The components whose parameter is a non-negative integer: the two
-	// cardinalities (§4.2) and the two string lengths (§4.5.1–4.5.2). They read
+	// cardinalities (§4.2) and the two string lengths (§4.4.1–4.4.2). They read
 	// identically and cite different sections, so the error kinds travel in the
 	// table rather than being decided by the reader.
 	counts := [4]struct {
@@ -114,8 +114,8 @@ compile_constraints :: proc(
 		}
 	}
 
-	// The components taking an RDF list of terms: `sh:in` (§4.6.1) and
-	// `sh:languageIn` (§4.5.4). The members go into the model's flat value array
+	// The components taking an RDF list of terms: `sh:in` (§4.8.3) and
+	// `sh:languageIn` (§4.4.4). The members go into the model's flat value array
 	// and are named by span, like every other child relation.
 	lists := [2]struct {
 		iri:      string,
@@ -142,7 +142,7 @@ compile_constraints :: proc(
 		}
 	}
 
-	// sh:pattern with sh:flags (§4.5.3). The regular expression is compiled
+	// sh:pattern with sh:flags (§4.4.3). The regular expression is compiled
 	// here, once, so that matching a value node is a run of an already-built
 	// program — and so that a pattern this engine cannot compile, or a flag it
 	// does not have, is an ill-formed shapes graph rather than a surprise
@@ -178,7 +178,7 @@ compile_constraints :: proc(
 		}
 	}
 
-	// sh:uniqueLang (§4.5.5), whose parameter switches the component on rather
+	// sh:uniqueLang (§4.4.5), whose parameter switches the component on rather
 	// than configuring it — so a `false` compiles to no constraint at all and
 	// the Constraint carries nothing.
 	//
@@ -191,7 +191,7 @@ compile_constraints :: proc(
 	// **This follows the suite's reading, and the reading is arguable.** The
 	// entry carries a comment explaining itself: "Only true is mentioned in the
 	// spec, meaning that `1` will not activate the constraint." That is a
-	// judgement about §4.5.5's prose, and it cuts against the spec's own
+	// judgement about §4.4.5's prose, and it cuts against the spec's own
 	// normative validator, which tests the parameter with SPARQL `=` — and
 	// `"1"^^xsd:boolean = true` is *true* by value. The entry is `sht:approved`,
 	// and this family's rule is that the suite defines done, so the suite wins.
@@ -244,6 +244,135 @@ compile_constraints :: proc(
 		}
 	}
 
+	// The logical combinators (§4.6). One constraint per value of the parameter —
+	// `sh:and (A B) , (C D)` is two conjunctions, not one of four — and the
+	// operands are resolved later, for the same reason `sh:closed`'s allowed set
+	// is: a shape's index does not exist until every shape is compiled. See
+	// `compile_shape_operands`.
+	//
+	// Nothing is read here at all beyond "how many", which is why this loop looks
+	// unlike every other in this procedure. It is still the place the constraint
+	// is created, because `Shape.constraints` is a contiguous span and a later
+	// pass cannot append into the middle of one.
+	for entry in LOGICAL_PARAMETERS {
+		if !v.found[entry.iri] {
+			continue
+		}
+		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		defer delete(vals)
+		for _ in vals {
+			append(&s.constraints, Constraint{kind = entry.kind})
+		}
+	}
+
+	return Error{}
+}
+
+// The four logical combinators, paired with the kind they compile to and how
+// their operand shapes are reached. `sh:not` names one shape; the other three
+// name an RDF list whose members are the shapes (§2.1.1).
+//
+// Shared by `compile_constraints`, which counts them, and
+// `compile_shape_operands`, which resolves them — and shared deliberately, so
+// the two passes cannot disagree about which parameters exist or in what order.
+@(private = "file")
+LOGICAL_PARAMETERS := [4]struct {
+	iri:     string,
+	kind:    Constraint_Kind,
+	is_list: bool,
+}{{AND, .And, true}, {OR, .Or, true}, {XONE, .Xone, true}, {NOT, .Not, false}}
+
+// compile_shape_operands resolves the operand shapes of every logical
+// combinator in the model, from shapes-graph node IDs to indices into
+// `Shapes.shapes`.
+//
+// **Why this is a separate pass, again.** The same reason `compile_closed_sets`
+// is: the model names shapes by index, and a branch's index is unknown while the
+// shape carrying the combinator is being compiled — `sh:and ( ex:A ex:B )` may
+// name shapes that come later in the worklist, or the shape itself. `compiled`
+// is the worklist's ID-to-index map, complete only once the loop has drained.
+//
+// **How a constraint finds its own parameter value.** By ordinal: the k-th
+// `.And` constraint on a shape belongs to the k-th value of `sh:and` on that
+// shape's node. That holds because both passes read the same parameter of the
+// same shape from the same store with the same pattern, and a match is
+// deterministic per store — `compile_constraints` appended in exactly this
+// order. It is stated rather than assumed because it is the one coupling between
+// the two halves, and a `sh:and` with two values is what would expose it.
+//
+// A malformed list is an error here (`Shape_List_Not_A_List`). Discovery skips
+// one silently, which SHACL-T-0010 recorded as this task's question to answer;
+// the answer is that it is ill-formed like every other broken list parameter, and
+// it is decided in one place rather than two.
+@(private)
+compile_shape_operands :: proc(
+	s: ^Shapes,
+	r: Reader($D, $It),
+	shape_ids: []store.Term_ID,
+	compiled: ^map[store.Term_ID]int,
+	v: ^Vocab,
+	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
+	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
+	$DESTROY: proc(it: ^It),
+) -> Error {
+	for shape_index in 0 ..< len(s.shapes) {
+		shape := s.shapes[shape_index]
+
+		for entry in LOGICAL_PARAMETERS {
+			if !v.found[entry.iri] {
+				continue
+			}
+			// Nothing to resolve unless this shape actually carries one, which
+			// keeps compilation to the reads it had before for every shapes graph
+			// that uses no combinator.
+			wanted := 0
+			for offset in 0 ..< shape.constraints.count {
+				if s.constraints[shape.constraints.start + offset].kind == entry.kind {
+					wanted += 1
+				}
+			}
+			if wanted == 0 {
+				continue
+			}
+
+			vals := objects_of(r, shape_ids[shape_index], v.ids[entry.iri], MATCH, NEXT, DESTROY)
+			defer delete(vals)
+
+			cursor := 0
+			for offset in 0 ..< shape.constraints.count {
+				index := shape.constraints.start + offset
+				if s.constraints[index].kind != entry.kind {
+					continue
+				}
+				if cursor >= len(vals) {
+					break
+				}
+				value := vals[cursor]
+				cursor += 1
+
+				start := len(s.shape_children)
+				if entry.is_list {
+					items, ok := list_items(r, value, MATCH, NEXT, DESTROY)
+					defer delete(items)
+					if !ok {
+						return Error {
+							.Shape_List_Not_A_List,
+							shape.node,
+							intern(&s.terms, rdf.IRI(entry.iri)),
+						}
+					}
+					for member in items {
+						if operand, found := compiled[member]; found {
+							append(&s.shape_children, operand)
+						}
+					}
+				} else if operand, found := compiled[value]; found {
+					append(&s.shape_children, operand)
+				}
+				s.constraints[index].shapes = Span{start, len(s.shape_children) - start}
+			}
+		}
+	}
 	return Error{}
 }
 
@@ -428,6 +557,13 @@ IMPLEMENTED_PARAMETERS := []string {
 	// anything unimplemented, even though it names no component of its own.
 	CLOSED,
 	IGNORED_PROPERTIES,
+	// The logical combinators (SHACL-T-0017) — the first four of the six
+	// shape-expecting parameters to move here from "discovered but not enforced".
+	// `sh:node` and `sh:qualifiedValueShape` stay out until SHACL-T-0018.
+	AND,
+	OR,
+	NOT,
+	XONE,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately
