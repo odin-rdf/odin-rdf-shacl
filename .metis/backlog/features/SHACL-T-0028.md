@@ -3,16 +3,16 @@ id: retire-the-memstore-instantiation
 level: task
 title: "Retire the memstore instantiation: port tests, rehome compile_turtle, settle purity and the benchmarks"
 short_code: "SHACL-T-0028"
-created_at: 2026-08-07T16:45:00.000000+00:00
-updated_at: 2026-08-07T16:45:00.000000+00:00
+created_at: 2026-08-07T16:45:00+00:00
+updated_at: 2026-08-07T18:34:44.554709+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#feature"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -67,6 +67,12 @@ it, and the transaction work is queued behind that.
   transaction model for the validate-before-commit path this engine is central to.
 - **Effort Estimate**: L — 3,540 lines of tests move, 528 lines of code are deleted, and
   three separate decisions have to be made rather than executed.
+
+## Acceptance Criteria
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
