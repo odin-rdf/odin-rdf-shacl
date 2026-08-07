@@ -121,6 +121,7 @@ Instrumented :: struct {
 Observation :: struct {
 	config:             Config,
 	raw_peak:           int,
+	raw_total_bytes:    int,
 	raw_allocs:         int,
 	conformance_allocs: int,
 	conforms:           bool,
@@ -267,6 +268,7 @@ run_config :: proc(c: Config) {
 			Observation {
 				config = c,
 				raw_peak = k.raw.peak,
+				raw_total_bytes = k.raw.total_bytes,
 				raw_allocs = k.raw.allocations,
 				conformance_allocs = k.conformance.allocations,
 				conforms = k.conforms,
@@ -541,6 +543,25 @@ assert_promises :: proc() {
 					b.config.name,
 					b.config.violation_percent,
 					b.raw_peak,
+				)
+			}
+
+			// **And flat in total bytes, not only in peak** — because peak is a
+			// high-water mark of *live* bytes, which is a statement about an
+			// allocator that frees. Under an arena, `free` is a no-op and the
+			// figure a caller sees is the total. The `shacl` package doc invites
+			// a caller to supply any allocator, so a flat-memory promise that
+			// held only for the heap would be a promise with a footnote nobody
+			// reads. Both are asserted, so it holds either way.
+			if a.raw_total_bytes != b.raw_total_bytes {
+				fail(
+					"%s (%d%% violating) allocated %d bytes in total and %s (%d%%) allocated %d — flat in peak but not in total, so the promise would not survive an arena allocator",
+					a.config.name,
+					a.config.violation_percent,
+					a.raw_total_bytes,
+					b.config.name,
+					b.config.violation_percent,
+					b.raw_total_bytes,
 				)
 			}
 

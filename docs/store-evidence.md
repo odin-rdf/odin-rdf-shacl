@@ -281,13 +281,13 @@ Recorded so the log's silence is legible rather than ambiguous:
   Still not a store gap. **And now measured, at SHACL-T-0025**: the duplicate is
   real and is the size this note assumed — one extra walk of every value node,
   +1000 reads and +2000 allocations on a 500-focus-node configuration, about 11%
-  of validation time. **The conformance cache was decided against**, and on a
-  number this log is the right place to repeat: peak memory does not move with
-  the duplicate, because each suppressed sub-walk allocates and frees, so the
-  cache would trade a working set that is flat in the data for one that grows
-  with it. SHACL-A-0002's "As Measured" section carries the full reasoning and
-  the alternative that should be preferred — sharing one walk between the two
-  bounds rather than remembering the first.
+  of validation time and **+1.2 MB of total allocation**. **The conformance cache
+  was decided against**, but not on the memory argument this note first carried:
+  peak does not move, yet peak measures *live* bytes and says nothing about a
+  caller using an arena, where the total is what is paid. The reason that survives
+  is that sharing one walk between the two bounds beats a cache on every axis and
+  under every allocator. SHACL-A-0002's "As Measured" section has the full
+  reasoning, the correction, and the numbers.
 
   So the read volume this section worried about is unchanged and will stay
   unchanged: **the engine still asks the store nothing it did not ask before**,

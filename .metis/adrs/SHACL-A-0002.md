@@ -223,43 +223,63 @@ costs about 11% of validation on a shapes graph that carries both bounds.
 
 ### The decision: no `(shape, node)` cache
 
-**The third column is why.** Peak memory does not move — 27078 bytes with the duplicate and
-without it — because each suppressed sub-walk allocates and frees. The engine's working set
-is *bounded and flat in the data*, which SHACL-T-0024 measured as byte-identical at 27076
-across 0, 1181, and 6000 results, and which the `shacl` package doc promises in as many
-words.
+**A correction first, because the first version of this reasoning was wrong in a way worth
+recording.** It read the zero in the peak column as decisive: the duplicate costs no memory,
+a cache would cost a working set proportional to the data, therefore no cache. Greger asked
+the obvious question — *doesn't that assume we are not using an arena allocator?* — and it
+does. Peak is the high-water mark of **live** bytes, which is a statement about an allocator
+that frees. Under an arena, `free` is a no-op and the figure a caller sees is the total:
 
-A `(shape, node)` conformance cache would trade exactly that away. Its entries are distinct
-(shape, node) pairs asked, which is proportional to focus nodes times shapes: 1000 entries
-on this 500-focus-node configuration, so tens of kilobytes against a 27 KB working set — it
-would **more than double** the footprint here, and grow without bound on real data where
-today's figure does not move at all. At the deployment this family is designed around —
-~200 processes per machine, each embedding a store, CPU and memory frugality both
-first-order — that is the wrong side of the trade.
+| | total allocated | peak |
+| --- | ---: | ---: |
+| `qualified-min` | 2 757 382 B | 27 078 B |
+| `qualified-minmax` | 3 973 382 B | 27 078 B |
+| **the duplicate** | **+1 216 000 B (+44%)** | **+0** |
 
-The rest reinforces it rather than carrying it:
+So under an arena the duplicate costs **1.2 MB per validation** at this scale, not nothing,
+and a cache of ~1000 entries would *win* on memory rather than lose. The `shacl` package doc
+invites a caller to supply any allocator, so the heap-only reading was not a safe default —
+it was an assumption presented as a measurement.
 
-- **The saving is narrow.** It exists only for a shapes graph putting two bounds on one
-  `sh:qualifiedValueShape`. `qualified-min`, `baseline`, `nested`, and every other
-  configuration measured gain nothing.
-- **The cost is broad.** A cache is a lookup on *every* `node_conforms` call — `sh:not`,
-  `sh:or`, `sh:xone`, `sh:node`, and the qualified family alike. Shapes graphs that cannot
-  benefit would pay on the hot path.
-- **11% is not nothing, and is not decisive either.** It is one ninth of validation on the
-  configuration built to favour it.
+(The flat-memory promise itself survives the question, and is now asserted so that it keeps
+surviving it: `bench` checks the density family is flat in **total bytes** as well as in
+peak — 1 317 380 either way — so that claim holds under an arena too.)
+
+**The decision is unchanged. The reason is different, and it is allocator-independent:
+sharing one walk strictly dominates caching, on every axis and under every allocator.**
+
+Both bounds of a property shape share one `sh:qualifiedValueShape` and one value-node set.
+Compiling them into a single constraint that counts once and tests the count twice:
+
+| | share one walk | `(shape, node)` cache |
+| --- | --- | --- |
+| the +1000 reads | **removed** | removed |
+| the +1 216 000 bytes | **removed** | reduced, not removed — entries allocate too |
+| hot-path cost | **none** | a lookup on every `node_conforms`, in all six components |
+| live memory | **none** | grows with focus nodes x shapes |
+| breadth of benefit | the same narrow case | the same narrow case |
+
+There is no column where the cache wins. It is the wrong instrument for this duplicate, and
+that verdict does not depend on how the caller allocates — which is the property the first
+version of this reasoning lacked.
+
+What a cache would additionally buy is duplicates that *don't* share a property shape — the
+same (shape, node) reached from two unrelated places. Nothing measured shows those, so that
+remains hypothetical and is the evidence a future reopening would have to bring.
 
 ### What should be done instead, and it is not memoisation
 
-The duplicate is worth removing; a cache is simply the wrong instrument. **Both bounds of one
-property shape share one `sh:qualifiedValueShape` and one value-node set, so they could share
-one walk** — compile them into a single constraint carrying both bounds, count once, test the
-count twice. That removes the whole +1000 with no lookup on any hot path and no memory at
-all, because it deletes the second walk rather than remembering the first.
+Compile both bounds into one constraint, count once, test twice. It is a change to
+`compile_constraints` and `check_qualified`, not to this ADR's mechanism.
 
-It is a change to `compile_constraints` and `check_qualified`, not to SHACL-A-0002's
-mechanism, and it is **not** made here: SHACL-T-0025 was scoped to decide the cache, and
-implementing a different engine change under a task that says "decide" is how scope creep
-starts. Recorded as an evidence-backed proposal with its numbers already measured.
+**And the arena question raises its priority rather than lowering it.** At +1.2 MB per
+validation under an arena — a natural choice for a validation pass, and one this engine's
+allocator-aware API explicitly invites — the duplicate is not a rounding error. It was worth
+removing when it looked like 11% of wall clock; it is more clearly worth removing now.
+
+Deliberately **not** made at SHACL-T-0025, which was scoped to decide the cache. Making a
+different engine change under a task that says "decide" is how scope creep starts. Recorded
+here as an evidence-backed proposal with its numbers already taken.
 
 ### Status of the trigger
 

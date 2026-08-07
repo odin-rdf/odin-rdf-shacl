@@ -117,24 +117,49 @@ should be checked deliberately rather than assumed from a green run.
   +1000 is exactly the 1000 `ex:q` value nodes, asked a second time for an answer that
   cannot have changed. The duplicate is real and is the size the code comment claimed.
 
-  ### The decision, and the number that made it
+  ### The decision — and a correction to how it was first argued
 
-  **No `(shape, node)` conformance cache.** The deciding column is peak: it does not move.
-  Each suppressed sub-walk allocates and frees, so the duplicate costs time and store
-  traffic but **no memory at all** — the working set stays 27078 bytes either way, flat in
-  the data, exactly as SHACL-T-0024 measured and the package doc promises.
+  **No `(shape, node)` conformance cache.** That verdict has not changed; the reasoning
+  behind it has, and the change is worth recording because the first version was wrong in a
+  specific way.
 
-  A cache trades precisely that away. Its entries are the distinct (shape, node) pairs
-  asked — proportional to focus nodes times shapes, 1000 on this configuration — so it
-  would more than double a 27 KB working set here and grow without bound on real data where
-  today's number does not move. At ~200 processes per machine, that is the wrong side of
-  the trade for an 11% saving on one authoring pattern.
+  It leaned on the peak column: memory does not move with the duplicate, a cache would cost
+  a working set proportional to the data, therefore no cache. Greger asked whether that
+  assumed a non-arena allocator. **It did.** Peak is the high-water mark of *live* bytes —
+  a statement about an allocator that frees. Under an arena, `free` is a no-op and the
+  caller pays the total:
 
-  Two things reinforce it without carrying it: the saving is narrow (only shapes graphs
-  putting two bounds on one `sh:qualifiedValueShape` gain anything — `baseline`, `nested`,
-  `qualified-min` and the rest gain nothing), while the cost is broad (a lookup on *every*
-  `node_conforms` call, so `sh:not`, `sh:or`, `sh:xone` and `sh:node` would pay for a
-  benefit they cannot receive).
+  | | total allocated | peak |
+  | --- | ---: | ---: |
+  | `qualified-min` | 2 757 382 B | 27 078 B |
+  | `qualified-minmax` | 3 973 382 B | 27 078 B |
+  | **the duplicate** | **+1 216 000 B (+44%)** | **+0** |
+
+  So under an arena the duplicate costs **1.2 MB per validation** at this scale, and a
+  ~1000-entry cache would *win* on memory rather than lose it. The `shacl` package doc
+  invites a caller to supply any allocator, so a heap-only reading was an assumption
+  wearing a measurement's clothes.
+
+  **The reason that survives is allocator-independent: sharing one walk strictly dominates
+  caching.** Both bounds share one `sh:qualifiedValueShape` and one value-node set, so
+  counting once and testing twice removes the +1000 reads *and* the +1.2 MB, with no
+  hot-path lookup and no live memory, benefiting exactly the same narrow case a cache would.
+  There is no axis on which the cache wins. What a cache would additionally buy is
+  duplicates that do not share a property shape; nothing measured shows any, so that is the
+  evidence a future reopening must bring.
+
+  Reinforcing but not carrying it: the saving is narrow (only shapes graphs putting two
+  bounds on one `sh:qualifiedValueShape` gain anything), while a cache's cost is broad — a
+  lookup on *every* `node_conforms` call, so `sh:not`, `sh:or`, `sh:xone` and `sh:node`
+  would pay for a benefit they cannot receive.
+
+  ### The gap this closed in SHACL-T-0024
+
+  The same question applied to that task's flat-memory result, which was asserted on peak
+  alone. `bench` now asserts the density family is flat in **total bytes** as well — 1 317
+  380 either way across 0, 1181, and 6000 results — so the package doc's promise holds under
+  an arena and not only under a freeing allocator. The claim was true; the assertion behind
+  it was narrower than the claim.
 
   ### The alternative, recorded and deliberately not implemented
 
@@ -148,6 +173,12 @@ should be checked deliberately rather than assumed from a green run.
   different engine change under a task that says "decide" is how scope creep starts. It is
   in SHACL-A-0002's As Measured section as an evidence-backed proposal with its numbers
   already taken, which is what a future task needs to act on it.
+
+  **The arena question raises its priority rather than lowering it.** At +1.2 MB per
+  validation under an arena — a natural choice for a validation pass, and one this engine's
+  allocator-aware API explicitly invites — the duplicate is not a rounding error. It was
+  worth removing when it looked like 11% of wall clock; it is more clearly worth removing
+  now.
 
   ### Where it is written down
 
