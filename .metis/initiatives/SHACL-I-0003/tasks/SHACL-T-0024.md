@@ -4,14 +4,14 @@ level: task
 title: "Baselines recorded, and the flat-memory promises tested at scale"
 short_code: "SHACL-T-0024"
 created_at: 2026-08-07T11:34:41.053696+00:00
-updated_at: 2026-08-07T12:52:32.599726+00:00
+updated_at: 2026-08-07T12:55:50.148070+00:00
 parent: SHACL-I-0003
 blocked_by: [SHACL-T-0023]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: true
@@ -29,8 +29,6 @@ initiative_id: SHACL-I-0003
 Turn the instrument into evidence. Record baselines where the family records them, and use
 the instrumented mode to test two promises the `shacl` package doc makes that
 `tests/guards` is too small to reach.
-
-## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
