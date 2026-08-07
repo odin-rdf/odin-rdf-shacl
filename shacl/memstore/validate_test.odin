@@ -1623,3 +1623,318 @@ test_recursion_through_a_combinator_is_a_failure :: proc(t: ^testing.T) {
 	// behind that a caller could mistake for one.
 	expect_results(t, &seen, []string{}, "a failed validation reported a violation")
 }
+
+// ---- The shape-based constraints ------------------------------------------
+
+@(private = "file")
+NODE_SHAPES :: PREFIX + `
+ex:NodeAtNode a sh:NodeShape ; sh:targetNode ex:good, ex:bad ;
+	sh:node ex:MustHaveName .
+
+ex:NodeAtProperty a sh:NodeShape ; sh:targetNode ex:owner ;
+	sh:property [ sh:path ex:child ; sh:node ex:MustHaveName ] .
+
+ex:MustHaveName sh:property [ sh:path ex:name ; sh:minCount 1 ] .
+`
+
+@(private = "file")
+NODE_DATA :: PREFIX + `
+ex:good  ex:name "g" .
+ex:bad   ex:other 1 .
+ex:owner ex:child ex:good ; ex:child ex:bad .
+`
+
+// sh:node (§4.7.1), at a node shape and at a property shape.
+//
+// It is `sh:not` without the inversion and shares its evaluator, so what this
+// pins is the part that is its own: which node a result blames. At a node shape
+// the value node and the focus node coincide; at a property shape they do not,
+// and `property/node-002` expects the *value* node in `sh:value` with the focus
+// node in `sh:focusNode`. `ex:MustHaveName`'s own `sh:minCount` violation is
+// produced twice internally and reaches nobody.
+@(test)
+test_node_constraint :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, NODE_SHAPES, NODE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"NodeAtNode|NodeConstraintComponent|bad|bad",
+			"_:|NodeConstraintComponent|owner|bad",
+		},
+		"sh:node",
+	)
+}
+
+@(private = "file")
+QUALIFIED_SHAPES :: PREFIX + `
+ex:Qualified a sh:NodeShape ; sh:targetNode ex:two, ex:three, ex:four ;
+	sh:property [ sh:path ex:item ;
+		sh:qualifiedValueShape [ sh:class ex:Good ] ;
+		sh:qualifiedMinCount 3 ;
+		sh:qualifiedMaxCount 3 ] .
+`
+
+@(private = "file")
+QUALIFIED_DATA :: PREFIX + `
+ex:g1 a ex:Good . ex:g2 a ex:Good . ex:g3 a ex:Good . ex:g4 a ex:Good .
+ex:b1 a ex:Bad .
+
+ex:two   ex:item ex:g1 , ex:g2 , ex:b1 .
+ex:three ex:item ex:g1 , ex:g2 , ex:g3 , ex:b1 .
+ex:four  ex:item ex:g1 , ex:g2 , ex:g3 , ex:g4 .
+`
+
+// sh:qualifiedValueShape with the two counts (§4.7.3).
+//
+// **The result carries no `sh:value`** — the trailing `-` below — and that is
+// the thing about this family that reads wrongly at first. It looks like
+// `sh:node` with a count attached, which would be value-scoped; it is not,
+// because the fault is a property of the whole value-node set. There is no
+// single node to blame for there being two conforming values where three were
+// wanted, and `property/qualifiedValueShape-001` expects exactly that shape of
+// result.
+//
+// The non-conforming value nodes are simply not counted rather than reported:
+// `ex:b1` appears in two of these three focus nodes and never in a result.
+@(test)
+test_qualified_value_shape :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, QUALIFIED_SHAPES, QUALIFIED_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// Two of three conform: under the minimum.
+			"_:|QualifiedMinCountConstraintComponent|two|-",
+			// Exactly three: ex:three produces nothing.
+			// Four: over the maximum.
+			"_:|QualifiedMaxCountConstraintComponent|four|-",
+		},
+		"qualified counts",
+	)
+}
+
+@(private = "file")
+DISJOINT_SHAPES :: PREFIX + `
+ex:Hand a sh:NodeShape ; sh:targetNode ex:mixedHand, ex:cleanHand ;
+	sh:property ex:HandThumb ;
+	sh:property ex:HandFinger .
+
+ex:HandThumb sh:path ex:digit ;
+	sh:qualifiedValueShape [ sh:class ex:Thumb ] ;
+	sh:qualifiedMinCount 1 ;
+	sh:qualifiedValueShapesDisjoint true .
+
+ex:HandFinger sh:path ex:digit ;
+	sh:qualifiedValueShape [ sh:class ex:Finger ] ;
+	sh:qualifiedMinCount 2 ;
+	sh:qualifiedValueShapesDisjoint true .
+
+# The same structure over the same data with the parameter left off, so the one
+# result below is attributable to disjointness and not to the fixture.
+ex:LooseHand a sh:NodeShape ; sh:targetNode ex:mixedHand ;
+	sh:property ex:LooseThumb ;
+	sh:property ex:LooseFinger .
+ex:LooseThumb  sh:path ex:digit ; sh:qualifiedValueShape [ sh:class ex:Thumb ] ; sh:qualifiedMinCount 1 .
+ex:LooseFinger sh:path ex:digit ; sh:qualifiedValueShape [ sh:class ex:Finger ] ; sh:qualifiedMinCount 2 .
+`
+
+@(private = "file")
+DISJOINT_DATA :: PREFIX + `
+ex:f1   a ex:Finger .
+ex:f2   a ex:Finger .
+ex:t1   a ex:Thumb .
+ex:both a ex:Finger , ex:Thumb .
+
+ex:mixedHand ex:digit ex:f1 , ex:f2 , ex:both .
+ex:cleanHand ex:digit ex:f1 , ex:f2 , ex:t1 .
+`
+
+// sh:qualifiedValueShapesDisjoint, which is the most intricate thing in SHACL
+// Core and the only place this engine reads the shapes model **upward**.
+//
+// A value node conforming to the qualified shape is excluded when it also
+// conforms to a *sibling* property shape's qualified shape — siblings being the
+// other `sh:property` values of the shapes that declare this one (§4.7.3). The
+// model has children and no parents, so `compile` inverts the relation once
+// rather than searching for it per value node.
+//
+// `ex:both` is the node the whole parameter exists for: it is a finger and a
+// thumb, so it is excluded from **both** counts. The thumb shape then counts
+// zero against a minimum of one and violates; the finger shape counts two
+// against a minimum of two and does not. `ex:LooseHand` is the same structure
+// without the parameter, where `ex:both` counts toward the thumb minimum and
+// nothing violates — which is what makes the single result below evidence about
+// disjointness rather than about the data.
+//
+// The exclusion has to be symmetric, and `qualifiedValueShapesDisjoint-001` is
+// the corpus entry that proves it: there both sides fall under their minimums
+// and it expects two results. An implementation excluding from one side only
+// produces one and looks half right.
+@(test)
+test_qualified_value_shapes_disjoint :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, DISJOINT_SHAPES, DISJOINT_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string{"HandThumb|QualifiedMinCountConstraintComponent|mixedHand|-"},
+		"qualifiedValueShapesDisjoint",
+	)
+}
+
+@(private = "file")
+INERT_SHAPES :: PREFIX + `
+# node/qualified-001 in miniature: qualified parameters with nothing to qualify.
+ex:Inert a sh:NodeShape ; sh:targetClass ex:C1 ;
+	sh:class ex:C2 ;
+	sh:qualifiedValueShapesDisjoint true ;
+	sh:qualifiedMinCount 5 ;
+	sh:qualifiedMaxCount 2 .
+
+# A second shape carrying a real sh:qualifiedValueShape, and the reason it is
+# here is not that it is being tested. node/qualified-001's shapes graph never
+# mentions sh:qualifiedValueShape at all, so the compiler skips every read of it
+# — the entry passes on a term that is absent from the dictionary rather than on
+# the rule it was written for. This puts the term in the store so ex:Inert has to
+# be inert for the right reason.
+ex:Real a sh:NodeShape ; sh:targetNode ex:k ;
+	sh:qualifiedValueShape [ sh:class ex:C2 ] ;
+	sh:qualifiedMinCount 1 .
+`
+
+@(private = "file")
+INERT_DATA :: PREFIX + `
+ex:i a ex:C1 .
+ex:j a ex:C1 , ex:C2 .
+ex:k a ex:C2 .
+`
+
+// **Qualified parameters without `sh:qualifiedValueShape` are inert** (§4.7.3),
+// and the numbers here are chosen to be impossible: a minimum of five and a
+// maximum of two cannot both hold, so an engine that read them without a shape
+// to count against would report whatever it did. The only result is the
+// `sh:class`, which is `node/qualified-001`'s expectation exactly.
+//
+// The engine got this right for the whole of SHACL-I-0002 by not implementing
+// the family at all. This is the test that keeps it right now that it does —
+// and it also asserts the record stays quiet, because a parameter that is
+// deliberately inert must not be reported as one the engine skipped.
+//
+// **The behaviour is guarded twice and this asserts the behaviour, not either
+// guard.** `compile_constraints` creates no constraint without a
+// `sh:qualifiedValueShape`, and `check_qualified` counts nothing against an
+// empty operand span. Removing either alone leaves this test passing, which was
+// checked rather than assumed; removing both makes it fail. That redundancy is
+// deliberate — the second guard also covers a `sh:qualifiedValueShape` naming
+// something the compile did not turn into a shape — and it is recorded here so a
+// later reader does not delete one as dead code.
+@(test)
+test_qualified_parameters_without_a_value_shape_are_inert :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, INERT_SHAPES, INERT_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string{"Inert|ClassConstraintComponent|i|i"},
+		"qualified parameters with no qualified value shape",
+	)
+	testing.expect_value(t, len(shacl.shapes_ignored(&f.shapes)), 0)
+}
+
+@(private = "file")
+RECURSION_DATA :: PREFIX + `
+ex:n ex:p 1 .
+`
+
+// **Recursion, written the way a user writes it.** SHACL-I-0001 predicted this
+// case and could only approximate it through `sh:property`: a shape reaching
+// itself is something people do by accident when their data is
+// asset-points-at-asset, and `sh:node` is the parameter they reach for.
+//
+// All three shapes below report `Failure.Recursive_Shape`, which is
+// SHACL-A-0002's decision — the recursion set is shared, so a shape re-entered
+// through a suppressed run is recursion exactly as one re-entered through
+// `sh:property` is. **The middle one is the ADR's own worked example**, writable
+// for the first time now that `sh:node` exists; SHACL-T-0017 could only test one
+// level shallower.
+//
+// The alternative the ADR rejected does not give a different answer to any of
+// these, it gives none: with a fresh recursion set per suppressed run, each
+// would nest until the process died.
+//
+// This is also the review trigger SHACL-A-0001 recorded. If a consumer shows
+// that recursive shapes are common rather than a corner case, the answer is to
+// reopen cycle-breaking as a whole — not to give suppressed runs a private rule.
+@(test)
+test_recursion_through_shape_based_constraints_is_a_failure :: proc(t: ^testing.T) {
+	cases := []struct {
+		name:   string,
+		shapes: string,
+	} {
+		{
+			"a shape whose sh:node is itself",
+			PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:S .`,
+		},
+		{
+			// SHACL-A-0002's worked example, verbatim.
+			"SHACL-A-0002's ex:S sh:not [ sh:node ex:S ]",
+			PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:not [ sh:node ex:S ] .`,
+		},
+		{
+			"a mutual pair",
+			PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node ex:T . ex:T sh:node ex:S .`,
+		},
+	}
+
+	for c in cases {
+		f: Fixture
+		defer fixture_destroy(&f)
+		if !fixture_init(t, &f, c.shapes, RECURSION_DATA) {
+			continue
+		}
+		seen: Seen
+		defer seen_destroy(&seen)
+		failure := validate_into(&f, &seen)
+		testing.expectf(
+			t,
+			failure == .Recursive_Shape,
+			"%s: got %v, expected Recursive_Shape",
+			c.name,
+			failure,
+		)
+		// A failure is not a conformance answer, and must not have left a result
+		// behind that a caller could read as one.
+		testing.expectf(t, len(seen.lines) == 0, "%s: a failed validation reported %d results", c.name, len(seen.lines))
+	}
+}

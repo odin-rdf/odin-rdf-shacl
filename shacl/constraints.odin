@@ -254,7 +254,7 @@ compile_constraints :: proc(
 	// unlike every other in this procedure. It is still the place the constraint
 	// is created, because `Shape.constraints` is a contiguous span and a later
 	// pass cannot append into the middle of one.
-	for entry in LOGICAL_PARAMETERS {
+	for entry in SHAPE_VALUED_PARAMETERS {
 		if !v.found[entry.iri] {
 			continue
 		}
@@ -265,22 +265,78 @@ compile_constraints :: proc(
 		}
 	}
 
+	// The qualified family (§4.7.3). Two components — the counts — sharing one
+	// `sh:qualifiedValueShape`, which is read here only to decide whether they
+	// exist at all.
+	//
+	// **Nothing compiles without `sh:qualifiedValueShape`**, and that is a
+	// requirement rather than an optimisation: `node/qualified-001` declares
+	// `sh:qualifiedMinCount 5` and `sh:qualifiedMaxCount 2` with no qualified
+	// shape and expects *neither* to fire. Five values, a maximum of two, and a
+	// conforming answer — the counts are meaningless without something to count,
+	// so §4.7.3 makes them inert. The engine got this right by not implementing
+	// them; this is the line that keeps it right.
+	//
+	// A consequence worth naming: an ill-formed `sh:qualifiedMinCount` on a shape
+	// with no qualified value shape is never read and so never reported. That is
+	// the same silence the spec asks for about the parameter itself.
+	//
+	// `sh:qualifiedValueShape` is treated as functional, like `sh:path`. The
+	// shape is resolved in `compile_shape_operands`; only its presence matters
+	// here.
+	if v.found[QUALIFIED_VALUE_SHAPE] {
+		if _, has_shape := first_object(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPE], MATCH, NEXT, DESTROY);
+		   has_shape {
+			qualified := [2]struct {
+				iri:  string,
+				kind: Constraint_Kind,
+			}{{QUALIFIED_MIN_COUNT, .Qualified_Min_Count}, {QUALIFIED_MAX_COUNT, .Qualified_Max_Count}}
+			for entry in qualified {
+				if !v.found[entry.iri] {
+					continue
+				}
+				vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+				defer delete(vals)
+				for id in vals {
+					n, ok := integer_value(materialize_term(s, load, load_data, id))
+					if !ok {
+						return Error {
+							.Qualified_Count_Not_Integer,
+							shape_node,
+							intern(&s.terms, rdf.IRI(entry.iri)),
+						}
+					}
+					if n < 0 {
+						return Error{.Qualified_Count_Negative, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
+					}
+					append(&s.constraints, Constraint{kind = entry.kind, count = n})
+				}
+			}
+		}
+	}
+
 	return Error{}
 }
 
-// The four logical combinators, paired with the kind they compile to and how
-// their operand shapes are reached. `sh:not` names one shape; the other three
-// name an RDF list whose members are the shapes (§2.1.1).
+// The parameters whose value **is a shape**, paired with the kind they compile
+// to and how the shape is reached: `sh:and`, `sh:or` and `sh:xone` name an RDF
+// list whose members are the shapes; `sh:not` and `sh:node` name one directly
+// (§2.1.1).
+//
+// `sh:qualifiedValueShape` is deliberately absent even though its value is a
+// shape too. It compiles to no constraint of its own — the two counts are the
+// components — so it has nothing to pair with by ordinal, and
+// `compile_shape_operands` resolves it separately.
 //
 // Shared by `compile_constraints`, which counts them, and
 // `compile_shape_operands`, which resolves them — and shared deliberately, so
 // the two passes cannot disagree about which parameters exist or in what order.
 @(private = "file")
-LOGICAL_PARAMETERS := [4]struct {
+SHAPE_VALUED_PARAMETERS := [5]struct {
 	iri:     string,
 	kind:    Constraint_Kind,
 	is_list: bool,
-}{{AND, .And, true}, {OR, .Or, true}, {XONE, .Xone, true}, {NOT, .Not, false}}
+}{{AND, .And, true}, {OR, .Or, true}, {XONE, .Xone, true}, {NOT, .Not, false}, {NODE, .Node, false}}
 
 // compile_shape_operands resolves the operand shapes of every logical
 // combinator in the model, from shapes-graph node IDs to indices into
@@ -318,7 +374,44 @@ compile_shape_operands :: proc(
 	for shape_index in 0 ..< len(s.shapes) {
 		shape := s.shapes[shape_index]
 
-		for entry in LOGICAL_PARAMETERS {
+		// `sh:qualifiedValueShape` first, and outside the ordinal table: the two
+		// counts on one shape share a single shape, so there is nothing to pair
+		// by position. Both constraints get the same one-entry span.
+		if v.found[QUALIFIED_VALUE_SHAPE] {
+			qualified := -1
+			for offset in 0 ..< shape.constraints.count {
+				kind := s.constraints[shape.constraints.start + offset].kind
+				if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
+					qualified = shape.constraints.start + offset
+					break
+				}
+			}
+			if qualified >= 0 {
+				start := len(s.shape_children)
+				if value, has := first_object(
+					r,
+					shape_ids[shape_index],
+					v.ids[QUALIFIED_VALUE_SHAPE],
+					MATCH,
+					NEXT,
+					DESTROY,
+				); has {
+					if operand, found := compiled[value]; found {
+						append(&s.shape_children, operand)
+					}
+				}
+				span := Span{start, len(s.shape_children) - start}
+				for offset in 0 ..< shape.constraints.count {
+					index := shape.constraints.start + offset
+					kind := s.constraints[index].kind
+					if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
+						s.constraints[index].shapes = span
+					}
+				}
+			}
+		}
+
+		for entry in SHAPE_VALUED_PARAMETERS {
 			if !v.found[entry.iri] {
 				continue
 			}
@@ -374,6 +467,155 @@ compile_shape_operands :: proc(
 		}
 	}
 	return Error{}
+}
+
+// compile_qualified_siblings fills in the sibling shapes that a disjoint
+// `sh:qualifiedValueShape` excludes against, and is the only place this engine
+// reads the shapes model **upward**.
+//
+// §4.7.3 defines the sibling shapes of a shape S as the values of `sh:property`
+// at the shapes that have S as a value of `sh:property`, minus S itself; a value
+// node counts toward the qualified cardinality only if it conforms to S's
+// `sh:qualifiedValueShape` and to **none** of the siblings'. The model names
+// children and not parents, so the relation is inverted here, once, rather than
+// searched for per value node during validation.
+//
+// **The exclusion is symmetric and that is the whole point.**
+// `qualifiedValueShapesDisjoint-001` puts two property shapes on the same path,
+// one qualifying on `ex:Thumb` and one on `ex:Finger`, over a hand holding three
+// fingers and one `ex:FingerAndThumb`. That node conforms to both qualified
+// shapes, so it is excluded from **both** counts — the thumb shape counts zero
+// against a minimum of one and the finger shape counts three against a minimum
+// of four, and the entry expects both violations. An implementation that
+// excluded it from one side only produces one result and looks half right.
+//
+// **`sh:qualifiedValueShapesDisjoint false` leaves the span empty**, which is
+// also what a shape with no siblings gets, because the two are the same thing to
+// the evaluator. Runs after the qualified shapes are resolved, since that is what
+// a sibling contributes.
+@(private)
+compile_qualified_siblings :: proc(
+	s: ^Shapes,
+	r: Reader($D, $It),
+	shape_ids: []store.Term_ID,
+	load: Term_Loader,
+	load_data: rawptr,
+	v: ^Vocab,
+	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
+	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
+	$DESTROY: proc(it: ^It),
+) -> Error {
+	if !v.found[QUALIFIED_VALUE_SHAPES_DISJOINT] {
+		return Error{}
+	}
+
+	// The parent's children are copied out before anything is appended:
+	// `shape_properties` slices `Shapes.shape_children`, and this loop grows it.
+	children := make([dynamic]int, s.allocator)
+	defer delete(children)
+
+	for parent in 0 ..< len(s.shapes) {
+		clear(&children)
+		append(&children, ..shape_properties(s, s.shapes[parent]))
+		if len(children) < 2 {
+			// A shape with one child has no siblings, and one with none has no
+			// qualified constraints to give them to.
+			continue
+		}
+
+		for child in children {
+			disjoint, err := qualified_is_disjoint(
+				s,
+				r,
+				shape_ids[child],
+				s.shapes[child].node,
+				load,
+				load_data,
+				v,
+				MATCH,
+				NEXT,
+				DESTROY,
+			)
+			if err.kind != .None {
+				return err
+			}
+			if !disjoint {
+				continue
+			}
+
+			shape := s.shapes[child]
+			start := len(s.shape_children)
+			for other in children {
+				if other == child {
+					continue
+				}
+				for offset in 0 ..< s.shapes[other].constraints.count {
+					c := s.constraints[s.shapes[other].constraints.start + offset]
+					if c.kind != .Qualified_Min_Count && c.kind != .Qualified_Max_Count {
+						continue
+					}
+					// A sibling's two counts share one shape, so take it from
+					// whichever comes first and stop.
+					for operand in constraint_shapes(s, c) {
+						append(&s.shape_children, operand)
+					}
+					break
+				}
+			}
+			span := Span{start, len(s.shape_children) - start}
+
+			for offset in 0 ..< shape.constraints.count {
+				index := shape.constraints.start + offset
+				kind := s.constraints[index].kind
+				if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
+					s.constraints[index].siblings = span
+				}
+			}
+		}
+	}
+	return Error{}
+}
+
+// qualified_is_disjoint reads one shape's `sh:qualifiedValueShapesDisjoint`.
+//
+// `true` means the term `"true"^^xsd:boolean` and nothing else, which is the
+// reading `sh:uniqueLang` took on a suite entry's authority and `sh:closed`
+// inherited. Nothing in the corpus distinguishes it here —
+// `qualifiedMinCountDisjoint-001` and `qualifiedValueShapesDisjoint-001` both
+// write `"true"^^xsd:boolean` — so this is consistency rather than measurement,
+// recorded in the same terms as the other two.
+@(private = "file")
+qualified_is_disjoint :: proc(
+	s: ^Shapes,
+	r: Reader($D, $It),
+	shape_id: store.Term_ID,
+	shape_node: rdf.Term,
+	load: Term_Loader,
+	load_data: rawptr,
+	v: ^Vocab,
+	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
+	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
+	$DESTROY: proc(it: ^It),
+) -> (
+	disjoint: bool,
+	err: Error,
+) {
+	ids := objects_of(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPES_DISJOINT], MATCH, NEXT, DESTROY)
+	defer delete(ids)
+	for id in ids {
+		literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+		if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
+			return false, Error {
+				.Qualified_Disjoint_Not_Boolean,
+				shape_node,
+				intern(&s.terms, rdf.IRI(QUALIFIED_VALUE_SHAPES_DISJOINT)),
+			}
+		}
+		if literal.lexical == "true" {
+			disjoint = true
+		}
+	}
+	return disjoint, Error{}
 }
 
 // compile_closed_sets fills in the allowed-predicate set of every `sh:closed`
@@ -564,6 +806,15 @@ IMPLEMENTED_PARAMETERS := []string {
 	OR,
 	NOT,
 	XONE,
+	// The shape-based constraints (SHACL-T-0018), which complete SHACL Core's §4
+	// except for what needs SPARQL. With these five the list holds every
+	// parameter the specification defines that this engine acts on, so a
+	// non-empty `shapes_ignored` now means a vendor extension or SHACL-SPARQL.
+	NODE,
+	QUALIFIED_VALUE_SHAPE,
+	QUALIFIED_MIN_COUNT,
+	QUALIFIED_MAX_COUNT,
+	QUALIFIED_VALUE_SHAPES_DISJOINT,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately

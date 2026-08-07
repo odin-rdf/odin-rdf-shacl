@@ -47,12 +47,16 @@ Suite :: struct {
 // Leaving a green directory disabled would misstate the position as surely as
 // enabling a broken one, so they are on.
 //
-// The three that remain need constraint components the spine deliberately does
-// not implement, and after SHACL-T-0017 the list is down to one family: the
-// shape-based constraints, `sh:node` and `sh:qualifiedValueShape`. They belong
-// to the catalogue initiative, which turns the directories on one at a time under
-// the same rule. `core/complex` additionally needs `sh:sparql`, so it belongs to
-// the SHACL-SPARQL phase rather than to the catalogue.
+// **`core/node` joined them at SHACL-T-0018**, the first directory the catalogue
+// initiative enabled and the first that needs more than the spine's seven
+// components: with the shape-based constraints landed, all thirty-two entries
+// went green at once.
+//
+// The two that remain need nothing further from the catalogue. `core/property`
+// is at 37 of 38 and the missing entry is `nodeKind-001`, which uses only
+// components the spine shipped — a diagnosis rather than a component, and
+// SHACL-T-0019's. `core/complex` needs `sh:sparql`, so it belongs to the
+// SHACL-SPARQL phase.
 // The floors were measured by this table's own instrumentation at SHACL-T-0009,
 // and they reproduce the diagnostic figure SHACL-I-0001 closed on: 18 of the 69
 // entries in `core/node` and `core/property`, which is why the catalogue's real
@@ -72,8 +76,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 31},
-	{"core/property", 38, 38, false, 32},
+	{"core/node", 32, 32, true, 0},
+	{"core/property", 38, 38, false, 37},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -87,7 +91,13 @@ TOTAL_ENTRIES :: 98
 // asserted against both the table and the number the runner really executed.
 // A directory that quietly stopped being enabled, or a runner that quietly
 // skipped an entry, has to fail somewhere; this is where.
-ENABLED_ENTRIES :: 26
+//
+// **58 at SHACL-T-0018**, up from the spine's 26: `core/node`'s thirty-two
+// entries went green when the shape-based constraints landed, so the directory
+// is on. It is the first one the catalogue initiative enabled and the first that
+// needs more than the spine's seven components — every one of §4's twenty-nine
+// non-SPARQL components is exercised by something in it.
+ENABLED_ENTRIES :: 58
 
 // PROGRESS_FLOOR is the sum of the disabled directories' floors, pinned
 // separately from them for the same reason ENABLED_ENTRIES is pinned separately
@@ -157,4 +167,17 @@ ENABLED_ENTRIES :: 26
 // and whose `sh:value` are *data*-graph blank nodes, which is the hardest
 // isomorphism case in the corpus and the shape of the harness defect
 // SHACL-T-0012 already found once.
-PROGRESS_FLOOR :: 63
+//
+// **37 at SHACL-T-0018, and the number going down is the good news.** All five
+// of that task's entries went green, which took `core/node` to 32 of 32 and
+// `core/property` to 37 of 38. A green directory is **enabled**, and an enabled
+// directory carries no floor — so `core/node`'s thirty-two entries left this sum
+// and joined `ENABLED_ENTRIES` instead, where they are a conformance claim
+// rather than a direction of travel. The floor now measures one directory:
+// `core/property`, one entry short.
+//
+// The arithmetic, since a falling monotonic-looking number deserves it:
+// 63 = node 31 + property 32; 37 = property 37, with node's 32 promoted. The
+// catalogue's original 51 entries of work are 50 done and one left, and the one
+// left is `nodeKind-001`, which is not a component at all.
+PROGRESS_FLOOR :: 37

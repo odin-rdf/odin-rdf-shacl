@@ -209,3 +209,19 @@ Recorded so the log's silence is legible rather than ambiguous:
   memoise conformance answers until a consumer showed it was needed. If the read
   window ever becomes a real complaint, this is the task that widened it, and the
   answer is likelier to be memoisation here than a snapshot verb upstream.
+
+  **SHACL-T-0018 adds the case where the repetition is provably wasted**, which
+  is the first concrete argument for memoisation the engine has produced. A
+  qualified property shape with both a minimum and a maximum shares one
+  `sh:qualifiedValueShape`, and the two constraints walk the same value nodes
+  against the same shape independently — the same question, asked twice, with an
+  answer that cannot have changed in between. `qualifiedValueShape-001` and
+  `qualifiedValueShapesDisjoint-001` both have that shape, and
+  `sh:qualifiedValueShapesDisjoint` multiplies it again by asking each sibling's
+  shape per value node.
+
+  Still not a store gap, and deliberately not fixed here: SHACL-A-0002's review
+  trigger is *measured* cost, and there is no benchmark yet. Recorded so that
+  when one exists, the reader knows the duplicate is structural rather than
+  incidental — a `(shape, node)` conformance cache in `Validation` would collapse
+  it, and the ADR already says where the reasoning lives.

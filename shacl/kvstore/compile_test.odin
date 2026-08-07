@@ -254,15 +254,20 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(s.shapes), 3)
 
-	// sh:sparql and sh:node, which discovery reads but nothing validates yet.
-	// sh:name is inert and sh:targetNode is implemented, so neither appears.
+	// **Only `sh:sparql` is left**, and the shrinking of this list across three
+	// tasks is the record working rather than the test rotting: SHACL-T-0017
+	// implemented `sh:xone` and SHACL-T-0018 `sh:node`, so a shapes graph using
+	// either is no longer using something this engine ignores. `sh:name` is inert
+	// and `sh:targetNode` implemented, so neither ever appeared.
 	//
-	// **`sh:xone` is on the other list now**, and that is the record working
-	// rather than the test rotting: SHACL-T-0017 implemented it, so a shapes
-	// graph using it is no longer using something this engine ignores. The two
-	// parameters above it are still discovered-only, which is what keeps this
-	// test's real subject — that a shape-expecting parameter makes its value a
-	// shape whether or not anything validates it — visible in both directions.
+	// With SHACL Core's catalogue complete, **a non-empty record now means a
+	// vendor extension or SHACL-SPARQL** and nothing else. That is why the one
+	// example left is `sh:sparql`: it belongs to a phase this initiative is
+	// explicitly not part of, so it cannot go the way the other two did.
+	//
+	// The test's real subject is unchanged and is asserted above: a
+	// shape-expecting parameter makes its value a shape. That held when nothing
+	// validated the value and holds now that something does.
 	ignored: map[string]bool
 	defer delete(ignored)
 	for term in shacl.shapes_ignored(&s) {
@@ -270,11 +275,9 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 			ignored[string(iri)] = true
 		}
 	}
-	testing.expect_value(t, len(ignored), 2)
-	for iri in ([]string{shacl.NS + "sparql", shacl.NODE}) {
-		testing.expectf(t, iri in ignored, "%s should have been recorded as unimplemented", iri)
-	}
-	for iri in ([]string{shacl.NAME, shacl.TARGET_NODE, shacl.XONE}) {
+	testing.expect_value(t, len(ignored), 1)
+	testing.expect(t, shacl.NS + "sparql" in ignored, "sh:sparql should have been recorded as unimplemented")
+	for iri in ([]string{shacl.NAME, shacl.TARGET_NODE, shacl.XONE, shacl.NODE}) {
 		testing.expectf(t, !(iri in ignored), "%s should not be recorded as ignored", iri)
 	}
 }

@@ -109,6 +109,15 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 		return NOT_COMPONENT
 	case .Xone:
 		return XONE_COMPONENT
+	case .Node:
+		return NODE_COMPONENT
+	// `sh:qualifiedValueShape` and `sh:qualifiedValueShapesDisjoint` name no
+	// component of their own: the two counts are the components, and a result
+	// from the family names whichever count it broke.
+	case .Qualified_Min_Count:
+		return QUALIFIED_MIN_COUNT_COMPONENT
+	case .Qualified_Max_Count:
+		return QUALIFIED_MAX_COUNT_COMPONENT
 	}
 	return ""
 }

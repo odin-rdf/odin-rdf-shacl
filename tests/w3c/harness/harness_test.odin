@@ -269,16 +269,26 @@ test_expected_report_extraction :: proc(t: ^testing.T) {
 	)
 }
 
-// Exactly the directories the spine can green are enabled, and no others.
-// Turning one on is a deliberate act with a task behind it, so it has to be a
-// visible change here as well as in the table.
+// Exactly the directories that are green are enabled, and no others. Turning
+// one on is a deliberate act with a task behind it, so it has to be a visible
+// change here as well as in the table.
+//
+// Four came from the spine (SHACL-T-0007 and SHACL-T-0008) and cover what its
+// seven constraint components could green. **`core/node` joined them at
+// SHACL-T-0018**, when the last of §4's non-SPARQL catalogue landed and its
+// thirty-two entries went green together — the first directory the catalogue
+// initiative enabled, and the first that needed more than the spine.
+//
+// `core/property` is deliberately still out at 37 of 38: `nodeKind-001` is red
+// and uses nothing beyond the spine, so it is a separate diagnosis rather than a
+// missing component. `core/complex` needs SHACL-SPARQL.
 @(test)
-test_exactly_the_spine_directories_are_enabled :: proc(t: ^testing.T) {
-	SPINE :: []string{"core/targets", "core/path", "core/misc", "core/validation-reports"}
+test_exactly_the_green_directories_are_enabled :: proc(t: ^testing.T) {
+	GREEN :: []string{"core/targets", "core/path", "core/misc", "core/validation-reports", "core/node"}
 
 	for suite in SUITES {
 		want := false
-		for dir in SPINE {
+		for dir in GREEN {
 			if suite.dir == dir {
 				want = true
 			}
@@ -286,8 +296,9 @@ test_exactly_the_spine_directories_are_enabled :: proc(t: ^testing.T) {
 		testing.expectf(
 			t,
 			suite.enabled == want,
-			"%s: enabled = %v, but the spine enables the four directories its "+
-			"seven constraint components cover (the rest need catalogue ones)",
+			"%s: enabled = %v, but the enabled set is the directories that are "+
+			"fully green — enabling means every entry passes, and leaving a green "+
+			"directory off misstates the position as surely as enabling a broken one",
 			suite.dir,
 			suite.enabled,
 		)

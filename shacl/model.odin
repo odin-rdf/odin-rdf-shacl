@@ -140,6 +140,13 @@ Constraint_Kind :: enum u8 {
 	Or,
 	Not,
 	Xone,
+	// The shape-based constraints (SHACL-T-0018), and the last of SHACL Core.
+	// `Node` reads exactly like `Not` without the inversion. The qualified pair
+	// carries a `count` as well as its shape, and is the only place `siblings` is
+	// used.
+	Node,
+	Qualified_Min_Count,
+	Qualified_Max_Count,
 }
 
 // Node_Kind is `sh:nodeKind` (§4.1.3), as a set of the three primitive kinds
@@ -182,8 +189,22 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 // `shapes` is the fourth kind of parameter and the only one that names other
 // *shapes*: a range into Shapes.shape_children, whose entries are indices back
 // into Shapes.shapes, exactly as a shape's `sh:property` children are. The four
-// logical combinators use it and nothing else does yet — the shape-based
-// constraints will.
+// logical combinators use it, `sh:node` uses it, and `sh:qualifiedValueShape`
+// puts its single shape there too.
+//
+// `siblings` is the fifth, and exists for one parameter.
+// `sh:qualifiedValueShapesDisjoint` excludes a value node that conforms to any
+// *sibling* shape's `sh:qualifiedValueShape` (§4.7.3), where siblings are the
+// other `sh:property` values of the shapes that declare this one. That is a read
+// **upward** through the model, which nothing else does and nothing at
+// validation time should have to: `compile` resolves it once, into another range
+// of shape indices.
+//
+// **An empty `siblings` is how `sh:qualifiedValueShapesDisjoint false` is
+// represented**, and no boolean is stored. A disjointness with nothing to be
+// disjoint from excludes nothing, which is exactly what the parameter being off
+// means, so the two collapse into one representation rather than into a flag the
+// evaluator would have to consult.
 Constraint :: struct {
 	kind:      Constraint_Kind,
 	count:     int,
@@ -191,6 +212,7 @@ Constraint :: struct {
 	node_kind: Node_Kind,
 	values:    Span,
 	shapes:    Span,
+	siblings:  Span,
 	pattern:   regex.Regular_Expression,
 }
 
@@ -369,4 +391,12 @@ constraint_values :: proc(s: ^Shapes, c: Constraint) -> []rdf.Term {
 // and the single shape of `sh:not`.
 constraint_shapes :: proc(s: ^Shapes, c: Constraint) -> []int {
 	return s.shape_children[c.shapes.start:][:c.shapes.count]
+}
+
+// constraint_siblings returns the sibling qualified shapes a disjoint
+// `sh:qualifiedValueShape` excludes against, as indices into `Shapes.shapes`.
+// Empty for every other constraint, and for a qualified one that is not
+// disjoint.
+constraint_siblings :: proc(s: ^Shapes, c: Constraint) -> []int {
+	return s.shape_children[c.siblings.start:][:c.siblings.count]
 }

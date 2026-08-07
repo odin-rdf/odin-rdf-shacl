@@ -109,8 +109,12 @@
 // shapes graph carries, so ignoring is the only workable policy. Ignoring
 // *silently* is what lets an engine implementing part of SHACL Core produce a
 // conforming report and look complete, so compilation records what it passed
-// over. While the constraint catalogue is incomplete, **a `sh:conforms true`
-// means what it says only if `shapes_ignored` is empty**.
+// over: **a `sh:conforms true` means what it says only if `shapes_ignored` is
+// empty**.
+//
+// SHACL Core's catalogue is complete as of SHACL-T-0018, so a non-empty list now
+// means a vendor extension or a SHACL-SPARQL parameter (`sh:sparql`,
+// `sh:shapesGraph`, `sh:entailment`) rather than a missing Core component.
 //
 // **`sh:datatype` skips the lexical check for datatypes it does not model.**
 // §4.1.2 requires the value's lexical form to lie in the datatype's lexical
@@ -179,12 +183,13 @@
 // `ex:b` which is `ex:partOf` `ex:a` is ordinary, and validates: recursion is
 // a property of the *shapes*, and detection is on the set of shapes currently
 // on the stack. What triggers it is a shape that reaches itself — through
-// `sh:property`, through any of the logical combinators, and through `sh:node`
-// when the catalogue initiative adds it. A suppressed run shares the outer
-// walk's stack (SHACL-A-0002), so `ex:S sh:not ex:S` is recursion exactly as
-// `ex:S sh:property [ ... ex:S ... ]` is. Every path form is separately
-// cycle-safe over data, by a visited set, so `sh:zeroOrMorePath` over the graph
-// above terminates.
+// `sh:property`, through any of the logical combinators, through `sh:node`, or
+// through `sh:qualifiedValueShape`. A suppressed run shares the outer walk's
+// stack (SHACL-A-0002), so `ex:S sh:node ex:S` is recursion exactly as
+// `ex:S sh:property [ ... ex:S ... ]` is, and so is a mutual pair. **`sh:node`
+// is how a user writes one by accident**, on data where an asset points at an
+// asset. Every path form is separately cycle-safe over data, by a visited set,
+// so `sh:zeroOrMorePath` over the graph above terminates.
 //
 // Cycle-breaking ("assume valid on re-entry") remains addable later without
 // redesign if evidence asks for it.

@@ -46,6 +46,9 @@ Error_Kind :: enum {
 	// One kind for sh:and, sh:or and sh:xone rather than three: the Error names
 	// the parameter at fault, so three kinds would say the same thing twice.
 	Shape_List_Not_A_List, // sh:and / sh:or / sh:xone whose value is not an RDF list
+	Qualified_Count_Not_Integer, // sh:qualifiedMinCount / sh:qualifiedMaxCount that is not an integer
+	Qualified_Count_Negative, // a negative qualified cardinality
+	Qualified_Disjoint_Not_Boolean, // sh:qualifiedValueShapesDisjoint that is not an xsd:boolean
 }
 
 // error_message returns a static description of kind. Allocation-free, and
@@ -98,6 +101,12 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "sh:ignoredProperties value is not an RDF list (§4.8.1)"
 	case .Shape_List_Not_A_List:
 		return "logical constraint value is not an RDF list of shapes (§4.6)"
+	case .Qualified_Count_Not_Integer:
+		return "qualified cardinality parameter is not an xsd:integer (§4.7.3)"
+	case .Qualified_Count_Negative:
+		return "qualified cardinality parameter is negative (§4.7.3)"
+	case .Qualified_Disjoint_Not_Boolean:
+		return "sh:qualifiedValueShapesDisjoint is not an xsd:boolean (§4.7.3)"
 	}
 	return "unknown error"
 }

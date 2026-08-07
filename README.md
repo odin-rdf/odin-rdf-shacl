@@ -9,24 +9,19 @@ through [odin-rdf-store](../odin-rdf-store)'s match interface alone, so the
 same shapes validate in-memory and LMDB-backed data identically. Written in
 Odin with no external dependencies.
 
-**Status: the Core spine validates.** Shapes compilation, target resolution,
-property paths, constraint dispatch, and `sh:ValidationReport` emission work
-end to end, and four of the W3C SHACL suite's seven `core/` directories are
-green — `core/targets`, `core/path`, `core/misc`, and
-`core/validation-reports`, every entry, against both storage backends, at both
-`Term_ID` widths. What is missing is most of the SHACL Core constraint
-catalogue. Twenty-five components validate: the spine's `sh:minCount`,
-`sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
-`sh:in`, which is exactly what those four directories exercise; the four
-value-range bounds `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and
-`sh:maxExclusive`; the string-based `sh:minLength`, `sh:maxLength`,
-`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`; the
-property-pair `sh:equals`, `sh:disjoint`, `sh:lessThan`, and
-`sh:lessThanOrEquals`; `sh:closed` with `sh:ignoredProperties`; and the logical
-combinators `sh:and`, `sh:or`, `sh:not`, and `sh:xone`. The shape-based
-constraints (`sh:node`, `sh:qualifiedValueShape`) are what is left of the second
-initiative, and the remaining suite directories stay disabled until they land.
-See `.metis/` for the vision, the initiative, and SHACL-A-0001.
+**Status: SHACL Core's constraint catalogue is complete.** Every constraint
+component of §4 that does not need SPARQL is implemented — the value-type,
+cardinality, value-range, string-based, property-pair, logical, shape-based and
+"other" families, twenty-nine components in all — alongside shapes compilation,
+target resolution, property paths, and `sh:ValidationReport` emission.
+
+Five of the W3C SHACL suite's seven `core/` directories are green:
+`core/targets`, `core/path`, `core/misc`, `core/validation-reports`, and
+`core/node`, every entry, against both storage backends, at both `Term_ID`
+widths. `core/property` stands at 37 of 38 and `core/complex` needs
+SHACL-SPARQL, so both remain disabled — this repository claims conformance only
+for directories where *every* entry passes. See `.metis/` for the vision, the
+initiative, and the ADRs.
 
 **A constraint this engine does not implement is ignored, and the compile says
 so.** Erroring instead would reject the spec's own non-validating annotations
@@ -34,8 +29,12 @@ so.** Erroring instead would reject the spec's own non-validating annotations
 every vendor extension a real shapes graph carries. But ignoring silently is
 how a partial engine comes to look complete, so `shapes_ignored(&shapes)`
 returns every `sh:` parameter the compile saw on a shape and skipped. **Check it
-before trusting a `sh:conforms true`** while the catalogue is incomplete: a
-report with no results and a non-empty ignored list is not a validated graph.
+before trusting a `sh:conforms true`**: a report with no results and a non-empty
+ignored list is not a validated graph.
+
+Now that SHACL Core's catalogue is complete, a non-empty list means a vendor
+extension or a SHACL-SPARQL parameter (`sh:sparql`, `sh:shapesGraph`,
+`sh:entailment`) — not a missing Core component.
 
 **`sh:datatype` checks the lexical form, but only for the datatypes it
 models.** §4.1.2 asks two things — that the datatype IRI matches, and that the

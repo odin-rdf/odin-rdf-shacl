@@ -127,6 +127,12 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	// one node; the ordering pair could be, but the second read of the data
 	// graph is per *focus* node, so asking per value node would repeat it once
 	// for every value.
+	//
+	// The qualified pair joins them, and reads as though it should not: it looks
+	// like `sh:node` with a count bolted on. It is not — the count is over the
+	// value-node *set*, so `qualifiedValueShape-001` expects one result naming the
+	// focus node and the path and **no `sh:value`**, because no single value node
+	// is to blame for there being two of them where three were wanted.
 	case .Min_Count,
 	     .Max_Count,
 	     .Has_Value,
@@ -134,7 +140,9 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Equals,
 	     .Disjoint,
 	     .Less_Than,
-	     .Less_Than_Or_Equals:
+	     .Less_Than_Or_Equals,
+	     .Qualified_Min_Count,
+	     .Qualified_Max_Count:
 		return .Node_Set
 	//
 	// `sh:closed` is value-scoped and reads as though it were not, which is the
@@ -166,7 +174,8 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .And,
 	     .Or,
 	     .Not,
-	     .Xone:
+	     .Xone,
+	     .Node:
 		return .Value
 	}
 	return .Value
@@ -250,6 +259,77 @@ check_node_set :: proc(
 
 	case .Equals, .Disjoint, .Less_Than, .Less_Than_Or_Equals:
 		check_property_pair(v, shape_index, c, constraint_index, values)
+
+	case .Qualified_Min_Count, .Qualified_Max_Count:
+		check_qualified(v, shape_index, c, values)
+	}
+}
+
+// check_qualified is `sh:qualifiedValueShape` with `sh:qualifiedMinCount`,
+// `sh:qualifiedMaxCount` and `sh:qualifiedValueShapesDisjoint` (§4.7.3): how
+// many of a shape's value nodes conform to a given shape, against a bound.
+//
+// **The count is the constraint, so the result blames nobody in particular.** It
+// names the focus node and the shape's path and carries no `sh:value` — there is
+// no single value node at fault when the fault is that there were two of them
+// and three were wanted. `qualifiedValueShape-001` is the entry that says so.
+//
+// **Disjointness is an exclusion, not a second test.** A value node that
+// conforms to the qualified shape is *not* counted if it also conforms to any
+// sibling property shape's qualified shape, where the siblings were resolved at
+// compile time (`compile_qualified_siblings`). The exclusion is symmetric, and
+// `qualifiedValueShapesDisjoint-001` is what proves it has to be: one node that
+// is both a finger and a thumb drops out of the finger count *and* the thumb
+// count, and the entry expects both to violate.
+//
+// Both counts share one `sh:qualifiedValueShape`, so a shape carrying a minimum
+// and a maximum walks its value nodes twice. That is one suppressed validation
+// per value node per bound, which is the cost SHACL-A-0002 declined to memoise
+// until a consumer measured it; a shapes graph wanting one walk can write one
+// bound.
+@(private = "file")
+check_qualified :: proc(v: ^Validation, shape_index: int, c: Constraint, values: Value_Set) {
+	operands := constraint_shapes(v.s, c)
+	if len(operands) == 0 {
+		// `sh:qualifiedValueShape` naming a node the compile did not turn into a
+		// shape. Nothing to count against, so nothing is counted — the same
+		// silence §4.7.3 asks for when the parameter is absent entirely.
+		return
+	}
+	siblings := constraint_siblings(v.s, c)
+
+	conformed := 0
+	for n in 0 ..< value_set_count(values) {
+		value := value_set_at(values, n)
+		if !node_conforms(v, operands[0], value) {
+			continue
+		}
+		if v.failure != .None {
+			return
+		}
+		excluded := false
+		for sibling in siblings {
+			if node_conforms(v, sibling, value) {
+				excluded = true
+			}
+			if v.failure != .None {
+				return
+			}
+			if excluded {
+				break
+			}
+		}
+		if !excluded {
+			conformed += 1
+		}
+	}
+	if v.failure != .None {
+		return
+	}
+
+	violates := c.kind == .Qualified_Min_Count ? conformed < c.count : conformed > c.count
+	if violates {
+		emit_result(v, shape_index, values.focus, {}, false, c.kind)
 	}
 }
 
@@ -516,7 +596,7 @@ check_value :: proc(
 		ok = check_string(v, c, value)
 	case .Language_In:
 		ok = check_language_in(v, c, value)
-	case .And, .Or, .Not, .Xone:
+	case .And, .Or, .Not, .Xone, .Node:
 		ok = check_logical(v, c, value)
 	case .Min_Count,
 	     .Max_Count,
@@ -526,7 +606,9 @@ check_value :: proc(
 	     .Disjoint,
 	     .Less_Than,
 	     .Less_Than_Or_Equals,
-	     .Closed:
+	     .Closed,
+	     .Qualified_Min_Count,
+	     .Qualified_Max_Count:
 		return
 	}
 	if !ok {
@@ -534,8 +616,10 @@ check_value :: proc(
 	}
 }
 
-// check_logical is the four logical combinators of §4.6: `sh:not`, `sh:and`,
-// `sh:or`, and `sh:xone`.
+// check_logical is the four logical combinators of §4.6 — `sh:not`, `sh:and`,
+// `sh:or`, `sh:xone` — and `sh:node` (§4.7.1), which belongs here rather than in
+// a procedure of its own because it *is* one of them: `sh:not` without the
+// inversion, and the degenerate `sh:and` of a single shape.
 //
 // **The value node becomes the inner shape's focus node.** That is the sentence
 // the whole family turns on, and it is what makes these components a consumer of
@@ -588,7 +672,11 @@ check_logical :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 		}
 		return true
 
-	case .And:
+	// `sh:node` and `sh:and` are the same loop, and saying so is more honest than
+	// giving `sh:node` a case that reads identically: every named shape must be
+	// conformed to. They differ only in how many shapes the compile put in the
+	// span — one, or an RDF list's worth — and in which component a result names.
+	case .Node, .And:
 		for index in operands {
 			conforms := node_conforms(v, index, value)
 			if v.failure != .None {

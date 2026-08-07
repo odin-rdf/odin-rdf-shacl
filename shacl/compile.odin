@@ -100,6 +100,9 @@ VOCAB_TERMS := []string {
 	LESS_THAN_OR_EQUALS,
 	CLOSED,
 	IGNORED_PROPERTIES,
+	QUALIFIED_MIN_COUNT,
+	QUALIFIED_MAX_COUNT,
+	QUALIFIED_VALUE_SHAPES_DISJOINT,
 	NODE,
 	NOT,
 	AND,
@@ -504,6 +507,22 @@ compile :: proc(
 		r,
 		pending[:len(s.shapes)],
 		&compiled,
+		&v,
+		MATCH,
+		NEXT,
+		DESTROY,
+	); err.kind != .None {
+		return err
+	}
+
+	// Siblings after operands: a sibling contributes its `sh:qualifiedValueShape`,
+	// which the pass above is what resolves.
+	if err := compile_qualified_siblings(
+		s,
+		r,
+		pending[:len(s.shapes)],
+		load,
+		load_data,
 		&v,
 		MATCH,
 		NEXT,

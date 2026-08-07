@@ -109,6 +109,13 @@ OR :: NS + "or"
 XONE :: NS + "xone"
 QUALIFIED_VALUE_SHAPE :: NS + "qualifiedValueShape"
 
+// The rest of the qualified family (§4.7.3), SHACL-T-0018. The two counts are
+// the components; `sh:qualifiedValueShapesDisjoint` modifies them and names none
+// of its own, like `sh:flags`.
+QUALIFIED_MIN_COUNT :: NS + "qualifiedMinCount"
+QUALIFIED_MAX_COUNT :: NS + "qualifiedMaxCount"
+QUALIFIED_VALUE_SHAPES_DISJOINT :: NS + "qualifiedValueShapesDisjoint"
+
 // The non-validating annotation properties (§2.3.2, §2.3.3). No conforming
 // engine acts on these, so seeing one is not evidence of an unimplemented
 // component — which is exactly why they are named rather than left to fall into
@@ -160,6 +167,9 @@ AND_COMPONENT :: NS + "AndConstraintComponent"
 OR_COMPONENT :: NS + "OrConstraintComponent"
 NOT_COMPONENT :: NS + "NotConstraintComponent"
 XONE_COMPONENT :: NS + "XoneConstraintComponent"
+NODE_COMPONENT :: NS + "NodeConstraintComponent"
+QUALIFIED_MIN_COUNT_COMPONENT :: NS + "QualifiedMinCountConstraintComponent"
+QUALIFIED_MAX_COUNT_COMPONENT :: NS + "QualifiedMaxCountConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"

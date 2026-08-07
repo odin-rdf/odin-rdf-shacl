@@ -817,13 +817,24 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(got), 2)
 }
 
-// A shape-expecting parameter is recognised by discovery and still recorded as
-// unimplemented, because nothing validates against it yet. This is the case the
-// record exists for: the engine understood the graph well enough to compile
-// six more shapes and would still have reported `sh:conforms true` for a node
-// violating every one of them.
+// A shape-expecting parameter makes its value a shape, and — since
+// SHACL-T-0018 — is no longer recorded as unimplemented.
+//
+// **This test used to assert the opposite, and the change is the point.** From
+// SHACL-T-0010 to SHACL-T-0017 the six shape-expecting parameters were
+// recognised by discovery and enforced by nothing: the engine understood the
+// graph well enough to compile the nested shapes and would still have reported
+// `sh:conforms true` for a node violating every one of them, which is the case
+// the record exists for. All six now validate, so the record goes quiet.
+//
+// What it guards in this direction is the inverse failure, and it is the one
+// that matters more now: a component wired into the evaluator without being
+// declared in `IMPLEMENTED_PARAMETERS` would keep being reported as ignored, and
+// every enabled suite directory would fail on a record that should be empty.
+// Both halves are asserted here — the shape is compiled *and* the parameter is
+// not reported — because either alone would pass on a broken engine.
 @(test)
-test_shape_expecting_parameters_are_recorded_as_unimplemented :: proc(t: ^testing.T) {
+test_shape_expecting_parameters_are_compiled_and_enforced :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
 	if !compile_source(
@@ -833,11 +844,9 @@ test_shape_expecting_parameters_are_recorded_as_unimplemented :: proc(t: ^testin
 	) {
 		return
 	}
-	ignored := shacl.shapes_ignored(&s)
-	if !testing.expect_value(t, len(ignored), 1) {
-		return
-	}
-	testing.expect_value(t, ignored[0], rdf.Term(rdf.IRI(shacl.NODE)))
+	_, found := find_shape(&s, "http://example.org/C")
+	testing.expect(t, found, "the value of sh:node was not compiled as a shape")
+	testing.expect_value(t, len(shacl.shapes_ignored(&s)), 0)
 }
 
 // A shapes graph using nothing unimplemented records nothing. Stated as its own
