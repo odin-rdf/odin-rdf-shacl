@@ -24,6 +24,25 @@ import store "store:store"
 // added there. So the earlier claim that no edit is in the evaluator held for
 // the spine's seven and does not hold in general.
 //
+// **Read the corpus entries before writing the component.** Every component
+// family SHACL-I-0002 added turned out to have exactly one detail that
+// contradicted the obvious implementation — and in each case the obvious version
+// passed every test that had been written for it:
+//
+//   - `sh:uniqueLang` is switched on by the *term* `"true"^^xsd:boolean` rather
+//     than by its value. `property/uniqueLang-002` declares `"1"^^xsd:boolean`
+//     over two `@en` literals and expects a conforming report.
+//   - `sh:lessThan` emits a result per failing **pair**, not per failing value
+//     node. `property/lessThan-002` expects four results from two value nodes.
+//   - `sh:equals` reports members of the *other* predicate's set, which are not
+//     value nodes at all. `node/equals-001` expects one.
+//   - `sh:datatype` needs §4.3.1's lexical check, which the spine deferred for a
+//     whole initiative because its enabled directories only ever used
+//     `xsd:string`, whose lexical space is every string.
+//
+// Four families, four traps. The entries are a few minutes to read and the
+// alternative is a component that looks right.
+//
 // **Scope is the thing worth naming**, and it answers exactly one question:
 // how often is the component asked? A value-scoped one is asked once per value
 // node; a set-scoped one is asked once about the whole value-node set. Getting
