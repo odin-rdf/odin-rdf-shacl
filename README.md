@@ -6,7 +6,7 @@ Shape-based validation for the Odin RDF family: a SHACL implementation that
 validates RDF data graphs against shapes graphs. Shapes are themselves RDF,
 parsed with [odin-rdf-parser](../odin-rdf-parser); the data graph is read
 through [odin-rdf-store](../odin-rdf-store)'s match interface alone, so the
-same shapes validate in-memory and LMDB-backed data identically. Written in
+same shapes validate against any backend the store offers. Written in
 Odin with no external dependencies.
 
 **Status: SHACL Core is complete and the vendored W3C suite is green.** Every
@@ -80,13 +80,15 @@ permanently.
 | Package          | Description                                                     |
 | ---------------- | --------------------------------------------------------------- |
 | `shacl`          | The backend-independent core: shapes compilation, targets, paths, constraint dispatch, validation results |
-| `shacl/memstore` | The validator instantiated against the in-memory backend        |
 | `shacl/kvstore`  | The validator instantiated against the persistent (LMDB) backend |
 
-`shacl` names no storage backend and imports none, so a program that only
-wants an in-memory store never links LMDB. That property is asserted rather
-than trusted — `make check` builds a core-plus-memstore consumer and fails if
-the binary carries LMDB symbols.
+`shacl` names no storage backend and imports none. That split was originally
+what kept LMDB out of the link of a program that only wanted an in-memory
+store; odin-rdf-store retired that backend (STORE-A-0006), so today it is the
+seam a future backend would bind to rather than a linkage guarantee. `make
+check` still builds a core-only consumer and fails if the binary carries LMDB
+symbols, which now catches a stray backend import in the core rather than
+protecting a consumer.
 
 ## Performance
 
@@ -95,17 +97,21 @@ Numbers from `make bench`, on the **reference configuration**: 500 focus nodes,
 violating — with predicate paths and `sh:class` constraints, seed `0x5EED0001`.
 Measured on Apple M-series, `-o:speed -no-bounds-check`, 64-bit `Term_ID`.
 
-| | memstore | kvstore (LMDB) |
-| --- | ---: | ---: |
-| `compile` (shapes graph → model) | 37 µs | 146 µs |
-| `bind` (model → store IDs) | 0.7 µs | 27 µs |
-| `validate` | 666 µs | 4.69 ms |
-| per focus node | 1.3 µs | 9.4 µs |
-| store reads | 7503 | 7503 |
+| | kvstore (LMDB) |
+| --- | ---: |
+| `compile` (shapes graph → model) | 146 µs |
+| `bind` (model → store IDs) | 27 µs |
+| `validate` | 4.69 ms |
+| per focus node | 9.4 µs |
+| store reads | 7503 |
 
-**Read the two backends as different questions.** memstore is the engine's own
-cost with storage out of the way; kvstore is what a process embedding a
-persistent store actually pays. Neither substitutes for the other.
+This is what a process embedding a persistent store pays. The table used to
+carry a second column for the in-memory backend — the engine's own cost with
+storage out of the way, 1.3 µs per focus node against 9.4 — but odin-rdf-store
+retired that backend (STORE-A-0006), and the isolated figure is no longer
+measurable. The read count was identical across both, which is how the family
+knew the core decided *what* to ask and the adapter only *how*; with one
+adapter there is nothing left to cross-check it against.
 
 `compile` and `bind` are measured **cold, once**, because that is what a process
 pays — the deployment this family is designed around is ~200 processes per
@@ -171,10 +177,10 @@ cannot drift from the API.
 package main
 
 import rdf "rdf:rdf"
-import memstore "store:store/memstore"
+import kvstore "store:store/kvstore"
 
 import shacl "shacl"
-import shacl_memstore "shacl/memstore"
+import shacl_kvstore "shacl/kvstore"
 
 SHAPES :: `
 @prefix sh:  <http://www.w3.org/ns/shacl#> .
@@ -198,40 +204,44 @@ ex:bob   a ex:Person .
 `
 
 validate_example :: proc(report: ^[dynamic]string) -> shacl.Failure {
-	// 1. Compile the shapes graph. The model owns every term it holds, so the
-	//    private store `compile_turtle` built is already gone by the time it
-	//    returns — the model outlives it.
+	// 1. Open the store. It is a directory on disk, opened once and kept.
+	db, open_err := kvstore.open("/var/lib/example/rdf")
+	if open_err != nil {
+		return .None
+	}
+	defer kvstore.close(db)
+
+	// 2. Compile the shapes graph into a graph of that store. The model owns
+	//    every term it holds, so the store may be closed afterwards and the
+	//    model bound to another one. Compile once and keep the model: loading
+	//    a shapes graph twice does not dedupe, because every load mints fresh
+	//    blank nodes.
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	err, parse_err := shacl_memstore.compile_turtle(&shapes, transmute([]byte)string(SHAPES))
+	err, parse_err := shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
 	if parse_err.message != "" || err.kind != .None {
 		return .None
 	}
 
 	// 2. Load the data graph.
-	dictionary: memstore.Dictionary
-	memstore.dictionary_init(&dictionary)
-	defer memstore.dictionary_destroy(&dictionary)
-	dataset: memstore.Dataset
-	memstore.dataset_init(&dataset)
-	defer memstore.dataset_destroy(&dataset)
-	memstore.load_turtle(&dictionary, &dataset, transmute([]byte)string(DATA))
+
+	kvstore.load_turtle(db, transmute([]byte)string(DATA))
 
 	// 3. Bind the model's terms to this store's IDs — once per validation, not
 	//    once per check. A model compiled elsewhere binds here just as well.
 	bindings: shacl.Bindings
-	shacl_memstore.bind(&bindings, &shapes, &dictionary)
+	shacl_kvstore.bind(&bindings, &shapes, &session)
 	defer shacl.bindings_destroy(&bindings)
 
 	// 4. Validate. Results are handed to the visitor as they are found and
 	//    nothing is buffered, so memory stays flat however bad the data is.
-	sink := Sink{shapes = &shapes, dictionary = &dictionary, lines = report}
-	return shacl_memstore.validate(&shapes, &bindings, &dictionary, &dataset, on_result, &sink)
+	sink := Sink{shapes = &shapes, dictionary = &session, lines = report}
+	return shacl_kvstore.validate(&shapes, &bindings, &session, on_result, &sink)
 }
 
 Sink :: struct {
 	shapes:     ^shacl.Shapes,
-	dictionary: ^memstore.Dictionary,
+	session: ^shacl_kvstore.Session,
 	lines:      ^[dynamic]string,
 }
 
@@ -240,7 +250,7 @@ Sink :: struct {
 // it out — or use `validate_report` and let the report do it for you.
 on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
-	focus := memstore.lookup_term(sink.dictionary, result.focus.id)
+	focus := kvstore.lookup_term(sink.dictionary, result.focus.id)
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
 		append(sink.lines, string(iri))
 	}
@@ -262,14 +272,14 @@ of it, and each is one call:
 // Just the answer. Stops at the first result of any severity rather than
 // finding them all — which at ~200 processes per machine is the difference
 // worth having. A warning breaks conformance exactly as a violation does (§3.1).
-ok, failure := shacl_memstore.conforms(&shapes, &bindings, &dictionary, &dataset)
+ok, failure := shacl_kvstore.conforms(&shapes, &bindings, &session)
 
 // The sh:ValidationReport graph, finished and ready to serialise. Emitting it
 // is odin-rdf-parser's job, through any of its four emitters.
 report: shacl.Report
 shacl.report_init(&report)
 defer shacl.report_destroy(&report)
-failure := shacl_memstore.validate_report(&report, &shapes, &bindings, &dictionary, &dataset)
+failure := shacl_kvstore.validate_report(&report, &shapes, &bindings, &session)
 ```
 
 **Check the `Failure` before the answer.** It is the spec's *failure* (§3.3),
@@ -298,8 +308,8 @@ There is a fourth, narrower question: **does one node conform to one shape?**
 ```odin
 // shape_index names a shape by its position in the compiled model — the same
 // index a Result carries in `result.shape`.
-ok, failure := shacl_memstore.conforms_node(
-	&shapes, &bindings, &dictionary, &dataset,
+ok, failure := shacl_kvstore.conforms_node(
+	&shapes, &bindings, &session,
 	rdf.IRI("http://example.org/alice"), shape_index,
 )
 ```

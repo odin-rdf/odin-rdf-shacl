@@ -239,6 +239,39 @@ the ownership property is exercised on all 40 entry runs per width rather than o
 tests that name it. It also keeps the two graphs' blank-node label spaces apart, which the
 entries with separate shapes files would otherwise need a special case for.
 
+## Amendments
+
+- **2026-08-07 (SHACL-T-0028)** — odin-rdf-store retired its in-memory backend
+  (STORE-A-0006), and two of this decision's supports change with it.
+
+  **Decision 1's justification is gone, though the decision stands.** The
+  core/instantiation split was chosen so that "a consumer that only ever wants an
+  in-memory store" would not link LMDB, and `make purity` asserted exactly that by
+  building a core-plus-memstore binary and checking it for `mdb_` symbols. There is
+  no such consumer any more: every consumer of this library links LMDB. The split is
+  kept because it is still what a future backend would bind to and it still keeps
+  the core's dependencies legible, but that is internal hygiene rather than a promise
+  to users, and it is a weaker reason than the one recorded above. The purity target
+  is retargeted at a core-only consumer, which tests less: an instantiation package
+  is where a stray `store:store/kvstore` import would be most tempting and least
+  visible, and nothing checks that any more.
+
+  **Decision 3's shapes-from-a-file helper moved and changed shape.**
+  `shacl_memstore.compile_turtle` built a private store, compiled from it and
+  destroyed it. `shacl_kvstore.compile_turtle` takes the caller's store and a scratch
+  graph instead — a validation library should not silently own an LMDB environment,
+  and every consumer already has a store open for the data graph. The ownership
+  property this ADR turns on is unaffected and is in fact exercised harder: closing a
+  kvstore unmaps the pages its terms were read from, so a model that had borrowed
+  rather than copied now reads unmapped memory rather than stale-but-mapped bytes.
+
+  It carries one new caveat, recorded here because it is a consequence of compiling
+  from a *persistent* store rather than a private one: loading a shapes graph is not
+  idempotent. Per-load blank-node scoping means loading the same document into the
+  same graph twice deposits a second copy of every blank-node-rooted shape, and a
+  later compile sees duplicated shapes. The contract is compile-once, and it relaxes
+  when odin-rdf-store's `remove` lands (STORE-T-0023).
+
 ## Review Triggers
 
 This decision should be revisited if any of the following occurs:

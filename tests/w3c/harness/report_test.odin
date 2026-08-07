@@ -581,7 +581,7 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 
 // The conformance-only consumer: it stops at the first result, which is what
 // early exit is for. Asserted here on a synthetic stream;
-// `shacl/memstore/validate_test.odin` asserts it end to end, on a traversal
+// `shacl/kvstore/validate_semantics_test.odin` asserts it end to end, on a traversal
 // that actually stops.
 @(test)
 test_conformance_consumer_stops_at_the_first_result :: proc(t: ^testing.T) {

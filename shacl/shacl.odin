@@ -4,12 +4,14 @@
 //
 // It names no storage backend and imports none. Data reaches it through
 // odin-rdf-store's published match contract, bound at compile time by a thin
-// instantiation package — `shacl/memstore` for the in-memory backend,
-// `shacl/kvstore` for the persistent one. That split is not stylistic:
-// kvstore foreign-imports a static LMDB archive, so a core that imported it
-// would put LMDB into the link of every consumer, including the ones that
-// only ever want an in-memory store. `tests/purity` asserts the property
-// rather than trusting it.
+// instantiation package — `shacl/kvstore`, over odin-rdf-store's persistent
+// backend. That split was originally not stylistic: kvstore foreign-imports a
+// static LMDB archive, so a core that imported it would put LMDB into the link
+// of every consumer, including the ones that only ever wanted an in-memory
+// store. odin-rdf-store has since retired that backend (STORE-A-0006), so
+// every consumer links LMDB and the split now earns its keep as the seam a
+// second backend would bind to. `tests/purity` still asserts that this package
+// acquires no backend import.
 //
 // The engine is deliberately validation-only. Inference and entailment
 // regimes, SHACL Advanced Features (rules, functions), and any server or
@@ -50,7 +52,7 @@
 //   - **A compiled `Shapes` owns every term it holds** and frees them at
 //     `shapes_destroy`. This is the deviation, and SHACL-A-0001 decision 3 is
 //     why: the two backends disagree about what `lookup_term` returns —
-//     memstore borrows its dictionary's storage, kvstore builds a term from
+//     kvstore builds a term from
 //     the database's bytes — so a borrowing model would have had a
 //     backend-dependent lifetime rule in its public contract. Owning states
 //     one rule instead: **the store a shapes graph was compiled from may be

@@ -28,7 +28,7 @@ import store "store:store"
 // `Constraint_Kind`, a scope, and a case — nothing in this file.
 //
 // **The store is reached through the four procedures in `Access`** and nothing
-// else. There is no backend name anywhere in this package; `shacl/memstore` and
+// else. There is no backend name anywhere in this package; `shacl/kvstore`
 // `shacl/kvstore` supply the concrete four.
 
 // Access is everything the validator may do to the data graph.
@@ -37,7 +37,7 @@ import store "store:store"
 // because the adapters need the same two things — the dataset and the graph —
 // and the graph belongs to the adapter rather than to the core, so a validation
 // cannot widen itself to the whole dataset (SHACL-A-0001 decision 5). `load`
-// materialises an ID and takes its own `load_data`, because on memstore that is
+// materialises an ID and takes its own `load_data`, because on some backends that is
 // the dictionary while the dataset is a separate handle.
 //
 // **`outgoing` is the fourth read verb and the first one added since the spine**

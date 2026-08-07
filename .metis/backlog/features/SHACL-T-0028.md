@@ -70,11 +70,11 @@ it, and the transaction work is queued behind that.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] Every assertion currently running against memstore runs against kvstore afterwards.
+- [x] Every assertion currently running against memstore runs against kvstore afterwards.
       Counts recorded before and after at **both `Term_ID` widths**; any reduction named.
       Note the kvstore-side count goes from **14 to ~85**, so this is also a coverage
       expansion on a path that has been much thinner than the memstore one.
-- [ ] `shacl/memstore/` deleted: `memstore.odin`, `compile.odin`, `eval.odin`,
+- [x] `shacl/memstore/` deleted: `memstore.odin`, `compile.odin`, `eval.odin`,
       `validate.odin`, `report.odin` (528 lines) and the five `_test` files (3,540 lines).
 
 **`compile_turtle` — the caller supplies the store.** Recommended signature:
@@ -86,7 +86,7 @@ compile_turtle :: proc(s: ^shacl.Shapes, st: ^kvstore.Store, source: []byte,
                  -> (err: shacl.Error, load_err: store.Load_Error, db_err: kvstore.Error)
 ```
 
-- [ ] The procedure survives on `shacl/kvstore` over a caller-supplied store and scratch
+- [x] The procedure survives on `shacl/kvstore` over a caller-supplied store and scratch
       graph — or its removal is a recorded decision with the reason. Rationale for the
       shape: today's version builds a private store and destroys it, which was tolerable
       when the store was a hash map and is not when it is an LMDB environment; and its own
@@ -95,7 +95,7 @@ compile_turtle :: proc(s: ^shacl.Shapes, st: ^kvstore.Store, source: []byte,
       Every shacl consumer already has a store open for the data graph, and `Session`'s doc
       already describes the replacement: "A caller whose shapes and data live in different
       graphs of one store uses two Sessions over the same store."
-- [ ] **The compile-once contract is in the doc comment, with its reason**, because the
+- [x] **The compile-once contract is in the doc comment, with its reason**, because the
       failure is silent. `load_turtle` applies per-load blank-node scoping (`fresh_blank_txn`)
       and shapes graphs are blank-node dense (`sh:property [ sh:path ex:p ; sh:minCount 1 ]`),
       so reloading the same shapes into the same named graph does **not** dedupe — repeated
@@ -106,7 +106,7 @@ compile_turtle :: proc(s: ^shacl.Shapes, st: ^kvstore.Store, source: []byte,
 
 **The `purity` target — decide, do not leave broken.**
 
-- [ ] `tests/purity/` and `make purity` are retargeted, retired, or deleted, as a recorded
+- [x] `tests/purity/` and `make purity` are retargeted, retired, or deleted, as a recorded
       decision. Its guarded property — "a consumer that only ever wants an in-memory store"
       must not link LMDB — has no beneficiary once there is no in-memory store.
       Recommendation: **retarget it at the `shacl` core package alone** (it still catches a
@@ -117,7 +117,7 @@ compile_turtle :: proc(s: ^shacl.Shapes, st: ^kvstore.Store, source: []byte,
 
 **The benchmarks — a changed measurement, not a port.**
 
-- [ ] `bench/consumers.odin` ported with its changed question stated. It uses memstore
+- [x] `bench/consumers.odin` ported with its changed question stated. It uses memstore
       *deliberately* — its own comment: "memstore only, deliberately. The question is what
       *this engine* allocates, and on kvstore every figure would carry LMDB's page handling
       and term [decoding]." That reason is real: memstore's `lookup_term` borrows from
@@ -126,15 +126,15 @@ compile_turtle :: proc(s: ^shacl.Shapes, st: ^kvstore.Store, source: []byte,
       figures now include term materialization** — arguably the more honest number, since
       every real consumer pays it. Mark the historical figures as not comparable rather than
       leaving them looking like a regression.
-- [ ] Recorded as lost rather than silently dropped: `bench/main.odin`'s cross-backend
+- [x] Recorded as lost rather than silently dropped: `bench/main.odin`'s cross-backend
       timing comparison, and the invariant it asserts that "the read count is identical on
       memstore and kvstore."
-- [ ] `tests/readme/`, `tests/guards/`, `tests/w3c/harness/runner.odin` and `bench/access.odin`
+- [x] `tests/readme/`, `tests/guards/`, `tests/w3c/harness/runner.odin` and `bench/access.odin`
       all reference memstore and need triage.
 
 **The vision.**
 
-- [ ] `.metis/vision.md`'s success criterion "Validation runs against any odin-rdf-store
+- [x] `.metis/vision.md`'s success criterion "Validation runs against any odin-rdf-store
       backend through the match interface alone, so the same shapes validate **in-memory and
       LMDB-backed** data identically" is retracted — it becomes unverifiable. A port that
       leaves a falsified criterion standing in a published vision is incomplete. Recommend a
@@ -185,3 +185,46 @@ point 3), explicitly waiting on evidence from these ports.
 - **2026-08-07 — Filed from odin-rdf-store STORE-T-0027**, the sibling-proposal task of
   STORE-I-0003. Sequencing and shape are this repo's call; the blocking relationship with
   STORE-T-0030 is the one part that is not.
+- **2026-08-07 — Done. 144 tests per width, green at both, `make check` clean,
+  `make purity` passing against its new target.**
+
+  **Counts.** Before: shacl 21, shacl/memstore 71, shacl/kvstore 14, guards 12, readme 4,
+  w3c/harness 23 = **145**. After: shacl 21, shacl/kvstore 84, guards 12, readme 4,
+  w3c/harness 23 = **144**. The −1 is `shacl/memstore/link_test.odin`, whose own comment
+  called it "far less load-bearing than the kvstore one — there is no foreign archive to
+  resolve here"; kvstore's equivalent survives. The other 70 moved intact, no assertion
+  rewritten. The W3C harness keeps its 23 tests but each entry now runs once rather than
+  against both backends — the same consolidation as odin-rdf-sparql.
+
+  **All three decisions taken.**
+
+  1. **`compile_turtle` takes the caller's store**, as recommended:
+     `compile_turtle(s, st, source, graph = nil, base = "", allocator)`. The compile-once
+     contract is in the doc comment *with its reason*, which was the thing most likely to
+     be skipped: per-load blank-node scoping means loading a shapes graph twice does not
+     dedupe, it deposits a second copy of every blank-node-rooted shape.
+  2. **`purity` retargeted at the core alone**, and SHACL-A-0001 amended with a new
+     Amendments section saying plainly that decision 1's *justification* is gone even
+     though the decision stands, and that the retargeted check tests less — an
+     instantiation package is where a stray `kvstore` import is most tempting and least
+     visible, and nothing checks that now.
+  3. **Benchmarks ported with the changed question stated in the source.**
+     `bench/consumers.odin` now measures allocation including term materialization;
+     `bench/main.odin`'s cross-backend invariant (same reads per verb, same results) is
+     gone with nothing replacing it, and says so.
+
+  **Two findings beyond the item's scope.**
+
+  - **Four scratch-path helpers lacked the uniqueness they now need.** `temp_path` keyed
+    only on a caller-supplied name — fine for 14 hand-named tests, not for ~85 on ten
+    threads where several hold two stores at once. The W3C report tests shared one tag
+    across five parallel tests and failed as `make_directory` on a path that already
+    existed. Each helper now carries a pid and an atomic counter. **Reporting upstream:
+    that is five copies of the temp-path dance in this repo alone and nine across the
+    family** — the evidence STORE-I-0003's `open_ephemeral` was explicitly waiting on.
+  - **The guards all survived**, unlike odin-rdf-sparql's, where a triple-term guard
+    asserted a property only memstore had. Nothing here depended on borrowing.
+
+  The vision's identical-behaviour criterion and its purity description are retracted with
+  dated amendments; README, package docs and the two ADR-adjacent prose claims are
+  corrected rather than annotated, since they describe current state.

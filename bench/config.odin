@@ -184,7 +184,7 @@ Pin :: struct {
 	reads: int,
 }
 
-// Measured at SHACL-T-0023, identical on memstore and kvstore and at both
+// Measured at SHACL-T-0023, identical on both backends then shipped and at both
 // `Term_ID` widths. What the differences say, since a pin is more useful with
 // its neighbours in view:
 //

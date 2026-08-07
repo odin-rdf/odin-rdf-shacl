@@ -56,9 +56,9 @@ constraint catalogue, completed 2026-08-07).
   and a suite that goes green against a specification that can change under it is worth
   less than it looks. Review trigger and reasoning in `tests/w3c/README.md`.
 
-Packages: `shacl` (backend-independent core), `shacl/memstore`, `shacl/kvstore`. The core
+Packages: `shacl` (backend-independent core) and `shacl/kvstore`. The core
 names no storage backend and imports none, asserted rather than trusted — `make check`
-builds a core-plus-memstore consumer and fails if the binary carries LMDB symbols.
+builds a core-only consumer and fails if the binary carries LMDB symbols. *(Amended 2026-08-07, SHACL-T-0028: it built a core-plus-memstore consumer until odin-rdf-store retired that backend — STORE-A-0006. The check is narrower now and is internal hygiene rather than a promise to users, since every consumer links LMDB.)*
 
 The dependencies are unchanged and all complete: **odin-rdf-parser** and
 **odin-rdf-store** at v0.1.0, and **odin-rdf-sparql** at v0.1.0, relevant here only for
@@ -126,7 +126,7 @@ that is still the most useful thing it records:**
 A complete, well-tested Odin library where:
 
 - SHACL Core validation conforms to the W3C SHACL specification, measured against the official SHACL test suite.
-- Validation runs against any odin-rdf-store backend through the match interface alone, so the same shapes validate in-memory and LMDB-backed data identically.
+- Validation runs against any odin-rdf-store backend through the match interface alone. *(Amended 2026-08-07, SHACL-T-0028: this read "…so the same shapes validate in-memory and LMDB-backed data identically", and it was met — the engine ran verbatim against both backends at both `Term_ID` widths, which is what proved it reached storage through the contract alone. odin-rdf-store has since retired its in-memory backend (STORE-A-0006), so the identical-behaviour half is no longer verifiable and is retracted rather than left standing. The criterion itself survives: the core still names no backend.)*
 - Validation reports are spec-conformant RDF graphs that round-trip through odin-rdf-parser.
 - The SHACL-SPARQL phase covers SPARQL-based constraints by embedding odin-rdf-sparql, keeping it strictly optional for Core-only users.
 

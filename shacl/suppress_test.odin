@@ -18,7 +18,7 @@ import store "store:store"
 // consumers exist, and the risk named against it was drift: nothing here checks
 // the model against what `compile` actually produces. Two things settled it.
 //
-// The drift risk is now covered from the other side — `shacl/memstore`'s
+// The drift risk is now covered from the other side — `shacl/kvstore`'s
 // `test_inner_results_do_not_reach_the_caller` and
 // `test_an_inner_stop_does_not_truncate_the_outer_traversal` assert the same two
 // properties through a compiled shapes graph and a real backend, so a model here
@@ -33,7 +33,7 @@ import store "store:store"
 //
 // They are in package `shacl` rather than in a backend package for that reason:
 // `node_conforms` takes an in-flight `Validation`, and a test in
-// `shacl/memstore` can only reach the public `conforms_node`, which builds its
+// `shacl/kvstore` can only reach the public `conforms_node`, which builds its
 // own `Validation` and therefore cannot see the save/restore at all.
 //
 // The store is a fake: `Access` is a handful of procedure pointers, so a
