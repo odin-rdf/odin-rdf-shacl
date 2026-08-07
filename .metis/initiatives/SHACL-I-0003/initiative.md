@@ -462,6 +462,48 @@ suite is still 98 of 98 against both backends at both `Term_ID` widths.
 
   Not transitioned to active — awaiting human review.
 
+- **2026-08-07 — SHACL-T-0023 and SHACL-T-0024 complete. Baselines below; only the
+  memoisation decision remains.**
+
+  **Reference configuration** (500 focus nodes, 3 shapes, 4 values each, 20% violating,
+  predicate paths, seed `0x5EED0001`, 64-bit): memstore compile 37 µs, bind 0.7 µs,
+  validate 666 µs — **1.3 µs per focus node**, 7503 store reads. kvstore is the same 7503
+  reads at 4.69 ms, roughly **7x**, which is the cost of persistence rather than of the
+  engine. Full matrix in SHACL-T-0024.
+
+  | configuration | reads | validate | Δ vs baseline |
+  | --- | ---: | ---: | --- |
+  | `baseline` / `dense` / `clean` | 7503 | 0.60–0.70 ms | density changes what is reported, not what is read |
+  | `alternative-path` | 9003 | 1.09 ms | the alternative's second branch |
+  | `nested` | 11596 | 1.10 ms | three `sh:node` levels |
+  | `qualified` | 11504 | 1.29 ms | **the qualified family, and the number T-0025 argues over** |
+
+  **Both memory promises hold, measured rather than asserted.** Peak is **byte-identical
+  at 27076** across 0, 1181, and 6000 results on an identical walk — and it is not flat
+  because nothing happened, because the counterweight is asserted too: a `Report` grows 2
+  → 9450 → 48002 triples across the same three. Without that, every flatness check would
+  pass on an engine that had stopped reporting.
+
+  **32-bit `Term_ID` buys ~23% of the working set (27076 → 20868 bytes) and no measurable
+  time.** Same reads, same allocation count, timings within noise in both directions. At
+  27 KB the working set already fits in cache, so there is nothing for halving it to win
+  back.
+
+  **One acceptance criterion was wrong and is recorded as wrong.** T-0024 asked for
+  `Conformance` to allocate nothing at all over a validation; the package doc's "nothing
+  at all" is about the *consumer*, not the walk beneath it. The replacement is sharper: on
+  a conforming graph nothing exits early, so `Conformance` and the raw stream walk
+  identically and the promise becomes an equality — 5518 = 5518, exactly.
+
+  **What SHACL-T-0025 inherits.** `qualified` − `baseline` = **+4001 reads and +9004
+  allocations** for 1.5x the reads, on workloads identical in every other knob. The
+  control it needs in order to say *no* exists and is the reference configuration itself.
+
+  Also recorded, deliberately not acted on (the initiative's non-goal):
+  `alternative-path` allocates 13018 times for only 1.2x baseline's reads, which is the
+  one place in the set where the read count is a poor proxy for time. Worth knowing before
+  anyone treats reads as a stand-in for cost.
+
 - **2026-08-07 — Two decisions taken at review, and one document repaired.**
 
   **The read count is pinned, not merely reported** (Greger). Not a threshold — a constant

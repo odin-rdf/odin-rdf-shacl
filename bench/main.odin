@@ -114,6 +114,22 @@ Instrumented :: struct {
 	allocations: int,
 }
 
+// Observation is what one configuration contributed to the cross-configuration
+// assertions below. Collected rather than asserted in place, because the
+// interesting promises are *comparisons between* configurations — flat peak as
+// density rises is not a statement any single run can make.
+Observation :: struct {
+	config:             Config,
+	raw_peak:           int,
+	raw_allocs:         int,
+	conformance_allocs: int,
+	conforms:           bool,
+	report_bytes:       int,
+	report_triples:     int,
+}
+
+observations: [dynamic]Observation
+
 failures := 0
 
 fail :: proc(format: string, args: ..any) {
@@ -149,6 +165,8 @@ main :: proc() {
 		fmt.printfln("\n== %s ==", c.name)
 		run_config(c)
 	}
+
+	assert_promises()
 
 	fmt.println()
 	if failures > 0 {
@@ -239,6 +257,22 @@ run_config :: proc(c: Config) {
 			c.name,
 			mem_i.results,
 			kv_i.results,
+		)
+	}
+
+	if k, k_ok := measure_consumers(c, w); k_ok {
+		report_consumers(c, k)
+		append(
+			&observations,
+			Observation {
+				config = c,
+				raw_peak = k.raw.peak,
+				raw_allocs = k.raw.allocations,
+				conformance_allocs = k.conformance.allocations,
+				conforms = k.conforms,
+				report_bytes = k.report.total_bytes,
+				report_triples = triple_count(k.report),
+			},
 		)
 	}
 
@@ -423,4 +457,116 @@ time_kvstore :: proc(c: Config, w: Workload) -> (t: Timing, ok: bool) {
 		return
 	}
 	return t, true
+}
+
+
+// same_workload_but_density reports whether two configurations differ only in
+// how much of their data violates. Compared structurally rather than by name:
+// the density family is a property of the knobs, and a name-based grouping
+// would silently stop meaning anything the moment someone renamed a
+// configuration or changed one of its other knobs.
+@(private = "file")
+same_workload_but_density :: proc(a, b: Config) -> bool {
+	x, y := a, b
+	x.name, y.name = "", ""
+	x.violation_percent, y.violation_percent = 0, 0
+	return x == y
+}
+
+// assert_promises checks the two claims the `shacl` package doc makes that only
+// a comparison across configurations can test, plus the counterweight that
+// stops them passing vacuously.
+@(private = "file")
+assert_promises :: proc() {
+	if len(observations) == 0 {
+		return
+	}
+
+	// **`Conformance` costs nothing over the walk it rides on.**
+	//
+	// The package doc says `Conformance` allocates "nothing at all, whatever the
+	// violation count", and SHACL-T-0024 first read that as
+	// `total_allocation_count == 0` over a whole validation. That is not what it
+	// claims, and the sentence before it says so: *validation* allocates per
+	// focus node, per reachability round, and per shape entered. The tighter
+	// promise is about the **consumer** — `tests/guards` asserts it in isolation,
+	// feeding a synthetic result stream — and a conformance run still pays for
+	// the walk underneath.
+	//
+	// So the checkable form at scale is a comparison rather than a zero, and it
+	// is sharper than it looks. On a graph that **conforms**, nothing exits
+	// early, so the walk is exactly the raw stream's walk: any difference in
+	// allocations is the consumer, and the promise is that there is none —
+	// an equality, not a bound. On a graph that does not conform, `Conformance`
+	// stops at the first result, so it must allocate strictly less; more would
+	// mean early exit was costing rather than saving.
+	for o in observations {
+		if o.conforms {
+			if o.conformance_allocs != o.raw_allocs {
+				fail(
+					"%s conforms, so Conformance and the raw stream walk identically — but Conformance made %d allocation(s) against the stream's %d, so the consumer is costing something",
+					o.config.name,
+					o.conformance_allocs,
+					o.raw_allocs,
+				)
+			}
+			continue
+		}
+		if o.conformance_allocs > o.raw_allocs {
+			fail(
+				"%s: Conformance made %d allocation(s) against the raw stream's %d. It stops at the first result, so early exit is costing rather than saving",
+				o.config.name,
+				o.conformance_allocs,
+				o.raw_allocs,
+			)
+		}
+	}
+
+	// **Memory stays flat exactly when the data is worst.** Within a density
+	// family — same workload, different violation percentage — peak must not
+	// move. It is an equality rather than a bound: the result stream buffers
+	// nothing, so there is no reason for a single byte of difference, and a
+	// tolerance would be a place for a slow leak to hide.
+	for a, i in observations {
+		for b in observations[i + 1:] {
+			if !same_workload_but_density(a.config, b.config) {
+				continue
+			}
+			if a.raw_peak != b.raw_peak {
+				fail(
+					"%s (%d%% violating) peaks at %d bytes and %s (%d%%) at %d — the same walk over the same data, so memory did not stay flat as density rose",
+					a.config.name,
+					a.config.violation_percent,
+					a.raw_peak,
+					b.config.name,
+					b.config.violation_percent,
+					b.raw_peak,
+				)
+			}
+
+			// **And the counterweight.** Everything above would pass just as
+			// well on an engine that had quietly stopped reporting anything, so
+			// the one consumer that is *meant* to grow with the violation count
+			// must be seen to. More violations, a larger report graph — strictly,
+			// because a report is a graph and that is what it is for.
+			denser, sparser := a, b
+			if denser.config.violation_percent < sparser.config.violation_percent {
+				denser, sparser = sparser, denser
+			}
+			if denser.config.violation_percent == sparser.config.violation_percent {
+				continue
+			}
+			if denser.report_triples <= sparser.report_triples {
+				fail(
+					"%s (%d%% violating) reports %d triples and %s (%d%%) reports %d — a Report is supposed to grow with the violation count",
+					denser.config.name,
+					denser.config.violation_percent,
+					denser.report_triples,
+					sparser.config.name,
+					sparser.config.violation_percent,
+					sparser.report_triples,
+				)
+			}
+		}
+	}
 }

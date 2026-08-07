@@ -88,6 +88,50 @@ wants an in-memory store never links LMDB. That property is asserted rather
 than trusted — `make check` builds a core-plus-memstore consumer and fails if
 the binary carries LMDB symbols.
 
+## Performance
+
+Numbers from `make bench`, on the **reference configuration**: 500 focus nodes,
+3 property shapes, 4 value nodes each — 6000 value nodes, 20% of them
+violating — with predicate paths and `sh:class` constraints, seed `0x5EED0001`.
+Measured on Apple M-series, `-o:speed -no-bounds-check`, 64-bit `Term_ID`.
+
+| | memstore | kvstore (LMDB) |
+| --- | ---: | ---: |
+| `compile` (shapes graph → model) | 37 µs | 146 µs |
+| `bind` (model → store IDs) | 0.7 µs | 27 µs |
+| `validate` | 666 µs | 4.69 ms |
+| per focus node | 1.3 µs | 9.4 µs |
+| store reads | 7503 | 7503 |
+
+**Read the two backends as different questions.** memstore is the engine's own
+cost with storage out of the way; kvstore is what a process embedding a
+persistent store actually pays. Neither substitutes for the other.
+
+`compile` and `bind` are measured **cold, once**, because that is what a process
+pays — the deployment this family is designed around is ~200 processes per
+machine each compiling a shapes graph at start-up. `validate` is a warm-up plus
+the best of five, because the question there is steady-state cost.
+
+**Memory.** Validation's working set is flat in the violation count, and the
+benchmark asserts it rather than reporting it: peak is **27076 bytes** on the
+identical walk whether 0, 1181, or 6000 results come out of it. `conforms` stops
+at the first result and costs 2372 bytes and 16 allocations. A `Report` is the
+one consumer meant to grow, and does — 2 triples for a conforming graph, 9450
+for the reference configuration, 48002 when everything violates.
+
+**32-bit `Term_ID`** buys about 23% of that working set — 27076 → 20868 bytes —
+and no measurable time. Same allocation count, same store reads, timings within
+noise. At this size the working set already fits in cache, so halving it has
+nothing to win back; a much larger graph might say otherwise.
+
+**What these numbers are not.** A synthetic workload this project chose. They
+are a regression instrument and a comparative one — the engine against itself
+over time, and with a change against without — not a claim about what SHACL
+costs in the world. There is no standard SHACL benchmark corpus, and the W3C
+suite is 98 files written to exercise semantics, several of them a dozen
+triples; benchmarking against it would measure the harness. See `bench/` for the
+workload's shape and the seven knobs that vary it.
+
 ## Building
 
 The parser and the store are **sibling checkouts**, not vendored copies, and
