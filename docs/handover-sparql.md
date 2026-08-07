@@ -126,13 +126,22 @@ the only thing that distinguishes a test from a comment.
   shape-based constraints would naturally nest a child's results under a
   parent's; a consumer asking for richer reports reopens it, and it is a `Result`
   field plus a `Report` change.
-- **Conformance answers are not memoised.** SHACL-A-0002 declined to until a
-  consumer showed it was needed, and `docs/store-evidence.md` records the case
-  where the repetition is provably wasted: a qualified property shape with both a
-  minimum and a maximum asks the same `(shape, node)` question twice, and
-  `sh:qualifiedValueShapesDisjoint` multiplies it by the sibling count. **There is
-  still no benchmark**, and `bench/` does not exist. That is the gap most likely
-  to matter first at ~200 processes per machine.
+- **Conformance answers are not memoised — settled, and no longer open.**
+  SHACL-A-0002 deferred this until measured cost justified it; SHACL-I-0003 built
+  `bench/` and SHACL-T-0025 pulled the trigger. **The answer is no cache**, and
+  the ADR's *As Measured* section carries the numbers. The duplicate is real —
+  a property shape with both bounds walks its value nodes twice, costing +1000
+  reads, +1.2 MB of total allocation, and ~11% of validation on a 500-focus-node
+  configuration — but a `(shape, node)` cache is the wrong instrument for it.
+- **What replaces it, and it is the one open engine change this project leaves
+  behind.** Both bounds share one `sh:qualifiedValueShape` and one value-node
+  set, so they could **share one walk**: compile them into a single constraint,
+  count once, test the count twice. That removes the reads *and* the bytes with
+  no hot-path lookup and no live memory, and it dominates a cache on every axis
+  under every allocator. Deliberately not implemented — SHACL-T-0025 was scoped
+  to decide the cache — and recorded with its numbers already taken, which is
+  what a future task needs to act on it. `compile_constraints` and
+  `check_qualified` are the two procedures involved.
 - **The `sh:pattern` dialect gap.** `core:text/regex` is not XML Schema's regex
   language. `s` and `q` are rejected at compile time rather than ignored, and the
   common subset is what the corpus uses. Unmeasured beyond that, deliberately.
@@ -187,3 +196,6 @@ direction of travel, not a conformance claim, because an entry expecting
   keeps apart.
 - `tests/w3c/README.md` — the corpus, its provenance, and what the suite can and
   cannot see.
+- `bench/` — the synthetic workload, its seven knobs, and the two measurement
+  modes. Its package doc says plainly what the numbers are not: a workload this
+  project chose, so a regression instrument rather than a claim about the world.

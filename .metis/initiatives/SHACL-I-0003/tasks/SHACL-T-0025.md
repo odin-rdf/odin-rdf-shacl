@@ -4,14 +4,14 @@ level: task
 title: "The memoisation decision, and SHACL-A-0002's amendment"
 short_code: "SHACL-T-0025"
 created_at: 2026-08-07T11:34:44.535089+00:00
-updated_at: 2026-08-07T11:34:44.535089+00:00
+updated_at: 2026-08-07T13:05:27.235889+00:00
 parent: SHACL-I-0003
 blocked_by: [SHACL-T-0023]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: true

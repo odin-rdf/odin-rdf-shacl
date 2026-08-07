@@ -4,17 +4,17 @@ level: initiative
 title: "Performance evidence: a benchmark workload, and the memoisation decision"
 short_code: "SHACL-I-0003"
 created_at: 2026-08-07T10:48:30.161797+00:00
-updated_at: 2026-08-07T11:47:06.435999+00:00
+updated_at: 2026-08-07T13:06:22.850109+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 estimated_complexity: S
 initiative_id: performance-evidence-a-benchmark
 ---
@@ -352,6 +352,69 @@ measured answer to its own review trigger; and if a conformance cache landed, th
 suite is still 98 of 98 against both backends at both `Term_ID` widths.
 
 ## Status Updates
+
+- **2026-08-07 — Completed. The library has performance evidence, and the decision it was
+  blocking is decided.**
+
+  Three tasks, all met, and the initiative's exit criteria with them: `bench/` exists and
+  `make bench` runs it at both `Term_ID` widths with release flags; the workload and the
+  reasoning for choosing it are documented beside the generator; baselines are in the
+  README and above; the flat-memory promises are verified at a size `tests/guards` cannot
+  reach; and SHACL-A-0002 carries a measured answer to its own review trigger. No
+  conformance cache landed, so the clause about the suite staying 98 of 98 did not apply —
+  and nothing under `shacl/` was touched by any of the three tasks.
+
+  **The headline.** Validation costs **1.3 µs per focus node** on memstore and 9.4 µs on
+  kvstore for the reference configuration, with 7503 store reads either way. Compile is
+  37 µs, which matters more than it looks at ~200 processes per machine each compiling a
+  shapes graph at start-up.
+
+  **What the initiative got right.** The design phase's central worry was that the workload
+  was the risk rather than the harness, and that a badly chosen one would produce confident
+  numbers about the wrong thing. That was correct twice over: at 100 focus nodes the
+  figures were confidently wrong (`dense` timing faster than `clean` on an identical walk),
+  and per-configuration warm-up alone let the answer depend on the order of the
+  configuration list. Both were caught because the design had named the failure mode in
+  advance and the numbers were read rather than reported.
+
+  It was also right about the qualified-family knob. SHACL-T-0025 could reach an honest
+  answer precisely because a configuration without it existed by requirement rather than by
+  luck.
+
+  **What it got wrong, and both are recorded as wrong rather than reworded.**
+
+  1. **SHACL-T-0024's `Conformance` criterion was unmeetable.** It asked for zero
+     allocations over a whole validation; the package doc's "nothing at all" is a claim
+     about the *consumer*, and validation allocates per focus node by design. The
+     replacement is sharper — on a conforming graph the two walks are identical, so the
+     promise is an equality, and it holds exactly at 5518 = 5518.
+  2. **SHACL-T-0025's decisive argument assumed a freeing allocator.** Peak does not move
+     with the duplicate, but peak is a high-water mark of *live* bytes; under an arena the
+     caller pays the total, and the duplicate costs +1.2 MB per validation rather than
+     nothing. Caught by Greger at review. The verdict survived on an allocator-independent
+     argument; the reasoning behind it had to be replaced, and `bench` now asserts flat
+     memory in total bytes as well as peak so the package doc's promise holds under an
+     arena too.
+
+  Both were found by the same thing: a claim being checked against a number rather than
+  against another document.
+
+  **What this initiative leaves for someone else.** One engine change, evidence-backed and
+  deliberately not made: **compile a property shape's two qualified bounds into one
+  constraint that counts once and tests twice.** It removes +1000 reads and +1.2 MB with no
+  hot-path lookup and no live memory, and it dominates the cache SHACL-A-0002 considered on
+  every axis under every allocator. `compile_constraints` and `check_qualified`. Recorded
+  in the ADR's *As Measured* section and in `docs/handover-sparql.md`.
+
+  Also recorded and deliberately not acted on, per the Non-Goals: `alternative-path`
+  allocates 13018 times for 1.2x baseline's reads, which is the one place in the set where
+  the read count is a poor proxy for cost — worth knowing before anyone treats reads as a
+  stand-in for time.
+
+  **The pins are the lasting artefact.** Eight configurations, each with an exact read
+  count asserted on every run, identical across two backends and two widths. That is the
+  mechanism this family already trusts — `TOTAL_ENTRIES`, `ENABLED_ENTRIES`, the retired
+  progress floor — applied to the one performance metric that can carry it.
 
 - **2026-08-07 — Created in discovery.** Drafted at the close of SHACL-I-0002, from the
   gap list in `docs/handover-sparql.md` and the review trigger SHACL-A-0002 left unpullable.
