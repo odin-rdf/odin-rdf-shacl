@@ -2,6 +2,8 @@ package shacl
 
 import "base:runtime"
 
+import "core:text/regex"
+
 import rdf "rdf:rdf"
 
 // The compiled shapes model (SHACL-A-0001).
@@ -108,6 +110,14 @@ Constraint_Kind :: enum u8 {
 	Max_Inclusive,
 	Min_Exclusive,
 	Max_Exclusive,
+	// The string-based components (SHACL-T-0014). Pattern is the only one that
+	// owns anything: its regular expression is compiled once here rather than
+	// per value node.
+	Min_Length,
+	Max_Length,
+	Pattern,
+	Language_In,
+	Unique_Lang,
 }
 
 // Node_Kind is `sh:nodeKind` (§4.4.2), as a set of the three primitive kinds
@@ -129,16 +139,27 @@ NODE_KIND_BLANK_NODE_OR_LITERAL :: Node_Kind{.Blank_Node, .Literal}
 NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 
 // Constraint is one constraint component with its parameter. Which field
-// carries the parameter depends on kind: `count` for the cardinality
-// components, `term` for Class/Datatype/Has_Value and the four value-range
-// bounds, `node_kind` for Node_Kind, and `values` — a range into Shapes.values —
-// for In.
+// carries the parameter depends on kind: `count` for the cardinality components
+// and the two lengths, `term` for Class/Datatype/Has_Value and the four
+// value-range bounds, `node_kind` for Node_Kind, `values` — a range into
+// Shapes.values — for In and Language_In, and `pattern` for Pattern.
+//
+// `Unique_Lang` carries nothing at all. Its parameter is the boolean that
+// switches it on, and a constraint that is switched off is simply not compiled,
+// so by the time one exists there is nothing left to record.
+//
+// **`pattern` is the first thing a Constraint owns.** Every other field either
+// borrows the model's term table or is a plain value; a compiled regular
+// expression is an allocation, made once at compile time so that matching a
+// value node costs no compilation, and freed by `shapes_destroy` with the
+// model's own allocator.
 Constraint :: struct {
 	kind:      Constraint_Kind,
 	count:     int,
 	term:      rdf.Term,
 	node_kind: Node_Kind,
 	values:    Span,
+	pattern:   regex.Regular_Expression,
 }
 
 // Message is one `sh:message`. A shape may carry several, typically one per
@@ -207,6 +228,14 @@ Shapes :: struct {
 // a failed compile still returns one, because the Error's terms borrow from
 // its table.
 shapes_destroy :: proc(s: ^Shapes) {
+	// The compiled regular expressions, which are the one thing in the model
+	// that is not a term or an index. A partly-compiled model may hold some, so
+	// this runs on the failure path too.
+	for c in s.constraints {
+		if c.kind == .Pattern {
+			regex.destroy(c.pattern, s.allocator)
+		}
+	}
 	delete(s.shapes)
 	delete(s.targets)
 	delete(s.constraints)

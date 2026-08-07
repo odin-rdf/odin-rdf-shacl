@@ -96,11 +96,11 @@
 // the violation count — it is a graph, and that is what it is for.
 //
 //
-// # Six contracts a caller should know
+// # Seven contracts a caller should know
 //
-// The first two are this engine's answers to being incomplete, the next two are
-// SHACL-A-0001 decisions, and the rest are the spec's; each surprises someone
-// otherwise.
+// The first three are this engine's answers to being incomplete or to being
+// written in Odin, the next two are SHACL-A-0001 decisions, and the rest are the
+// spec's; each surprises someone otherwise.
 //
 // **An unimplemented constraint parameter is ignored, and `shapes_ignored`
 // says which.** Erroring on an unrecognised `sh:` parameter would reject the
@@ -122,6 +122,16 @@
 // lexical form can only be called invalid against a space that is known. The
 // same machinery decides `sh:minInclusive` and its three companions, so the two
 // answers can never diverge.
+//
+// **`sh:pattern` is a different regular-expression dialect, and says so.**
+// SHACL defines it by XPath `fn:matches` — XML Schema regular expressions, flags
+// `i s m x q`. This engine uses `core:text/regex`, which keeps the family free of
+// external dependencies and is not that dialect. The common subset agrees;
+// beyond it, behaviour may differ. `i`, `m`, and `x` map across, and **`s` and
+// `q` are rejected at compile time** (`Error_Kind.Flags_Unsupported`), as is a
+// pattern the engine cannot compile (`Error_Kind.Pattern_Ill_Formed`). Refusing
+// beats ignoring: a silently-dropped flag validates against a pattern nobody
+// wrote and then reports conformance.
 //
 // **One data graph.** SHACL is specified against a single RDF graph;
 // odin-rdf-store holds a quad dataset. Validation reads one caller-named

@@ -1,6 +1,7 @@
 package shacl
 
 import "core:strings"
+import "core:text/regex"
 
 import rdf "rdf:rdf"
 import store "store:store"
@@ -28,11 +29,21 @@ compile_constraints :: proc(
 	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
 	$DESTROY: proc(it: ^It),
 ) -> Error {
-	// The cardinality components.
-	counts := [2]struct {
-		iri:  string,
-		kind: Constraint_Kind,
-	}{{MIN_COUNT, .Min_Count}, {MAX_COUNT, .Max_Count}}
+	// The components whose parameter is a non-negative integer: the two
+	// cardinalities (§4.2) and the two string lengths (§4.5.1–4.5.2). They read
+	// identically and cite different sections, so the error kinds travel in the
+	// table rather than being decided by the reader.
+	counts := [4]struct {
+		iri:          string,
+		kind:         Constraint_Kind,
+		not_integer:  Error_Kind,
+		negative:     Error_Kind,
+	} {
+		{MIN_COUNT, .Min_Count, .Count_Not_Integer, .Count_Negative},
+		{MAX_COUNT, .Max_Count, .Count_Not_Integer, .Count_Negative},
+		{MIN_LENGTH, .Min_Length, .Length_Not_Integer, .Length_Negative},
+		{MAX_LENGTH, .Max_Length, .Length_Not_Integer, .Length_Negative},
+	}
 	for entry in counts {
 		if !v.found[entry.iri] {
 			continue
@@ -43,10 +54,10 @@ compile_constraints :: proc(
 			term := materialize_term(s, load, load_data, id)
 			n, ok := integer_value(term)
 			if !ok {
-				return Error{.Count_Not_Integer, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
+				return Error{entry.not_integer, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
 			}
 			if n < 0 {
-				return Error{.Count_Negative, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
+				return Error{entry.negative, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
 			}
 			append(&s.constraints, Constraint{kind = entry.kind, count = n})
 		}
@@ -96,26 +107,140 @@ compile_constraints :: proc(
 		}
 	}
 
-	// sh:in takes an RDF list of terms. The members go into the model's flat
-	// value array and are named by span, like every other child relation.
-	if v.found[IN] {
-		vals := objects_of(r, shape_id, v.ids[IN], MATCH, NEXT, DESTROY)
+	// The components taking an RDF list of terms: `sh:in` (§4.6.1) and
+	// `sh:languageIn` (§4.5.4). The members go into the model's flat value array
+	// and are named by span, like every other child relation.
+	lists := [2]struct {
+		iri:      string,
+		kind:     Constraint_Kind,
+		not_list: Error_Kind,
+	}{{IN, .In, .In_Not_A_List}, {LANGUAGE_IN, .Language_In, .Language_In_Not_A_List}}
+	for entry in lists {
+		if !v.found[entry.iri] {
+			continue
+		}
+		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
 		defer delete(vals)
 		for head in vals {
 			items, ok := list_items(r, head, MATCH, NEXT, DESTROY)
 			defer delete(items)
 			if !ok {
-				return Error{.In_Not_A_List, shape_node, intern(&s.terms, rdf.IRI(IN))}
+				return Error{entry.not_list, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
 			}
 			start := len(s.values)
 			for id in items {
 				append(&s.values, materialize_term(s, load, load_data, id))
 			}
-			append(&s.constraints, Constraint{kind = .In, values = Span{start, len(s.values) - start}})
+			append(&s.constraints, Constraint{kind = entry.kind, values = Span{start, len(s.values) - start}})
+		}
+	}
+
+	// sh:pattern with sh:flags (§4.5.3). The regular expression is compiled
+	// here, once, so that matching a value node is a run of an already-built
+	// program — and so that a pattern this engine cannot compile, or a flag it
+	// does not have, is an ill-formed shapes graph rather than a surprise
+	// halfway through a validation.
+	//
+	// `sh:flags` is read before the loop because it is one parameter for the
+	// shape: two `sh:pattern` values on one shape share it.
+	if v.found[PATTERN] {
+		flags: regex.Flags
+		if v.found[FLAGS] {
+			ids := objects_of(r, shape_id, v.ids[FLAGS], MATCH, NEXT, DESTROY)
+			defer delete(ids)
+			for id in ids {
+				parsed, ok := regex_flags(materialize_term(s, load, load_data, id))
+				if !ok {
+					return Error{.Flags_Unsupported, shape_node, intern(&s.terms, rdf.IRI(FLAGS))}
+				}
+				flags |= parsed
+			}
+		}
+		vals := objects_of(r, shape_id, v.ids[PATTERN], MATCH, NEXT, DESTROY)
+		defer delete(vals)
+		for id in vals {
+			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			if !is_literal {
+				return Error{.Pattern_Ill_Formed, shape_node, intern(&s.terms, rdf.IRI(PATTERN))}
+			}
+			compiled, err := regex.create(literal.lexical, flags, s.allocator)
+			if err != nil {
+				return Error{.Pattern_Ill_Formed, shape_node, intern(&s.terms, rdf.IRI(PATTERN))}
+			}
+			append(&s.constraints, Constraint{kind = .Pattern, pattern = compiled})
+		}
+	}
+
+	// sh:uniqueLang (§4.5.5), whose parameter switches the component on rather
+	// than configuring it — so a `false` compiles to no constraint at all and
+	// the Constraint carries nothing.
+	//
+	// **`true` means the term `"true"^^xsd:boolean` and nothing else**, which is
+	// a term comparison in a file that has spent two tasks learning to compare
+	// values. `property/uniqueLang-002` is why: it declares
+	// `sh:uniqueLang "1"^^xsd:boolean` over two `@en` literals — which would
+	// violate if the component were active — and expects `sh:conforms true`.
+	//
+	// **This follows the suite's reading, and the reading is arguable.** The
+	// entry carries a comment explaining itself: "Only true is mentioned in the
+	// spec, meaning that `1` will not activate the constraint." That is a
+	// judgement about §4.5.5's prose, and it cuts against the spec's own
+	// normative validator, which tests the parameter with SPARQL `=` — and
+	// `"1"^^xsd:boolean = true` is *true* by value. The entry is `sht:approved`,
+	// and this family's rule is that the suite defines done, so the suite wins.
+	// Recorded rather than smoothed over: if a later revision of the corpus
+	// reverses it, one comparison here changes and this note is the reason why.
+	if v.found[UNIQUE_LANG] {
+		vals := objects_of(r, shape_id, v.ids[UNIQUE_LANG], MATCH, NEXT, DESTROY)
+		defer delete(vals)
+		for id in vals {
+			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
+				return Error{.Unique_Lang_Not_Boolean, shape_node, intern(&s.terms, rdf.IRI(UNIQUE_LANG))}
+			}
+			if literal.lexical == "true" {
+				append(&s.constraints, Constraint{kind = .Unique_Lang})
+			}
 		}
 	}
 
 	return Error{}
+}
+
+// regex_flags reads an `sh:flags` string into the flags this engine's regex
+// package understands, and fails on anything else.
+//
+// **This is where the dialect divergence is enforced rather than hidden.** SHACL
+// defines `sh:pattern` by XPath's `fn:matches`, whose flags are `i s m x q`;
+// `core:text/regex` offers `m i x u`. Three of those five map across; `s` (dot
+// matches newline) and `q` (treat the pattern as a literal) have no equivalent
+// and are rejected. Silently ignoring one would mean validating against a
+// different pattern than the shapes graph asked for and reporting conformance —
+// which is the failure mode this whole engine's ignored-parameter record exists
+// to prevent, applied one level down.
+//
+// `u` is not accepted either, and for the opposite reason: it is Odin's, not
+// SHACL's, and this package should not invent flags the specification does not
+// define.
+@(private = "file")
+regex_flags :: proc(term: rdf.Term) -> (flags: regex.Flags, ok: bool) {
+	literal, is_literal := term.(rdf.Literal)
+	if !is_literal {
+		return {}, false
+	}
+	for i in 0 ..< len(literal.lexical) {
+		switch literal.lexical[i] {
+		case 'i':
+			flags |= {.Case_Insensitive}
+		case 'm':
+			flags |= {.Multiline}
+		case 'x':
+			flags |= {.Ignore_Whitespace}
+		case:
+			return {}, false
+		}
+	}
+	return flags, true
 }
 
 // The `sh:`-namespace predicates this engine acts on. Everything the compiler
@@ -156,6 +281,15 @@ IMPLEMENTED_PARAMETERS := []string {
 	MAX_INCLUSIVE,
 	MIN_EXCLUSIVE,
 	MAX_EXCLUSIVE,
+	// The string-based components (SHACL-T-0014). `sh:flags` is here because it
+	// is read and acted on, even though it is a modifier rather than a component
+	// of its own — a shapes graph using it is not using anything unimplemented.
+	MIN_LENGTH,
+	MAX_LENGTH,
+	PATTERN,
+	FLAGS,
+	LANGUAGE_IN,
+	UNIQUE_LANG,
 }
 
 // The spec's non-validating annotation properties: recognised, deliberately

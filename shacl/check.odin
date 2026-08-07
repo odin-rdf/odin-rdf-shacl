@@ -1,5 +1,10 @@
 package shacl
 
+import "core:strings"
+import "core:text/regex"
+import regex_common "core:text/regex/common"
+import "core:unicode/utf8"
+
 import rdf "rdf:rdf"
 import store "store:store"
 
@@ -37,7 +42,11 @@ Constraint_Scope :: enum u8 {
 // `check_node_set`, and getting it wrong is the failure mode described above.
 constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	switch kind {
-	case .Min_Count, .Max_Count, .Has_Value:
+	// `sh:uniqueLang` is the third set-scoped component and the one that reads
+	// least like it: it looks per-value — "is this literal's tag unique?" — and
+	// is not, because uniqueness is a property of the set. §4.5.5 asks for one
+	// result per language used twice, which no per-value check could produce.
+	case .Min_Count, .Max_Count, .Has_Value, .Unique_Lang:
 		return .Node_Set
 	case .Class,
 	     .Datatype,
@@ -46,7 +55,11 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Min_Inclusive,
 	     .Max_Inclusive,
 	     .Min_Exclusive,
-	     .Max_Exclusive:
+	     .Max_Exclusive,
+	     .Min_Length,
+	     .Max_Length,
+	     .Pattern,
+	     .Language_In:
 		return .Value
 	}
 	return .Value
@@ -117,6 +130,75 @@ check_node_set :: proc(
 			}
 		}
 		emit_result(v, shape_index, values.focus, {}, false, .Has_Value)
+
+	case .Unique_Lang:
+		check_unique_lang(v, shape_index, values)
+	}
+}
+
+// check_unique_lang is `sh:uniqueLang` (§4.5.5): no two value nodes may carry
+// the same non-empty language tag.
+//
+// **One result per language used twice, not one per shape and not one per
+// node.** `property/uniqueLang-001` is what pins it: its second focus node has
+// three `@en` values and two `@de` values and expects exactly *two* results,
+// both naming the focus node and neither carrying an `sh:value` — there is no
+// single node to blame when the fault is that two of them agree.
+//
+// Like the cardinality components, it applies to property shapes only. A node
+// shape has exactly one value node, so no two of them could share anything.
+//
+// The tags are cloned because they are read from materialised terms, and on the
+// persistent backend a materialised term's strings die with it — a `map` keyed
+// on the borrowed tag would be reading freed database bytes by the second
+// iteration. The comparison is `equal_fold` because RDF language tags are
+// case-insensitive; see `language_matches` for the same rule stated where it
+// matters more.
+@(private = "file")
+check_unique_lang :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
+	if v.s.shapes[shape_index].path < 0 {
+		return
+	}
+	tags := make([dynamic]string, v.allocator)
+	defer {
+		for tag in tags {
+			delete(tag, v.allocator)
+		}
+		delete(tags)
+	}
+
+	for n in 0 ..< value_set_count(values) {
+		term, owned := materialize(v, value_set_at(values, n))
+		if literal, is_literal := term.(rdf.Literal); is_literal && literal.language != "" {
+			append(&tags, strings.clone(literal.language, v.allocator))
+		}
+		if owned {
+			rdf.destroy_term(term, v.allocator)
+		}
+	}
+
+	// A quadratic scan over one focus node's value nodes, which is a handful.
+	// Reporting on the *first* occurrence of each tag is what keeps three `@en`
+	// values to one result rather than two.
+	for i in 0 ..< len(tags) {
+		seen_earlier := false
+		repeats := 0
+		for j in 0 ..< len(tags) {
+			if !strings.equal_fold(tags[i], tags[j]) {
+				continue
+			}
+			if j < i {
+				seen_earlier = true
+				break
+			}
+			repeats += 1
+		}
+		if !seen_earlier && repeats > 1 {
+			emit_result(v, shape_index, values.focus, {}, false, .Unique_Lang)
+		}
+		if v.stopped {
+			return
+		}
 	}
 }
 
@@ -143,7 +225,11 @@ check_value :: proc(
 		ok = check_in(v, c, value)
 	case .Min_Inclusive, .Max_Inclusive, .Min_Exclusive, .Max_Exclusive:
 		ok = check_range(v, c, value)
-	case .Min_Count, .Max_Count, .Has_Value:
+	case .Min_Length, .Max_Length, .Pattern:
+		ok = check_string(v, c, value)
+	case .Language_In:
+		ok = check_language_in(v, c, value)
+	case .Min_Count, .Max_Count, .Has_Value, .Unique_Lang:
 		return
 	}
 	if !ok {
@@ -291,6 +377,123 @@ check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 		return order == .Less
 	}
 	return false
+}
+
+// check_string is the three components that work on a value node's **string**:
+// `sh:minLength`, `sh:maxLength` (§4.5.1–4.5.2), and `sh:pattern` (§4.5.3).
+//
+// They share a procedure because they share the hard part, which is deciding
+// what a node's string *is*. §4.5 answers it the same way for all three, and it
+// is not the answer a reader expects: a literal contributes its lexical form,
+// **an IRI contributes the IRI itself**, and a blank node contributes nothing
+// and therefore always violates.
+//
+// `node/minLength-001` pins all three in one entry. `<a:b>` is an IRI of length
+// three and violates `sh:minLength 4`; `"2017-03-29"^^xsd:date` is ten
+// characters of lexical form and passes; a blank node found by `sh:targetClass`
+// violates. `node/pattern-001` does the same for the regular expression, down to
+// matching `"777777"@mi` on its lexical form and ignoring the tag.
+//
+// **Length is in code points, not bytes.** §4.5.1 counts the string length as
+// XPath's `fn:string-length` does, which counts characters; a byte count would
+// make any non-ASCII lexical form longer than it is. No corpus entry is
+// non-ASCII, so this is the spec being followed rather than a test passing.
+@(private = "file")
+check_string :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
+	term, owned := materialize(v, value)
+	defer if owned {
+		rdf.destroy_term(term, v.allocator)
+	}
+	text, has_text := node_string(term)
+	if !has_text {
+		return false
+	}
+	#partial switch c.kind {
+	case .Min_Length:
+		return utf8.rune_count_in_string(text) >= c.count
+	case .Max_Length:
+		return utf8.rune_count_in_string(text) <= c.count
+	case .Pattern:
+		// A capture is required by the API and unwanted here — the question is
+		// whether the pattern matched at all — so it is a fixed-size stack
+		// buffer rather than an allocation on the engine's inner loop.
+		positions: [regex_common.MAX_CAPTURE_GROUPS][2]int
+		groups: [regex_common.MAX_CAPTURE_GROUPS]string
+		capture := regex.Capture {
+			pos    = positions[:],
+			groups = groups[:],
+		}
+		_, matched := regex.match_with_preallocated_capture(c.pattern, text, &capture)
+		return matched
+	}
+	return false
+}
+
+// node_string is what §4.5 means by a value node's string: a literal's lexical
+// form, an IRI's own text, and nothing at all for a blank node — which is how
+// the spec makes a blank node violate every string component without any of
+// them naming it.
+@(private = "file")
+node_string :: proc(term: rdf.Term) -> (text: string, ok: bool) {
+	#partial switch t in term {
+	case rdf.Literal:
+		return t.lexical, true
+	case rdf.IRI:
+		return string(t), true
+	}
+	return "", false
+}
+
+// check_language_in is `sh:languageIn` (§4.5.4): the value node must be a
+// language-tagged literal whose tag matches one of the listed language ranges.
+//
+// **Matching is RFC 4647 basic filtering**, not equality, which is why
+// `property/languageIn-001` expects `"Hill"@en-NZ` to satisfy the range `en`.
+// A range matches a tag that equals it or extends it at a subtag boundary, so
+// `en` matches `en-NZ` and not `english`.
+//
+// It is also why this component **cannot fire the family's language-tag
+// trigger**, which is worth saying because this is the one task that could have.
+// Basic filtering is case-insensitive by definition, so a comparison here can
+// never depend on whether the parser folded a tag's case — the question the
+// trigger exists to force is not asked.
+@(private = "file")
+check_language_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
+	term, owned := materialize(v, value)
+	defer if owned {
+		rdf.destroy_term(term, v.allocator)
+	}
+	literal, is_literal := term.(rdf.Literal)
+	if !is_literal || literal.language == "" {
+		return false
+	}
+	for i in 0 ..< c.values.count {
+		allowed, is_allowed_literal := v.s.values[c.values.start + i].(rdf.Literal)
+		if is_allowed_literal && language_matches(literal.language, allowed.lexical) {
+			return true
+		}
+	}
+	return false
+}
+
+// language_matches is RFC 4647 §3.3.1 basic filtering: a range matches a tag
+// that equals it, or that extends it at a subtag boundary. Case-insensitive,
+// per RFC 4647 and RFC 5646 both.
+@(private = "file")
+language_matches :: proc(tag, range: string) -> bool {
+	if range == "" {
+		return false
+	}
+	if range == "*" {
+		return tag != ""
+	}
+	if len(tag) < len(range) {
+		return false
+	}
+	if !strings.equal_fold(tag[:len(range)], range) {
+		return false
+	}
+	return len(tag) == len(range) || tag[len(range)] == '-'
 }
 
 // node_kind_of is the value node's node kind, as the one-element set the

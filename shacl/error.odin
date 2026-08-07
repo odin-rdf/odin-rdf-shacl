@@ -35,6 +35,12 @@ Error_Kind :: enum {
 	Deactivated_Not_Boolean, // sh:deactivated whose value is not a boolean
 	In_Not_A_List, // sh:in whose value is not an RDF list
 	Shape_Expected, // a value where a shape was required
+	Length_Not_Integer, // sh:minLength / sh:maxLength whose value is not an integer
+	Length_Negative, // a negative length
+	Pattern_Ill_Formed, // an sh:pattern this engine's regex compiler rejects
+	Flags_Unsupported, // an sh:flags letter this engine's regex engine does not have
+	Language_In_Not_A_List, // sh:languageIn whose value is not an RDF list
+	Unique_Lang_Not_Boolean, // sh:uniqueLang whose value is not an xsd:boolean
 }
 
 // error_message returns a static description of kind. Allocation-free, and
@@ -69,6 +75,18 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "sh:in value is not an RDF list (§4.6.1)"
 	case .Shape_Expected:
 		return "value must be a shape, an IRI or a blank node (§2.1.1)"
+	case .Length_Not_Integer:
+		return "length parameter is not an xsd:integer (§4.5)"
+	case .Length_Negative:
+		return "length parameter is negative (§4.5)"
+	case .Pattern_Ill_Formed:
+		return "sh:pattern is not a regular expression this engine can compile (§4.5.3)"
+	case .Flags_Unsupported:
+		return "sh:flags names a flag this engine does not support (§4.5.3)"
+	case .Language_In_Not_A_List:
+		return "sh:languageIn value is not an RDF list (§4.5.4)"
+	case .Unique_Lang_Not_Boolean:
+		return "sh:uniqueLang is not an xsd:boolean (§4.5.5)"
 	}
 	return "unknown error"
 }

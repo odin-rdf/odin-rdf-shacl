@@ -66,6 +66,18 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 		return MIN_EXCLUSIVE_COMPONENT
 	case .Max_Exclusive:
 		return MAX_EXCLUSIVE_COMPONENT
+	case .Min_Length:
+		return MIN_LENGTH_COMPONENT
+	case .Max_Length:
+		return MAX_LENGTH_COMPONENT
+	// `sh:flags` has no component of its own: it modifies the pattern, and a
+	// result from the pair names the pattern's.
+	case .Pattern:
+		return PATTERN_COMPONENT
+	case .Language_In:
+		return LANGUAGE_IN_COMPONENT
+	case .Unique_Lang:
+		return UNIQUE_LANG_COMPONENT
 	}
 	return ""
 }

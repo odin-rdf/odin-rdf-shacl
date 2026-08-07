@@ -742,8 +742,8 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 			rdfs:label "not a sh: predicate at all" ;
 			sh:minCount 1 ;
 			sh:minInclusive 2 ;
-			sh:pattern "^a" ;
-			sh:property [ sh:path ex:p ; sh:maxLength 5 ; sh:pattern "^b" ] .
+			sh:sparql ex:Query1 ;
+			sh:property [ sh:path ex:p ; sh:sparql ex:Query2 ; sh:entailment ex:Regime ] .
 		`,
 	) {
 		return
@@ -759,9 +759,15 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 		}
 	}
 
-	// Unimplemented components are recorded, from every shape and not only the
-	// root — sh:maxLength is on the property shape.
-	for iri in ([]string{shacl.NS + "pattern", shacl.NS + "maxLength"}) {
+	// Unimplemented parameters are recorded, from every shape and not only the
+	// root — sh:entailment is on the property shape alone.
+	//
+	// The examples are SHACL-SPARQL's deliberately. Earlier revisions of this
+	// test used whichever component was next on the catalogue's list, and every
+	// task that landed one had to come here and pick another; sh:sparql and
+	// sh:entailment belong to a phase this initiative is explicitly not part of,
+	// so they will still be unimplemented when it closes.
+	for iri in ([]string{shacl.NS + "sparql", shacl.NS + "entailment"}) {
 		testing.expectf(t, got[iri], "%s is not implemented and should have been recorded", iri)
 	}
 
@@ -774,6 +780,8 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 	for iri in ([]string {
 			shacl.NS + "minCount",
 			shacl.NS + "minInclusive",
+			shacl.NS + "pattern",
+			shacl.NS + "maxLength",
 			shacl.NS + "targetNode",
 			shacl.NS + "property",
 			shacl.NS + "path",
@@ -785,7 +793,7 @@ test_ignored_parameters_are_recorded :: proc(t: ^testing.T) {
 		testing.expectf(t, !got[iri], "%s should not be recorded as ignored", iri)
 	}
 
-	// sh:pattern appears on two shapes and is recorded once: the record is a
+	// sh:sparql appears on two shapes and is recorded once: the record is a
 	// property of the compile, not a list of occurrences.
 	testing.expect_value(t, len(ignored), len(got))
 	testing.expect_value(t, len(got), 2)

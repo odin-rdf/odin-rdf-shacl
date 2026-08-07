@@ -241,7 +241,7 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 			sh:node ex:ViaNode ;
 			sh:xone ( ex:ViaXone ) ;
 			sh:name "inert" ;
-			sh:pattern "^a" .
+			sh:sparql ex:Query .
 		`,
 		&s,
 	) {
@@ -254,10 +254,11 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(s.shapes), 3)
 
-	// sh:pattern and the two shape-expecting parameters, which discovery reads
+	// sh:sparql and the two shape-expecting parameters, which discovery reads
 	// but nothing validates yet. sh:name is inert and sh:targetNode is
-	// implemented, so neither appears. (This said sh:minInclusive until
-	// SHACL-T-0013 implemented it, which is the record working as intended.)
+	// implemented, so neither appears. (This named sh:minInclusive, then
+	// sh:pattern, and each task that implemented one had to change it —
+	// SHACL-SPARQL is out of this initiative's scope entirely, so it holds.)
 	ignored: map[string]bool
 	defer delete(ignored)
 	for term in shacl.shapes_ignored(&s) {
@@ -266,7 +267,7 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect_value(t, len(ignored), 3)
-	for iri in ([]string{shacl.NS + "pattern", shacl.NODE, shacl.XONE}) {
+	for iri in ([]string{shacl.NS + "sparql", shacl.NODE, shacl.XONE}) {
 		testing.expectf(t, ignored[iri], "%s should have been recorded as unimplemented", iri)
 	}
 	for iri in ([]string{shacl.NAME, shacl.TARGET_NODE}) {

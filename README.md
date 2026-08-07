@@ -15,11 +15,14 @@ end to end, and four of the W3C SHACL suite's seven `core/` directories are
 green — `core/targets`, `core/path`, `core/misc`, and
 `core/validation-reports`, every entry, against both storage backends, at both
 `Term_ID` widths. What is missing is most of the SHACL Core constraint
-catalogue. Eleven components validate: the spine's `sh:minCount`,
+catalogue. Sixteen components validate: the spine's `sh:minCount`,
 `sh:maxCount`, `sh:class`, `sh:datatype`, `sh:nodeKind`, `sh:hasValue`, and
-`sh:in`, which is exactly what those four directories exercise, plus the four
+`sh:in`, which is exactly what those four directories exercise; the four
 value-range bounds `sh:minInclusive`, `sh:maxInclusive`, `sh:minExclusive`, and
-`sh:maxExclusive`. The string components, `sh:closed`, the logical combinators
+`sh:maxExclusive`; and the string-based `sh:minLength`, `sh:maxLength`,
+`sh:pattern` with `sh:flags`, `sh:languageIn`, and `sh:uniqueLang`. The
+property-pair components (`sh:equals`, `sh:disjoint`, `sh:lessThan`,
+`sh:lessThanOrEquals`), `sh:closed`, the logical combinators
 (`sh:and`/`sh:or`/`sh:not`/`sh:xone`), and the shape-based constraints
 (`sh:node`, `sh:qualifiedValueShape`) are the rest of the second initiative,
 and the remaining suite directories stay disabled until they land. See
@@ -44,6 +47,22 @@ xsd:double, xsd:dateTime, xsd:date, and rdf:langString. **For any other
 datatype the check is skipped rather than failed**: an engine may call a
 lexical form invalid only when it knows the space, so `sh:datatype rdf:HTML`
 accepts whatever it is given. The set grows on evidence.
+
+**`sh:pattern` is not XPath's regular expression dialect, and an unsupported
+flag is an error rather than an ignore.** SHACL defines `sh:pattern` by XPath's
+`fn:matches`, which is XML Schema's regular expression language with the flags
+`i s m x q`. This engine uses Odin's `core:text/regex`, keeping the family's
+no-external-dependencies rule, and that is a *different dialect*: the common
+subset — literals, anchors, character classes, alternation, the usual
+quantifiers — behaves the same, and anything beyond it may not. Of the flags,
+`i`, `m`, and `x` map across; **`s` (dot matches newline) and `q` (treat the
+pattern as a literal) have no equivalent and are rejected at compile time** with
+`Error_Kind.Flags_Unsupported`. A pattern the engine cannot compile is
+`Error_Kind.Pattern_Ill_Formed`. Both are refusals rather than silent
+downgrades, because validating against a pattern other than the one written and
+then reporting conformance is the failure worth avoiding. If you hit the
+dialect gap, that is evidence worth filing — the choice was made by measuring
+the W3C corpus, whose four patterns all sit in the common subset.
 
 This is a peer of [odin-rdf-sparql](../odin-rdf-sparql) on the same
 foundation, not a layer above it. **SHACL Core has no dependency on the query

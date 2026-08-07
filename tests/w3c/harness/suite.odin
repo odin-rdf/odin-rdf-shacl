@@ -72,8 +72,8 @@ Suite :: struct {
 SUITES := []Suite {
 	{"core/targets", 7, 7, true, 0},
 	{"core/path", 13, 13, true, 0},
-	{"core/node", 32, 32, false, 15},
-	{"core/property", 38, 38, false, 16},
+	{"core/node", 32, 32, false, 20},
+	{"core/property", 38, 38, false, 22},
 	{"core/misc", 5, 5, true, 0},
 	{"core/complex", 2, 2, false, 0},
 	{"core/validation-reports", 1, 1, true, 0},
@@ -109,6 +109,16 @@ ENABLED_ENTRIES :: 26
 //
 // **31 at SHACL-T-0013**, which is every one of the ten value-range entries in
 // the corpus and nothing else: `core/node` gained its six `min`/`maxInclusive`
-// and `min`/`maxExclusive` entries, `core/property` its four. The catalogue's
-// remaining work is 38 entries of the original 51.
-PROGRESS_FLOOR :: 31
+// and `min`/`maxExclusive` entries, `core/property` its four.
+//
+// **42 at SHACL-T-0014**, again the whole family at once: the eleven remaining
+// `minLength`, `maxLength`, `pattern`, `languageIn`, and `uniqueLang` entries.
+// `property/uniqueLang-002` was already in the floor and stayed there for a
+// different reason — it used to pass because nothing implemented `sh:uniqueLang`,
+// and now passes because the implementation reads `"1"^^xsd:boolean` as not
+// switching the component on, which is what that entry exists to check. It is
+// the one entry in the tree that went from passing-by-inaction to
+// passing-by-validation, which is the transition the note above `core/complex`
+// warns can go the other way. The catalogue's remaining work is 27 entries of
+// the original 51.
+PROGRESS_FLOOR :: 42

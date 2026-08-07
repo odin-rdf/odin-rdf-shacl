@@ -854,3 +854,229 @@ test_value_range_incomparable_violates :: proc(t: ^testing.T) {
 		"incomparable violates",
 	)
 }
+
+// ---- The string components (SHACL-T-0014) --------------------------------
+
+@(private = "file")
+STRING_SHAPES :: PREFIX + `
+# §4.5 asks all three of these for the value node's *string*, and the answer is
+# not the same shape as "the lexical form": an IRI contributes itself, a blank
+# node contributes nothing.
+ex:Length a sh:NodeShape ; sh:minLength 4 ; sh:maxLength 5 ;
+	sh:targetNode <a:b> ;                 # an IRI, three characters
+	sh:targetNode <a:bcde> ;              # an IRI, six
+	sh:targetNode "Hell" ;
+	sh:targetNode "Hel" ;
+	sh:targetNode "Hello!" ;
+	sh:targetNode "2017-03-29"^^xsd:date ;  # ten characters of lexical form
+	sh:targetNode "Hell"@en .
+
+ex:Blank a sh:NodeShape ; sh:minLength 0 ; sh:targetNode ex:hasBlank ;
+	sh:property [ sh:path ex:p ; sh:minLength 0 ] .
+
+# Length counts code points, not bytes: "æøå" is three characters and six bytes.
+ex:Runes a sh:NodeShape ; sh:maxLength 3 ; sh:targetNode "æøå" .
+`
+
+@(private = "file")
+STRING_DATA :: PREFIX + `
+ex:hasBlank ex:p [ ex:q "irrelevant" ] .
+`
+
+// What §4.5 means by a value node's string, which is the part of these three
+// components that is not obvious.
+//
+// A blank node has no string and so violates **even `sh:minLength 0`**, which
+// every other reading would make vacuously true — that is the case worth a test,
+// because an implementation that reached for the lexical form and defaulted to
+// "" would pass every other assertion here and fail only this one.
+@(test)
+test_string_length_over_nodes_that_are_not_literals :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, STRING_SHAPES, STRING_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// <a:b> is three characters of IRI, so it is too short; <a:bcde> is
+			// six, so it is too long. Neither is a literal.
+			"Length|MinLengthConstraintComponent|?a:b|?a:b",
+			"Length|MaxLengthConstraintComponent|?a:bcde|?a:bcde",
+			"Length|MinLengthConstraintComponent|?\"Hel\"|?\"Hel\"",
+			"Length|MaxLengthConstraintComponent|?\"Hello!\"|?\"Hello!\"",
+			// A date's lexical form is ten characters; the tag on "Hell"@en is
+			// not part of its string, so it passes at four.
+			"Length|MaxLengthConstraintComponent|?\"2017-03-29\"|?\"2017-03-29\"",
+			// The blank node reached by ex:p, against a bound of zero.
+			"_:|MinLengthConstraintComponent|hasBlank|_:",
+		},
+		"string length",
+	)
+}
+
+@(private = "file")
+PATTERN_SHAPES :: PREFIX + `
+ex:Anchored a sh:NodeShape ; sh:pattern "^[2-8][0-9]*$" ;
+	sh:targetNode 42 ; sh:targetNode 9 ; sh:targetNode "3456" ; sh:targetNode ex:Test .
+
+# Unanchored, so this is a search rather than a full match — which is what
+# XPath's fn:matches does and what property/pattern-001 depends on.
+ex:Contains a sh:NodeShape ; sh:pattern "Joh" ;
+	sh:targetNode "John Doe" ; sh:targetNode "john doe" .
+
+ex:Insensitive a sh:NodeShape ; sh:pattern "joh" ; sh:flags "i" ;
+	sh:targetNode "John Doe" ; sh:targetNode "john doe" ; sh:targetNode "Jane" .
+`
+
+// sh:pattern, including the two things about it that are easy to get wrong: it
+// searches rather than matching the whole string, and `sh:flags` is one
+// parameter for the shape rather than one per pattern.
+@(test)
+test_pattern_searches_and_honours_flags :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, PATTERN_SHAPES, STRING_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Anchored|PatternConstraintComponent|?\"9\"|?\"9\"",
+			// An IRI is matched on the IRI, which no anchored numeric pattern fits.
+			"Anchored|PatternConstraintComponent|?Test|?Test",
+			"Contains|PatternConstraintComponent|?\"john doe\"|?\"john doe\"",
+			"Insensitive|PatternConstraintComponent|?\"Jane\"|?\"Jane\"",
+		},
+		"pattern",
+	)
+}
+
+// An `sh:flags` letter this engine's regex package does not have is an
+// ill-formed shapes graph, not a silent downgrade.
+//
+// This is the whole reason the divergence is worth documenting: `s` is a legal
+// XPath flag and SHACL defines `sh:pattern` by XPath, so a shapes graph is
+// entitled to use it. Ignoring it would validate against a *different* pattern
+// than the one that was written and then report conformance.
+@(test)
+test_an_unsupported_flag_is_an_error :: proc(t: ^testing.T) {
+	f: Fixture
+	defer shacl.shapes_destroy(&f.shapes)
+	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:pattern "a.b" ; sh:flags "s" .`
+
+	dictionary: memstore.Dictionary
+	memstore.dictionary_init(&dictionary)
+	defer memstore.dictionary_destroy(&dictionary)
+	dataset: memstore.Dataset
+	memstore.dataset_init(&dataset)
+	defer memstore.dataset_destroy(&dataset)
+	_, load_err := memstore.load_turtle(&dictionary, &dataset, transmute([]byte)source)
+	if !testing.expectf(t, load_err.message == "", "fixture did not parse: %s", load_err.message) {
+		return
+	}
+
+	err := compile(&f.shapes, &dictionary, &dataset)
+	testing.expect_value(t, err.kind, shacl.Error_Kind.Flags_Unsupported)
+}
+
+@(private = "file")
+LANGUAGE_SHAPES :: PREFIX + `
+ex:Langs a sh:NodeShape ; sh:languageIn ( "en" "mi" ) ;
+	sh:targetNode "Hill"@en-NZ ;      # basic filtering: a range matches a longer tag
+	sh:targetNode "Mountain"@EN ;     # and does so case-insensitively
+	sh:targetNode "Maunga"@mi ;
+	sh:targetNode "Berg"@de ;
+	sh:targetNode "Plain" ;           # no tag at all
+	sh:targetNode ex:NotALiteral ;
+	sh:targetNode "english"@english . # a prefix, but not at a subtag boundary
+
+ex:Unique a sh:NodeShape ; sh:targetNode ex:one, ex:two, ex:three ;
+	sh:property [ sh:path ex:p ; sh:uniqueLang true ] .
+
+# §4.5.5 is a property-shape component; on a node shape it asks nothing.
+ex:UniqueOnANodeShape a sh:NodeShape ; sh:targetNode ex:one ; sh:uniqueLang true .
+`
+
+@(private = "file")
+LANGUAGE_DATA :: PREFIX + `
+ex:one   ex:p "Me"@en , "Myself"@en , "Moi"@fr , "untagged" .
+ex:two   ex:p "I"@en , "Ich"@de , "Me"@EN , "Mich"@de , "Myself"@en .
+ex:three ex:p "Me"@en , "Moi"@fr , "untagged" , "also untagged" .
+`
+
+// sh:languageIn's RFC 4647 basic filtering and sh:uniqueLang's set scope, in one
+// fixture because they are the two components that read a language tag.
+//
+// **Neither can fire the family's language-tag trigger**, and this fixture is
+// where that is demonstrated rather than asserted in prose: `@EN` appears on
+// both sides — matched against the range `en`, and counted as a duplicate of
+// `@en` — and both comparisons are case-insensitive by specification (RFC 4647
+// for the range, RDF Concepts for tag identity). There is no comparison here
+// whose answer depends on whether the parser folded the tag's case.
+@(test)
+test_language_in_and_unique_lang :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, LANGUAGE_SHAPES, LANGUAGE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			"Langs|LanguageInConstraintComponent|?\"Berg\"|?\"Berg\"",
+			"Langs|LanguageInConstraintComponent|?\"Plain\"|?\"Plain\"",
+			"Langs|LanguageInConstraintComponent|?NotALiteral|?NotALiteral",
+			// "en" is a prefix of "english" and not a subtag of it.
+			"Langs|LanguageInConstraintComponent|?\"english\"|?\"english\"",
+			// ex:one repeats @en once; ex:two repeats @en (three times, one
+			// result) and @de (twice, one result); ex:three repeats nothing.
+			// No result carries an sh:value: the fault is that two nodes agree.
+			"_:|UniqueLangConstraintComponent|one|-",
+			"_:|UniqueLangConstraintComponent|two|-",
+			"_:|UniqueLangConstraintComponent|two|-",
+		},
+		"languageIn and uniqueLang",
+	)
+}
+
+// `sh:uniqueLang "1"^^xsd:boolean` does not switch the component on, though "1"
+// is the same *value* as "true".
+//
+// §4.5.5 names the value `true`, and `property/uniqueLang-002` exists to pin
+// exactly this: it declares the "1" form over two `@en` literals and expects a
+// conforming report, with a comment in the corpus saying why. It is the one
+// place in this engine where a boolean parameter is read as a term rather than
+// a value, and it would otherwise look like an oversight.
+@(test)
+test_unique_lang_is_switched_on_by_the_term_true :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	shapes := PREFIX + `
+	ex:S a sh:NodeShape ; sh:targetNode ex:one ;
+		sh:property [ sh:path ex:p ; sh:uniqueLang "1"^^xsd:boolean ] .
+	`
+	if !fixture_init(t, &f, shapes, LANGUAGE_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	expect_results(t, &seen, []string{}, "uniqueLang \"1\" is not true")
+}

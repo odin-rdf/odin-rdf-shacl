@@ -65,6 +65,16 @@ MAX_INCLUSIVE :: NS + "maxInclusive"
 MIN_EXCLUSIVE :: NS + "minExclusive"
 MAX_EXCLUSIVE :: NS + "maxExclusive"
 
+// The string-based components (§4.5), SHACL-T-0014. `sh:flags` is the only
+// parameter here with no component of its own: it modifies `sh:pattern`, and a
+// result from the pair names `sh:PatternConstraintComponent`.
+MIN_LENGTH :: NS + "minLength"
+MAX_LENGTH :: NS + "maxLength"
+PATTERN :: NS + "pattern"
+FLAGS :: NS + "flags"
+LANGUAGE_IN :: NS + "languageIn"
+UNIQUE_LANG :: NS + "uniqueLang"
+
 // The shape-expecting parameters (§2.1.1). A node that is the value of one of
 // these **is a shape**, which is why they land here in SHACL-T-0010 — before
 // the constraint components that read them (SHACL-T-0017 and SHACL-T-0018).
@@ -117,6 +127,11 @@ MIN_INCLUSIVE_COMPONENT :: NS + "MinInclusiveConstraintComponent"
 MAX_INCLUSIVE_COMPONENT :: NS + "MaxInclusiveConstraintComponent"
 MIN_EXCLUSIVE_COMPONENT :: NS + "MinExclusiveConstraintComponent"
 MAX_EXCLUSIVE_COMPONENT :: NS + "MaxExclusiveConstraintComponent"
+MIN_LENGTH_COMPONENT :: NS + "MinLengthConstraintComponent"
+MAX_LENGTH_COMPONENT :: NS + "MaxLengthConstraintComponent"
+PATTERN_COMPONENT :: NS + "PatternConstraintComponent"
+LANGUAGE_IN_COMPONENT :: NS + "LanguageInConstraintComponent"
+UNIQUE_LANG_COMPONENT :: NS + "UniqueLangConstraintComponent"
 
 // The validation report vocabulary (§3).
 VALIDATION_REPORT :: NS + "ValidationReport"
