@@ -36,6 +36,28 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # **Windows runs one Term_ID width, not both**, and the reason is that
+        # the width matrix and the platform matrix test different things. A
+        # width-sensitive bug is arithmetic — a 32-bit `Term_ID` overflowing, or
+        # a cast that assumed 64 — and it surfaces identically wherever it runs,
+        # so ubuntu and macos cover it in about fifteen seconds each. What
+        # Windows uniquely proves is linkage (the vendored LMDB `.lib` actually
+        # resolves), path handling, and the executable-extension rule the
+        # Makefile's EXE variable exists for. One width proves all three.
+        #
+        # It is worth halving because `make test` is 6 packages x N widths =
+        # 6N separate `odin test` invocations, each a fresh compile *and link*.
+        # Windows links slowly and was paying for it twelve times: 244s against
+        # ubuntu's 15s for the same target, which is where 9x of the job's 293s
+        # went. Nothing else in the job is meaningfully slow.
+        #
+        # The other two are left alone: `WIDTHS` defaults to `64 32` in the
+        # Makefile, so only the override needs stating. Keep the value
+        # space-free — it is interpolated unquoted into a PowerShell command
+        # line on this runner.
+        include:
+          - os: windows-latest
+            test_widths: WIDTHS=64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -89,6 +111,9 @@ jobs:
         working-directory: odin-rdf-shacl
         run: make check
 
+      # Both Term_ID widths everywhere except Windows, which runs 64-bit only —
+      # see the matrix above for why. `matrix.test_widths` is empty on the other
+      # two, so they get the Makefile's own `WIDTHS := 64 32`.
       - name: Test at both Term_ID widths
         working-directory: odin-rdf-shacl
-        run: make test
+        run: make test ${{ matrix.test_widths }}
