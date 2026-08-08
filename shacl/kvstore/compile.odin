@@ -29,8 +29,17 @@ import shacl ".."
 // A caller whose shapes and data live in different graphs of one store uses
 // two Sessions over the same store, which is a struct rather than a handle
 // and costs nothing.
+//
+// **A session reads either through a store or through a transaction, never
+// both.** `session_init` sets `db` and leaves `txn` nil, and every read is an
+// autocommit operation — today's behaviour, and the default.
+// `session_init_txn` sets `txn` and leaves `db` nil, and every read goes
+// through that transaction, which is what makes validate-before-commit
+// expressible (odin-rdf-store STORE-A-0007). Code reaching for `db` on a
+// session it did not construct should go through the reads below instead.
 Session :: struct {
 	db:    ^kvstore.Store,
+	txn:   ^kvstore.Txn,
 	graph: store.Term_ID,
 	err:   kvstore.Error,
 }
@@ -38,10 +47,109 @@ Session :: struct {
 // session_init binds a session to a store and a graph, with no error recorded
 // yet. It allocates nothing and needs no destroy; the session borrows the store
 // and is valid as long as it is open.
+//
+// Every read through it is an autocommit operation — a transaction of the
+// appropriate mode, one operation, closed. A validation is many reads, so it is
+// many transactions and therefore many datasets; that is correct for a store
+// nobody is writing to, and `session_init_txn` is the answer when somebody is.
 session_init :: proc(s: ^Session, st: ^kvstore.Store, graph: store.Term_ID = store.DEFAULT_GRAPH) {
 	s.db = st
+	s.txn = nil
 	s.graph = graph
 	s.err = nil
+}
+
+// session_init_txn binds a session to an open transaction and a graph, so that
+// every read below it sees that transaction's dataset. The transaction is the
+// caller's throughout: this neither commits nor aborts it, and the session must
+// not outlive it.
+//
+// **This is what makes validate-before-commit reachable.** Build a candidate
+// inside a write transaction, validate through that same transaction, and keep
+// or discard the write on the answer. The alternative the API used to steer a
+// caller toward — build the candidate in a second store and validate *that* —
+// is wrong rather than slow: every constraint that must consult existing data
+// reads an empty world and passes vacuously, so a `sh:maxCount` over a property
+// the dataset already carries values for, or a `sh:class` against a hierarchy
+// that lives only in the committed graph, cannot fail.
+//
+// **Both modes are legal and they buy different things.** A `.Read`
+// transaction makes a validation one answer about one dataset rather than a
+// sequence of independent reads. A `.Write` transaction adds read-your-own-
+// writes, which is the whole point of the pattern above.
+//
+// **Two costs, and they are contract rather than backend detail** (STORE-A-0007):
+//
+//   - A **write** transaction holds the environment's writer lock for its whole
+//     life, serializing every other writer against that environment. The
+//     validate-before-commit pattern holds one across an *entire* validation by
+//     construction, and a validation is not fast. For the deployment shape this
+//     family targets — ~200 processes per machine, each embedding its own store
+//     — that serializes within an environment and not between them, which is why
+//     it is acceptable. A consumer putting one store behind many concurrent
+//     writers should know what it is buying before adopting the pattern, not
+//     after.
+//   - A **read** transaction pins pages, so a concurrent writer grows the file
+//     for as long as the snapshot is held. A validation is a fine lifetime for
+//     that; a request handler holding one across unrelated work is making a
+//     storage-sizing decision.
+//
+// The compiled shapes model is unaffected either way: it owns every term it
+// holds (SHACL-A-0001), so compile once at startup and validate many, each
+// validation optionally inside a transaction of its own.
+session_init_txn :: proc(s: ^Session, tx: ^kvstore.Txn, graph: store.Term_ID = store.DEFAULT_GRAPH) {
+	s.db = nil
+	s.txn = tx
+	s.graph = graph
+	s.err = nil
+}
+
+// The three reads this package performs, each in one place so that the
+// transactional and autocommit forms cannot drift apart across the seven call
+// sites that use them. They report failure rather than recording it: the error
+// slot belongs to the adapters, which are the ones that have to keep the walk
+// well-formed afterwards.
+
+@(private)
+session_match :: proc(
+	s: ^Session,
+	pattern: store.Match_Pattern,
+) -> (
+	kvstore.Match_Iterator,
+	kvstore.Error,
+) {
+	if s.txn != nil {
+		// The iterator borrows the transaction: match_destroy closes the
+		// cursor and leaves the transaction alone, so nothing about this
+		// package's iterator handling changes.
+		return kvstore.match_txn(s.txn, pattern)
+	}
+	return kvstore.match(s.db, pattern)
+}
+
+@(private)
+session_lookup :: proc(
+	s: ^Session,
+	id: store.Term_ID,
+	allocator: runtime.Allocator,
+) -> (
+	rdf.Term,
+	kvstore.Error,
+) {
+	if s.txn != nil {
+		return kvstore.lookup_term_txn(s.txn, id, allocator)
+	}
+	return kvstore.lookup_term(s.db, id, allocator)
+}
+
+@(private)
+session_find_term :: proc(s: ^Session, term: rdf.Term) -> (store.Term_ID, bool, kvstore.Error) {
+	if s.txn != nil {
+		// Through a write transaction this sees that transaction's own
+		// interning, which is what binds a candidate's fresh terms.
+		return kvstore.find_term_txn(s.txn, term)
+	}
+	return kvstore.find_term(s.db, term)
 }
 
 // session_error reports the first store failure seen during compilation, or
@@ -53,7 +161,7 @@ session_error :: proc(s: ^Session) -> kvstore.Error {
 
 @(private)
 match_adapter :: proc(session: ^Session, pattern: store.Match_Pattern) -> kvstore.Match_Iterator {
-	it, err := kvstore.match(session.db, pattern)
+	it, err := session_match(session, pattern)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -90,7 +198,7 @@ load_adapter :: proc(
 	owned: bool,
 ) {
 	session := cast(^Session)data
-	loaded, err := kvstore.lookup_term(session.db, id, allocator)
+	loaded, err := session_lookup(session, id, allocator)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -103,7 +211,7 @@ load_adapter :: proc(
 @(private)
 find_adapter :: proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, found: bool) {
 	session := cast(^Session)data
-	got, ok, err := kvstore.find_term(session.db, term)
+	got, ok, err := session_find_term(session, term)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -198,6 +306,58 @@ compile_turtle :: proc(
 
 	session: Session
 	session_init(&session, st, graph_id)
+	err = compile(s, &session, allocator)
+	return err, load_err, session_error(&session)
+}
+
+// compile_turtle_txn is compile_turtle through the caller's write transaction:
+// the document is loaded and the shapes compiled from it without either being
+// visible outside the transaction, and neither is durable until the caller
+// commits.
+//
+// **The transaction must be a .Write one**, because this loads. It is the
+// caller's throughout — this neither commits nor aborts it, and an abort
+// discards the loaded shapes graph while leaving the returned `shacl.Shapes`
+// perfectly valid, since the model owns every term it holds (SHACL-A-0001) and
+// outlives both the transaction and the store.
+//
+// The compile-once rule that compile_turtle documents holds here unchanged, and
+// has one sharper edge worth naming: two loads of the same document into *one*
+// transaction still mint distinct blank nodes, so a transaction does not make
+// loading idempotent either.
+//
+// Check `db_err` as well as the other two: a store failure means the shapes
+// were compiled from an incomplete read.
+compile_turtle_txn :: proc(
+	s: ^shacl.Shapes,
+	tx: ^kvstore.Txn,
+	source: []byte,
+	graph: rdf.Graph_Label = nil,
+	base := "",
+	allocator := context.allocator,
+) -> (
+	err: shacl.Error,
+	load_err: store.Load_Error,
+	db_err: kvstore.Error,
+) {
+	added: int
+	added, load_err, db_err = kvstore.load_turtle_txn(tx, source, base, graph, allocator)
+	_ = added
+	if db_err != nil || load_err.message != "" {
+		return shacl.Error{}, load_err, db_err
+	}
+
+	graph_id, found, find_err := kvstore.find_graph_label_txn(tx, graph)
+	if find_err != nil {
+		return shacl.Error{}, load_err, find_err
+	}
+	if !found {
+		// The load just put statements there, so the label must exist.
+		return shacl.Error{}, load_err, nil
+	}
+
+	session: Session
+	session_init_txn(&session, tx, graph_id)
 	err = compile(s, &session, allocator)
 	return err, load_err, session_error(&session)
 }

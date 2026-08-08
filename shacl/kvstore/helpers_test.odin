@@ -12,10 +12,13 @@ package shacl_kvstore
 //
 // Terms come from the temp allocator: the suites render them to strings
 // immediately and never keep one.
+//
+// Both go through the session's own reads rather than through kvstore
+// directly, so they work on a transactional session as well as an autocommit
+// one (SHACL-T-0029) — a helper that read `s.db` would see nil on the former.
 
 import rdf "rdf:rdf"
 import store "store:store"
-import kvstore "store:store/kvstore"
 
 // session_term materialises a term for rendering in an assertion message.
 // A store failure yields a blank node named for the failure rather than
@@ -23,7 +26,7 @@ import kvstore "store:store/kvstore"
 // than as a lost test run.
 @(private)
 session_term :: proc(s: ^Session, id: store.Term_ID) -> rdf.Term {
-	term, err := kvstore.lookup_term(s.db, id, context.temp_allocator)
+	term, err := session_lookup(s, id, context.temp_allocator)
 	if err != nil {
 		return rdf.Blank_Node("lookup-failed")
 	}
@@ -35,7 +38,7 @@ session_term :: proc(s: ^Session, id: store.Term_ID) -> rdf.Term {
 // and each site already asserts on found.
 @(private)
 session_find :: proc(s: ^Session, term: rdf.Term) -> (id: store.Term_ID, found: bool) {
-	got, ok, err := kvstore.find_term(s.db, term)
+	got, ok, err := session_find_term(s, term)
 	if err != nil {
 		return 0, false
 	}

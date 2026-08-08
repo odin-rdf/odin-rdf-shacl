@@ -1,10 +1,10 @@
 ---
-id: bind-session-to-a-store-transaction
+id: bind-session-to-a-store
 level: task
 title: "Bind Session to a store transaction, so validate-before-commit is reachable"
 short_code: "SHACL-T-0029"
-created_at: 2026-08-08T00:05:00.000000+00:00
-updated_at: 2026-08-08T00:05:00.000000+00:00
+created_at: 2026-08-08T00:05:00+00:00
+updated_at: 2026-08-08T13:44:56.038724+00:00
 parent: 
 blocked_by: []
 archived: false
@@ -12,7 +12,7 @@ archived: false
 tags:
   - "#task"
   - "#feature"
-  - "#phase/backlog"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -100,13 +100,13 @@ does today, and every existing caller compiles untouched.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] `Session` gains an optional transaction — the natural home, since it is already the
+- [x] `Session` gains an optional transaction — the natural home, since it is already the
       dataset handle this package threads and is "a struct rather than a handle [that] costs
       nothing" (its own doc comment). **Nil means autocommit**, which is today's behaviour and
       must stay the default.
-- [ ] A constructor beside `session_init` that binds one — `session_init_txn(s, tx, graph)` or
+- [x] A constructor beside `session_init` that binds one — `session_init_txn(s, tx, graph)` or
       equivalent — so the existing three-argument `session_init` keeps its meaning.
-- [ ] The seven read sites switch to the `_txn` form when a transaction is present:
+- [x] The seven read sites switch to the `_txn` form when a transaction is present:
   - `shacl/kvstore/compile.odin:56` — `match_adapter`, the compile path's reader
   - `shacl/kvstore/compile.odin:93` — `load_adapter`, `lookup_term`
   - `shacl/kvstore/compile.odin:106` — `find_adapter`, `find_term`
@@ -114,25 +114,25 @@ does today, and every existing caller compiles untouched.
   - `shacl/kvstore/eval.odin:39` — `step_adapter`
   - `shacl/kvstore/eval.odin:95` — `scan_adapter`
   - `shacl/kvstore/eval.odin:134` — `outgoing_adapter`
-- [ ] **The error-slot contract is unchanged.** A failed read still records into `Session.err`
+- [x] **The error-slot contract is unchanged.** A failed read still records into `Session.err`
       and still hands back an already-done iterator, because a failed match that looks like an
       exhausted one is how a broken store reads as a conforming graph. Transactions change
       where a read comes from, not what a failure means.
-- [ ] **A test that would fail without this**, and it should be the vacuity case rather than
+- [x] **A test that would fail without this**, and it should be the vacuity case rather than
       the happy path: pre-existing committed data, a candidate loaded into a write transaction,
       and a constraint that violates *only because* the pre-existing data is visible.
       `sh:maxCount` over a property the candidate adds a second value to, or `sh:class` against
       a hierarchy that lives only in the committed graph. Validating the same candidate in
       isolation must pass — that assertion is what makes the test about this feature rather
       than about SHACL.
-- [ ] **The cost is documented where a caller will read it, as contract rather than as a
+- [x] **The cost is documented where a caller will read it, as contract rather than as a
       note**: a write transaction held across a validation **serializes every other writer
       against that environment for its lifetime**, and the validate-before-commit pattern holds
       one across the *entire* validation by construction, since read-your-own-writes is the
       whole point. On the read side, a long-held snapshot pins pages and makes a concurrent
       writer grow the file. Neither should be discovered in production.
-- [ ] `make test` green at both `Term_ID` widths; `make check` clean, including `purity`.
-- [ ] The CI pin moves to `v0.3.0`. Note it is a **floor, not just a pin**, as `v0.2.0` already
+- [x] `make test` green at both `Term_ID` widths; `make check` clean, including `purity`.
+- [x] The CI pin moves to `v0.3.0`. Note it is a **floor, not just a pin**, as `v0.2.0` already
       is here: `match_txn` does not exist before it.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
@@ -187,3 +187,51 @@ the old branch.
   and **this repo's Windows CI job takes 211s against ubuntu's 17s** for exactly that reason.
   odin-rdf-store's own job went 64s → 41s while running 83% more tests once it adopted it.
   Bumping the pin to v0.3.0 is the prerequisite for both, so they are one pass.
+
+- **2026-08-08 — Done. 151 tests per width, green at both, `make check` clean including
+  `purity`.** The estimate held: one field, one constructor, and the call sites. Counts went
+  145 → 151, all six in `shacl/kvstore/txn_test.odin` except the README's, which is in
+  `tests/readme`.
+
+  **The seven read sites went through three wrappers rather than seven branches.**
+  `session_match`, `session_lookup` and `session_find_term` are the only places that know a
+  transaction might be present, so the transactional and autocommit forms cannot drift apart
+  one site at a time. They report failure rather than recording it — the error slot stays with
+  the adapters, which are the ones that have to keep the walk well-formed afterwards, so that
+  contract is untouched.
+
+  **`session_init_txn` takes the transaction alone, not `(store, txn)`.** A `Txn` carries its
+  own store, but that field is odin-rdf-store's business — STORE-A-0007 exists to keep LMDB
+  types off consumers, and reading it here would bypass the interface for convenience. The
+  consequence is that `db` is nil on a transactional session, documented on the struct; the two
+  test helpers that read `s.db` now go through the wrappers.
+
+  **`compile_turtle_txn` was added**, because it is the only way the `find_graph_label` site
+  named above has a transaction to read through — `compile_turtle` builds its session after
+  loading. It also covers the case the acceptance criteria did not ask about: a shapes graph
+  loaded inside a transaction that is then thrown away, with the model surviving it.
+
+  **One assumption in the test plan was wrong, and the correction is worth keeping.** An
+  autocommit *read* is not refused while a write transaction is open — only writes are
+  (`.Write_Txn_Open` covers `insert` and the loaders). A bare read opens a read transaction of
+  its own, succeeds, and answers about the last committed dataset. So a session bound to the
+  wrong thing does not announce itself, which is a sharper statement of the bug than the
+  refusal would have been, and `test_autocommit_session_cannot_see_the_open_write` now pins it.
+  It is also what proves the vacuity test is not passing for free: the same store at the same
+  instant gives two different answers through the two sessions.
+
+  **The cost went in twice**: as contract on `session_init_txn`, and as a README section a
+  consumer will actually meet, with a worked example mirrored in `tests/readme`.
+
+  **One finding beyond the item's scope, fixed in the same pass at the maintainer's request.**
+  The README's quick start had drifted from `tests/readme` — no `session_init` calls, a `Sink`
+  field name that did not exist, `lookup_term` at the wrong arity, `compile_turtle`'s three
+  returns taken as two. The "compiled and asserted, so they cannot drift" claim does not hold
+  for a mirror maintained by hand, and it had silently not held for some time. The block is now
+  identical to the mirror apart from the store path, verified by diffing the two rather than by
+  eye, and both files now state the two permitted divergences instead of implying there are
+  none.
+
+  **Not done here, and deliberately**: the paired `open_ephemeral` adoption. The pin bump it
+  needs is in, but it touches four scratch-path helpers across three packages and belongs in
+  its own pass rather than inflating this diff.

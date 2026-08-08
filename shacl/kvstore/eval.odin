@@ -36,7 +36,7 @@ step_adapter :: proc(
 		: store.Match_Pattern{from, predicate, store.WILDCARD, session.graph}
 	position := inverted ? store.QUAD_S : store.QUAD_O
 
-	it, err := kvstore.match(session.db, pattern)
+	it, err := session_match(session, pattern)
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -92,7 +92,7 @@ scan_adapter :: proc(
 	visit_data: rawptr,
 ) -> bool {
 	session := cast(^Session)data
-	it, err := kvstore.match(session.db, store.Match_Pattern{subject, predicate, object, session.graph})
+	it, err := session_match(session, store.Match_Pattern{subject, predicate, object, session.graph})
 	if err != nil {
 		if session.err == nil {
 			session.err = err
@@ -131,8 +131,8 @@ outgoing_adapter :: proc(
 	visit_data: rawptr,
 ) -> bool {
 	session := cast(^Session)data
-	it, err := kvstore.match(
-		session.db,
+	it, err := session_match(
+		session,
 		store.Match_Pattern{subject, store.WILDCARD, store.WILDCARD, session.graph},
 	)
 	if err != nil {

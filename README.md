@@ -171,7 +171,10 @@ one configuration.
 Validation is three objects and three steps: compile a shapes graph once, bind
 the model to the store holding the data once, then validate as often as you
 like. The examples below are compiled and asserted by `tests/readme`, so they
-cannot drift from the API.
+cannot drift from the API. That package differs from what you see here in two
+ways and no others: it reaches sibling directories where a consumer writes
+`rdf:` and `store:` collection imports, and it opens a throwaway directory where
+these open a path you would have chosen.
 
 ```odin
 package main
@@ -203,46 +206,55 @@ ex:alice a ex:Person ; ex:name "Alice" .
 ex:bob   a ex:Person .
 `
 
+// Validation is a compiled shapes model, a binding of that model to the store
+// holding the data, and a visitor the results stream to.
 validate_example :: proc(report: ^[dynamic]string) -> shacl.Failure {
 	// 1. Open the store. It is a directory on disk, opened once and kept.
+	//    Shapes and data live in graphs of it; this example uses one store and
+	//    loads both into the default graph.
 	db, open_err := kvstore.open("/var/lib/example/rdf")
 	if open_err != nil {
 		return .None
 	}
 	defer kvstore.close(db)
 
-	// 2. Compile the shapes graph into a graph of that store. The model owns
-	//    every term it holds, so the store may be closed afterwards and the
-	//    model bound to another one. Compile once and keep the model: loading
-	//    a shapes graph twice does not dedupe, because every load mints fresh
-	//    blank nodes.
+	// 2. Compile the shapes graph. The model owns every term it holds, so the
+	//    store may be closed afterwards and the model bound to another one.
+	//    Compile once and keep the model: loading a shapes graph twice does not
+	//    dedupe, because each load mints fresh blank nodes.
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	err, parse_err := shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
+
+	err, parse_err, _ := shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
 	if parse_err.message != "" || err.kind != .None {
 		return .None
 	}
 
-	// 2. Load the data graph.
-
+	// 3. Load the data graph.
 	kvstore.load_turtle(db, transmute([]byte)string(DATA))
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&session, db)
 
-	// 3. Bind the model's terms to this store's IDs — once per validation, not
+	// 4. Bind the model's terms to this store's IDs — once per validation, not
 	//    once per check. A model compiled elsewhere binds here just as well.
 	bindings: shacl.Bindings
 	shacl_kvstore.bind(&bindings, &shapes, &session)
 	defer shacl.bindings_destroy(&bindings)
 
-	// 4. Validate. Results are handed to the visitor as they are found and
+	// 5. Validate. Results are handed to the visitor as they are found and
 	//    nothing is buffered, so memory stays flat however bad the data is.
-	sink := Sink{shapes = &shapes, dictionary = &session, lines = report}
+	sink := Sink {
+		shapes  = &shapes,
+		session = &session,
+		lines   = report,
+	}
 	return shacl_kvstore.validate(&shapes, &bindings, &session, on_result, &sink)
 }
 
 Sink :: struct {
-	shapes:     ^shacl.Shapes,
+	shapes:  ^shacl.Shapes,
 	session: ^shacl_kvstore.Session,
-	lines:      ^[dynamic]string,
+	lines:   ^[dynamic]string,
 }
 
 // A Result borrows and owns nothing: it names nodes by Term_ID and the shape
@@ -250,7 +262,7 @@ Sink :: struct {
 // it out — or use `validate_report` and let the report do it for you.
 on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
-	focus := kvstore.lookup_term(sink.dictionary, result.focus.id)
+	focus, _ := kvstore.lookup_term(sink.session.db, result.focus.id, context.temp_allocator)
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
 		append(sink.lines, string(iri))
 	}
@@ -306,8 +318,10 @@ the `s` stripped.
 There is a fourth, narrower question: **does one node conform to one shape?**
 
 ```odin
-// shape_index names a shape by its position in the compiled model — the same
-// index a Result carries in `result.shape`.
+// A shape is named by its index in the compiled model — the same index a
+// Result carries in `result.shape`. Shapes with an IRI can be found by it.
+shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
+
 ok, failure := shacl_kvstore.conforms_node(
 	&shapes, &bindings, &session,
 	rdf.IRI("http://example.org/alice"), shape_index,
@@ -323,6 +337,74 @@ and `sh:qualifiedValueShape` are built on, which is why it exists before they do
 
 `shacl/kvstore` has the same entry points against the persistent backend, taking
 a `Session` where these take a dictionary and a dataset.
+
+### Deciding whether a write may join the dataset
+
+A `Session` reads through the store by default, one autocommit operation per
+read. `session_init_txn` binds it to an open transaction instead, and every read
+below it then sees that transaction's dataset — which is what lets a validator
+decide about **the dataset a write would produce** rather than about the one
+already committed (odin-rdf-store v0.3.0, `STORE-A-0007`).
+
+```odin
+// 1. Build the candidate inside a write transaction. Nothing is visible outside
+//    it and nothing is durable until commit.
+tx, txn_err := kvstore.txn_begin(db, .Write)
+if txn_err != nil {
+	return
+}
+// A no-op after a successful commit, so this is the whole cleanup story.
+defer kvstore.txn_abort(&tx)
+
+kvstore.load_turtle_txn(&tx, transmute([]byte)string(CANDIDATE))
+
+// 2. Validate through that same transaction: the committed data and the
+//    candidate, together.
+session: shacl_kvstore.Session
+shacl_kvstore.session_init_txn(&session, &tx)
+
+bindings: shacl.Bindings
+shacl_kvstore.bind(&bindings, &shapes, &session)
+defer shacl.bindings_destroy(&bindings)
+
+ok, failure := shacl_kvstore.conforms(&shapes, &bindings, &session)
+
+// 3. Keep or discard the write on the answer. Returning without committing
+//    discards it, because the deferred abort is what runs.
+if failure == .None && ok {
+	kvstore.txn_commit(&tx)
+}
+```
+
+**The obvious alternative is wrong, not merely slow.** Building the candidate in
+a second store and validating *that* makes every constraint which must consult
+existing data read an empty world and pass: a `sh:maxCount` over a property the
+dataset already carries values for, a `sh:class` against a hierarchy that lives
+only in the committed graph, uniqueness across the dataset. A validator that
+cannot fail is worse than one that is absent.
+
+**Two costs come with the pattern, and they are contract rather than backend
+detail:**
+
+- A **write** transaction holds the environment's writer lock for its whole
+  life, serializing every other writer against that environment — and this
+  pattern holds one across an entire validation by construction, because
+  read-your-own-writes is the point. At ~200 processes per machine each
+  embedding its own store, that serializes within an environment and not between
+  them, which is why it is acceptable here. Putting one store behind many
+  concurrent writers is a different bargain, and worth knowing about first.
+- A **read** transaction (`session_init_txn` with a `.Read` handle, which makes a
+  validation one answer about one dataset) pins pages, so a concurrent writer
+  grows the file for as long as it is held.
+
+An autocommit read is *not* refused while a write transaction is open — only
+writes are. It succeeds and answers about the last committed dataset, so a
+session bound to the wrong thing does not announce itself.
+
+The compiled model is unaffected either way: it owns every term it holds, so
+compile once at startup and validate many, each validation inside a transaction
+of its own. `compile_turtle_txn` is the transactional twin of `compile_turtle`
+for the case where the shapes graph itself is being loaded inside one.
 
 ## Memory contract
 

@@ -3,10 +3,18 @@
 // README-as-contract convention, established by odin-rdf-parser's
 // tests/readme and carried into odin-rdf-sparql by SPARQL-T-0009.
 //
-// The bodies below are the README's, verbatim. Only the import lines differ:
-// the README writes them the way a consumer would, through the `rdf:` and
-// `store:` collections and its own module path, and this package reaches
-// sibling directories instead.
+// The bodies below are the README's, verbatim, with two differences and no
+// others. The import lines: the README writes them the way a consumer would,
+// through the `rdf:` and `store:` collections and its own module path, and this
+// package reaches sibling directories instead. And the store path: the README
+// opens a path the reader would have chosen, while these open a throwaway
+// directory through the helper at the bottom of this file — everything between
+// `kvstore.open` and `kvstore.close` is the README's.
+//
+// Keeping that true is the whole point. It stopped being true once (the quick
+// start lost its `session_init` calls and named a `Sink` field that did not
+// exist), because a mirror maintained by hand only verifies what someone
+// remembered to copy across. Change one, change the other, in the same commit.
 package readme
 
 import "core:testing"
@@ -255,6 +263,87 @@ test_readme_conforms_node_example :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 }
 
+
+// The validate-before-commit form: the candidate is decided against the dataset
+// it would produce. The README's fifth example (SHACL-T-0029).
+
+ONE_NAME_SHAPES :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+
+ex:OneNameShape a sh:NodeShape ;
+	sh:targetClass ex:Person ;
+	sh:property [ sh:path ex:name ; sh:maxCount 1 ] .
+`
+
+CANDIDATE :: `
+@prefix ex: <http://example.org/> .
+
+ex:alice ex:name "Alice Smith" .
+`
+
+// Returns whether the candidate was kept.
+validate_before_commit_example :: proc() -> (kept: bool, failure: shacl.Failure) {
+	path := readme_store_path()
+	defer remove_readme_store(path)
+	db, open_err := kvstore.open(path)
+	if open_err != nil {
+		return false, .None
+	}
+	defer kvstore.close(db)
+
+	shapes: shacl.Shapes
+	defer shacl.shapes_destroy(&shapes)
+	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(ONE_NAME_SHAPES))
+
+	// The dataset as it stands: ex:alice is a Person and already has one name.
+	kvstore.load_turtle(db, transmute([]byte)string(DATA))
+
+	// 1. Open a write transaction and build the candidate inside it. Nothing is
+	//    visible outside the transaction and nothing is durable until commit.
+	tx, txn_err := kvstore.txn_begin(db, .Write)
+	if txn_err != nil {
+		return false, .None
+	}
+	// A no-op after a successful commit, so this is the whole cleanup story.
+	defer kvstore.txn_abort(&tx)
+
+	kvstore.load_turtle_txn(&tx, transmute([]byte)string(CANDIDATE))
+
+	// 2. Validate *through the same transaction*. This is the point: the
+	//    validator sees the committed data and the candidate together, which is
+	//    the dataset the commit would produce.
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init_txn(&session, &tx)
+
+	bindings: shacl.Bindings
+	shacl_kvstore.bind(&bindings, &shapes, &session)
+	defer shacl.bindings_destroy(&bindings)
+
+	ok, fail := shacl_kvstore.conforms(&shapes, &bindings, &session)
+	if fail != .None || shacl_kvstore.session_error(&session) != nil {
+		return false, fail
+	}
+
+	// 3. Keep or discard the write on the answer. Returning without committing
+	//    discards it, because the deferred abort is what runs.
+	if !ok {
+		return false, .None
+	}
+	kvstore.txn_commit(&tx)
+	return true, .None
+}
+
+@(test)
+test_readme_validate_before_commit_example :: proc(t: ^testing.T) {
+	kept, failure := validate_before_commit_example()
+	testing.expect_value(t, failure, shacl.Failure.None)
+	// The candidate gives ex:alice a second ex:name, which sh:maxCount 1
+	// forbids — and it violates only because the committed data is visible.
+	// Validated on its own it would carry no ex:Person target at all and would
+	// conform vacuously, which is the answer this pattern exists to avoid.
+	testing.expect(t, !kept)
+}
 
 // A throwaway database directory for the example. A real consumer opens a
 // path it chose and keeps it.

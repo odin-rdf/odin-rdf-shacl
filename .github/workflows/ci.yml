@@ -102,16 +102,20 @@ jobs:
       # repository broke, which is the only way to tell a local regression from
       # an upstream one.
       #
-      # **odin-rdf-store v0.2.0 is a floor, not just a pin**, and now for two
-      # reasons. `v0.1.0` vendored exactly one LMDB archive —
-      # `liblmdb_darwin_arm64.a` — and `shacl/kvstore` links those archives, so
-      # against that tag this builds on macOS and fails to link on the ubuntu and
-      # windows runners below; STORE-A-0004's five-platform vendoring is what
-      # `v0.1.1` released. Since SHACL-T-0028 there is a second floor above it:
-      # `shacl/kvstore.compile_turtle` takes the caller's `^kvstore.Store` and a
-      # scratch graph, which is the signature this repository adopted when
-      # odin-rdf-store retired its in-memory backend (STORE-A-0006). `v0.2.0` is
-      # that release. Do not pin the store below it.
+      # **odin-rdf-store v0.3.0 is a floor, not just a pin**, and by now for
+      # three reasons, each one strictly above the last. `v0.1.0` vendored
+      # exactly one LMDB archive — `liblmdb_darwin_arm64.a` — and
+      # `shacl/kvstore` links those archives, so against that tag this builds on
+      # macOS and fails to link on the ubuntu and windows runners below;
+      # STORE-A-0004's five-platform vendoring is what `v0.1.1` released.
+      # SHACL-T-0028 added a second floor: `shacl/kvstore.compile_turtle` takes
+      # the caller's `^kvstore.Store` and a scratch graph, the signature this
+      # repository adopted when odin-rdf-store retired its in-memory backend
+      # (STORE-A-0006), which `v0.2.0` released. SHACL-T-0029 adds the third and
+      # current one: `Session` reads through an optional `^kvstore.Txn`, and
+      # `match_txn`, `find_term_txn`, `lookup_term_txn`, `find_graph_label_txn`
+      # and `load_turtle_txn` do not exist before `v0.3.0` (STORE-A-0007). Do
+      # not pin the store below it.
       #
       # To bump either: change the ref, run `make test` and `make check` locally
       # against the new checkout, and commit them together — a collection is
@@ -127,7 +131,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-store
-          ref: v0.2.0
+          ref: v0.3.0
           path: odin-rdf-store
 
       - uses: laytan/setup-odin@v2
