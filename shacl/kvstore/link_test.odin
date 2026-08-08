@@ -9,13 +9,22 @@ import kvstore "store:store/kvstore"
 
 // temp_path joins the OS temp directory with a run-unique name.
 //
-// **Two tests use this, and everything else in the suite opens an ephemeral
+// **Four tests use this, and everything else in the suite opens an ephemeral
 // store instead** (odin-rdf-store v0.3.0, `kvstore.open_ephemeral` — no path to
 // name, make unique, or clean up, and a 16 MiB map rather than 1 GiB). What is
-// left here are the two cases that genuinely need a path on disk: the linkage
-// proof below, which is worth running against the constructor a consumer
-// actually uses, and `test_kvstore_compilation_does_not_write`, which closes a
-// store and reopens the same path read-only.
+// left here are the cases that genuinely need a locked database on disk:
+//
+//   - the linkage proof below, which is worth running against the constructor a
+//     consumer actually uses;
+//   - `test_kvstore_compilation_does_not_write`, which closes a store and
+//     reopens the same path read-only;
+//   - the two tests in `txn_test.odin` that hold a reader open across a writer.
+//     `open_ephemeral` opens with `NOLOCK`, and LMDB's contract for that flag
+//     requires the caller to ensure no reader is using an old transaction while
+//     a writer is active — without the reader table, a writer cannot know which
+//     pages a live reader still needs and may recycle them underneath it. Those
+//     two tests create that arrangement deliberately, which is the whole point
+//     of them, so they need the locking an ephemeral store gives up.
 //
 // The separator is added here rather than assumed, and the fallback order
 // matters: macOS exports TMPDIR with a trailing slash, Linux usually exports

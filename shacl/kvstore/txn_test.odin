@@ -268,7 +268,14 @@ test_read_txn_does_not_see_a_later_commit :: proc(t: ^testing.T) {
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	db, open_err := kvstore.open_ephemeral()
+	// A real store, not an ephemeral one: this holds a read transaction
+	// open across a commit, and open_ephemeral opens with NOLOCK, whose
+	// contract says the caller must ensure no reader holds an old
+	// transaction while a writer is active. Without the reader table the
+	// writer cannot know which pages this reader still needs.
+	path := temp_path("snapshot-data")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -392,7 +399,12 @@ test_autocommit_session_cannot_see_the_open_write :: proc(t: ^testing.T) {
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	db, open_err := kvstore.open_ephemeral()
+	// Durable for the same reason as the snapshot test above: the
+	// autocommit session below opens a read transaction while this
+	// test's write transaction is still open, which NOLOCK forbids.
+	path := temp_path("two-sessions-data")
+	defer remove_store(path)
+	db, open_err := kvstore.open(path)
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
