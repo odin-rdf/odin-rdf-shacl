@@ -260,3 +260,19 @@ the old branch.
   The README gained a **Scratch datasets** section, so `open_ephemeral` is documented for
   consumers rather than only used internally — including the Windows caveat that an abnormal
   termination leaks one file, and the two exceptions above.
+- **2026-08-08 — A correction to the `open_ephemeral` pass above, and the upstream fix it
+  led to.** Two of the tests converted in that pass hold a reader open across a writer —
+  `test_read_txn_does_not_see_a_later_commit` and
+  `test_autocommit_session_cannot_see_the_open_write` — which is the one arrangement
+  LMDB's `NOLOCK` contract forbids, and `open_ephemeral` opens with `NOLOCK`. Both are
+  back on `kvstore.open`. They had passed, and would have gone on passing: the fixtures
+  are a handful of quads, so the freelist never wraps and no reused page is ever handed
+  back. odin-rdf-store now documents that rule on `open_ephemeral` itself rather than
+  leaving it in this repository's test comments.
+
+  Adopting `open_ephemeral` also surfaced a Windows bug in it: this suite's job failed
+  intermittently, one or two of ~58 opens per run, a different test each time. That is
+  `STORE-T-0042`, fixed in odin-rdf-store v0.4.0 by retrying a reservation Windows
+  transiently refuses; the CI pin here moved v0.3.0 → v0.3.1 → v0.4.0 along the way, and
+  the middle step existed only to make the error say what it was. Five consecutive green
+  Windows runs followed, against three of three failing before.

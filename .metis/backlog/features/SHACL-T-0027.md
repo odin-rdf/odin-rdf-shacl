@@ -53,6 +53,7 @@ bad:
    surface.
 3. **Compile a throwaway shapes graph carrying `sh:targetNode`.** Costs a fresh
    compile per question (`bench`: 37 µs memstore, 146 µs kvstore, both measured
+   before memstore was retired — the kvstore number is the live one,
    cold precisely because they are start-up costs, not per-operation ones), and
    requires generating Turtle to phrase a question the caller could have asked
    directly.
@@ -83,7 +84,7 @@ can reach it".
 ## Acceptance Criteria **[REQUIRED]**
 
 - [ ] A public per-focus-node validation in `shacl`, taking the shape index, the focus node, and a `Result_Visitor`. Results stream as `validate`'s do; a visitor returning false stops the walk.
-- [ ] Instantiated in `shacl/memstore` and `shacl/kvstore` as peers, in the signature shape `conforms_node` already established there — node given as an `rdf.Term`, resolved through the non-interning lookup, `graph` defaulting to `store.DEFAULT_GRAPH`.
+- [ ] Instantiated in `shacl/kvstore`, in the signature shape `conforms_node` already established there — node given as an `rdf.Term`, resolved through the non-interning lookup, `graph` defaulting to `store.DEFAULT_GRAPH`. *(Amended 2026-08-08: this read "in `shacl/memstore` and `shacl/kvstore` as peers". odin-rdf-store retired its in-memory backend (STORE-A-0006) and SHACL-T-0028 deleted this repository's memstore instantiation, so there is one instantiation package to add this to. The core/instantiation split it was appealing to survives, so a second backend would still get it as a peer.)*
 - [ ] A report-building consumer alongside it, standing to it as `validate_report` stands to `validate`, producing a `sh:ValidationReport` for the one node.
 - [ ] **An unbound focus node behaves as it does in `conforms_node`**: a term the store has never seen is validated as an unbound focus node, paths from it reach nothing, and that emptiness is meaningful. The existing contract wording is correct and should be reused rather than restated differently.
 - [ ] Same recursion set, same subclass-closure cache, same `Failure` semantics — `.None` means the walk completed or was stopped, anything else means the stream is incomplete and the answer must not be read as conformance.

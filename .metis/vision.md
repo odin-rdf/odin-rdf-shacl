@@ -62,7 +62,12 @@ builds a core-only consumer and fails if the binary carries LMDB symbols. *(Amen
 
 The dependencies are unchanged and all complete: **odin-rdf-parser** and
 **odin-rdf-store** at v0.1.0, and **odin-rdf-sparql** at v0.1.0, relevant here only for
-the later SHACL-SPARQL phase.
+the later SHACL-SPARQL phase. *(Amended 2026-08-08: odin-rdf-store is at **v0.4.0** and
+this repository pins it. v0.2.0 retired the in-memory backend (STORE-A-0006), v0.3.0
+shipped transactions (STORE-A-0007) — which SHACL-T-0029 consumed, and which is what makes
+validate-before-commit expressible here — and v0.4.0 fixed a Windows failure in
+`open_ephemeral` that this repository's own suite surfaced (STORE-T-0042). odin-rdf-parser
+and odin-rdf-sparql are unchanged at v0.1.0.)*
 
 **`core/complex` was never a SHACL-SPARQL directory, and the correction is worth carrying
 up to this level** because it changes what that phase is for. It was documented for the
