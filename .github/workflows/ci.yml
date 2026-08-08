@@ -117,8 +117,18 @@ jobs:
       # and `load_turtle_txn` do not exist before `v0.3.0` (STORE-A-0007). Do
       # not pin the store below it.
       #
-      # **Pinned at `v0.4.0`, and that one is not a floor.** Nothing here needs
-      # it to compile. This job failed intermittently under `open_ephemeral` —
+      # **`v0.5.0` is a floor** (SHACL-T-0030). `as_of_test.odin` calls
+      # `kvstore.txn_begin_as_of` and `kvstore.remove`, neither of which exists
+      # before it (STORE-A-0008), so the pin cannot go below `v0.5.0` while that
+      # test is in the suite. `v0.5.0` is also a **format** break — a database
+      # written by an earlier store will not open — which costs this repository
+      # nothing, since every store it makes is ephemeral.
+      #
+      # The reasoning for the previous pin is kept below because it is still
+      # true and is still why the floor cannot fall back to `v0.3.x`.
+      #
+      # **`v0.4.0` was pinned for a reason that is not a floor.** Nothing here
+      # needed it to compile. This job failed intermittently under `open_ephemeral` —
       # one or two of ~58 opens per run, a different test each time. `v0.3.1`
       # made the reservation report the OS error instead of collapsing it into
       # `Temp_Unavailable`, which named the cause on the first run here:
@@ -142,7 +152,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-store
-          ref: v0.4.0
+          ref: v0.5.0
           path: odin-rdf-store
 
       - uses: laytan/setup-odin@v2

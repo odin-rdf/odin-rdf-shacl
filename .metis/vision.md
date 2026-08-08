@@ -69,6 +69,37 @@ validate-before-commit expressible here — and v0.4.0 fixed a Windows failure i
 `open_ephemeral` that this repository's own suite surfaced (STORE-T-0042). odin-rdf-parser
 and odin-rdf-sparql are unchanged at v0.1.0.)*
 
+*(Amended 2026-08-08, SHACL-T-0030 — filed from odin-rdf-store's STORE-T-0052: **the store
+this validator sits on has gained a time dimension, and it reaches validation with no source
+change here.** STORE-A-0008 gives every quad the epoch of the transaction that wrote it,
+makes `remove` a retraction rather than an erasure, and puts the horizon on the transaction:
+`txn_begin_as_of(db, epoch)` returns a transaction through which every read is as-of. Since
+`session_init_txn` already takes a `^kvstore.Txn` (SHACL-T-0029), **a validation through such
+a transaction answers about the dataset as it was**, and `shacl/kvstore/as_of_test.odin`
+asserts it — a shape that HEAD conforms to and an earlier epoch violates, and a `sh:class`
+that HEAD violates and an earlier epoch conforms to. Not one line of `shacl/` or
+`shacl/kvstore/` changed. That is odin-rdf-store's central bet paying off from the consumer
+side: put the time axis on the transaction, and the siblings inherit it without learning the
+concept exists. It arrives with **format version 2, which does not read version 1 and has no
+migration**, so it is a floor rather than a pin — the store's v0.5.0, unreleased at the time
+of writing, and the CI pin moves with the test rather than before it.
+
+**The distinction that will otherwise be mis-derived: as-of and validate-before-commit are
+two features through one entry point, and they do not compose.** Validate-before-commit is a
+candidate assembled inside a **write** transaction and validated through it, deciding a
+future. As-of validation is a **read** transaction with a horizon, describing a past.
+`txn_begin_as_of` takes no mode and always returns a read transaction, because an audit store
+must not expose an API for writing history — so there is no way to assemble a candidate
+inside an as-of transaction and validate the merged result. A reader meeting both in
+`session_init_txn`'s doc comment should not conclude otherwise.
+
+Two things checked rather than assumed while asserting this. The store documents `count` as
+O(1) at HEAD and a scan under a horizon, and flags the asymmetry for its consumers: **no
+validation path in this repository calls `count`**, so it does not reach us. And the
+dictionary sits outside the epoch model by design, which is what keeps a term nameable in a
+read of the past — the term-binding bridge resolves the shapes model's terms through an as-of
+transaction unchanged, including terms whose last quad has been retracted.)*
+
 **`core/complex` was never a SHACL-SPARQL directory, and the correction is worth carrying
 up to this level** because it changes what that phase is for. It was documented for the
 whole of SHACL-I-0002 as needing `sh:sparql`, `sh:shapesGraph`, and `sh:entailment`. All
