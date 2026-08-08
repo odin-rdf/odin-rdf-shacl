@@ -117,12 +117,16 @@ jobs:
       # and `load_turtle_txn` do not exist before `v0.3.0` (STORE-A-0007). Do
       # not pin the store below it.
       #
-      # **Pinned at `v0.3.1`, and that one is not a floor.** Nothing here needs
-      # it to compile. `v0.3.1` makes `open_ephemeral`'s reservation return the
-      # OS error verbatim instead of collapsing it into `Temp_Unavailable`, and
-      # this job started failing intermittently under `open_ephemeral` — two of
-      # ~58 opens per run, a different test each time — with an error that
-      # cannot say why. It is pinned so the next failure names its cause.
+      # **Pinned at `v0.4.0`, and that one is not a floor.** Nothing here needs
+      # it to compile. This job failed intermittently under `open_ephemeral` —
+      # one or two of ~58 opens per run, a different test each time. `v0.3.1`
+      # made the reservation report the OS error instead of collapsing it into
+      # `Temp_Unavailable`, which named the cause on the first run here:
+      # ERROR_ACCESS_DENIED from CREATE_NEW on a fresh temp name, i.e. another
+      # process on the runner holding a file briefly. `v0.4.0` retries the
+      # reservation eight times over ~35ms rather than treating one refusal as
+      # a verdict. If this job ever fails that way again, the pin is where to
+      # look first.
       #
       # To bump either: change the ref, run `make test` and `make check` locally
       # against the new checkout, and commit them together — a collection is
@@ -138,7 +142,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-store
-          ref: v0.3.1
+          ref: v0.4.0
           path: odin-rdf-store
 
       - uses: laytan/setup-odin@v2
