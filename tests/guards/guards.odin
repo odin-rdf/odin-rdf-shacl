@@ -14,10 +14,6 @@ package guards
 
 import "core:log"
 import "core:mem"
-import "core:fmt"
-import "core:strings"
-import "core:sync"
-import "core:os"
 import "core:testing"
 
 import rdf "rdf:rdf"
@@ -158,9 +154,7 @@ test_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "compile/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 		s: shacl.Shapes
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
 		shacl.shapes_destroy(&s)
@@ -182,9 +176,7 @@ test_failed_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 			sh:property [ sh:path ex:p ; sh:minCount "not a number" ] .
 		`
 		s: shacl.Shapes
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(BAD), nil, "", allocator)
 		shacl.shapes_destroy(&s)
@@ -201,9 +193,7 @@ test_path_evaluation_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "path evaluation", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -246,9 +236,7 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "target resolution", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -292,9 +280,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "report build/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -427,15 +413,11 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_path := guard_store_path()
-		defer remove_guard_store(shapes_path, allocator)
-		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(shapes_db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -488,9 +470,7 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
-	shapes_path := guard_store_path()
-	defer remove_guard_store(shapes_path)
-	shapes_db, shapes_open := kvstore.open(shapes_path)
+	shapes_db, shapes_open := kvstore.open_ephemeral()
 	if !testing.expectf(t, shapes_open == nil, "shapes store: %v", shapes_open) {
 		return
 	}
@@ -500,9 +480,7 @@ test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 		return
 	}
 
-	path := guard_store_path()
-	defer remove_guard_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -559,15 +537,11 @@ test_early_exit_and_recursion_unwind_cleanly :: proc(t: ^testing.T) {
 		for source in sources {
 			s: shacl.Shapes
 			defer shacl.shapes_destroy(&s)
-			shapes_path := guard_store_path()
-			defer remove_guard_store(shapes_path, allocator)
-			shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+			shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 			defer kvstore.close(shapes_db, allocator)
 			_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)source, nil, "", allocator)
 
-			path := guard_store_path()
-			defer remove_guard_store(path, allocator)
-			db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+			db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 			defer kvstore.close(db, allocator)
 			session: shacl_kvstore.Session
 			shacl_kvstore.session_init(&session, db)
@@ -611,15 +585,11 @@ test_conformance_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_path := guard_store_path()
-		defer remove_guard_store(shapes_path, allocator)
-		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(shapes_db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -650,9 +620,7 @@ test_repeated_compiles_do_not_accumulate :: proc(t: ^testing.T) {
 		context.allocator = allocator
 		for _ in 0 ..< 8 {
 			s: shacl.Shapes
-			path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
 			shacl.shapes_destroy(&s)
@@ -687,15 +655,11 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 		`
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_path := guard_store_path()
-		defer remove_guard_store(shapes_path, allocator)
-		shapes_db, _ := kvstore.open(shapes_path, kvstore.DEFAULT_OPTIONS, allocator)
+		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(shapes_db, allocator)
 		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(SUPPRESS), nil, "", allocator)
 
-		path := guard_store_path()
-		defer remove_guard_store(path, allocator)
-		db, _ := kvstore.open(path, kvstore.DEFAULT_OPTIONS, allocator)
+		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
 		defer kvstore.close(db, allocator)
 		session: shacl_kvstore.Session
 		shacl_kvstore.session_init(&session, db)
@@ -725,33 +689,4 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 			}
 		}
 	})
-}
-
-
-// Scratch databases for the guards. The in-memory backend needed no path.
-@(private = "file")
-guard_store_counter: u64
-
-@(private = "file")
-guard_store_path :: proc() -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	n := sync.atomic_add(&guard_store_counter, 1)
-	return fmt.aprintf("%s/odin-rdf-shacl-guard-%d-%d", strings.trim_right(tmp, `/\`), os.get_pid(), n)
-}
-
-@(private = "file")
-remove_guard_store :: proc(path: string, allocator := context.allocator) {
-	os.remove(fmt.tprintf("%s/data.mdb", path))
-	os.remove(fmt.tprintf("%s/lock.mdb", path))
-	os.remove(path)
-	delete(path, allocator)
 }

@@ -25,11 +25,8 @@ PREFIX :: `
 `
 
 @(private = "file")
-with_shapes :: proc(t: ^testing.T, name, source: string, s: ^shacl.Shapes) -> bool {
-	path := temp_path(name)
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+with_shapes :: proc(t: ^testing.T, source: string, s: ^shacl.Shapes) -> bool {
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return false
 	}
@@ -86,7 +83,7 @@ test_kvstore_compiles_the_same_model :: proc(t: ^testing.T) {
 				sh:in ( ex:one ex:two ) ;
 			] .
 		`
-	if !with_shapes(t, "compile-model", source, &s) {
+	if !with_shapes(t, source, &s) {
 		return
 	}
 
@@ -139,10 +136,7 @@ test_kvstore_model_outlives_the_store :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
 
-	path := temp_path("compile-outlives")
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return
 	}
@@ -233,7 +227,6 @@ test_kvstore_discovers_and_records_the_same :: proc(t: ^testing.T) {
 	defer shacl.shapes_destroy(&s)
 	if !with_shapes(
 		t,
-		"discovery",
 		PREFIX +
 		`
 		ex:Root a sh:NodeShape ;

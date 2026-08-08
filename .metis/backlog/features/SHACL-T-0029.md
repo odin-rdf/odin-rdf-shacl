@@ -235,3 +235,28 @@ the old branch.
   **Not done here, and deliberately**: the paired `open_ephemeral` adoption. The pin bump it
   needs is in, but it touches four scratch-path helpers across three packages and belongs in
   its own pass rather than inflating this diff.
+
+- **2026-08-08 — The paired half followed in its own commit.** 58 opens moved to
+  `kvstore.open_ephemeral`, three of the four scratch-path helpers deleted outright, and with
+  them the fixtures' dead `path` fields and the `name` arguments that existed only to label a
+  scratch directory. Net −207 lines. Per-width suite time went ~2.95s → ~0.25s on macOS, where
+  the map size is nearly free; Windows is where the 265s CI job should fall, since that is where
+  every `open` materializes `map_size` in full.
+
+  **Three opens keep `kvstore.open`, and the reasoning is the part worth keeping.** The linkage
+  proof stays on the durable constructor because `open_ephemeral` opens with
+  `NOSUBDIR | NOLOCK | NOSYNC` — a different flag set, no lock file, an unlinked inode on POSIX —
+  and proving the vendored archive resolves is a claim that should be made against the
+  configuration a consumer runs, not a test-only one. `test_kvstore_compilation_does_not_write`
+  keeps it because it closes a store and reopens *the same path* read-only, which an ephemeral
+  store has no way to express and whose `read_only` it ignores by contract. So `temp_path`
+  survives in `link_test.odin` with two callers rather than sixty.
+
+  **`bench/` was left on `open` with `DEFAULT_OPTIONS`, deliberately.** `EPHEMERAL_OPTIONS`
+  carries `no_sync = true` and a 16 MiB map, so adopting it there would quietly change what the
+  benchmark measures; benchmarks are not in CI, so there is no time argument to weigh against
+  that. That is the fourth of the helpers SHACL-T-0028 counted, and it stays on purpose.
+
+  The README gained a **Scratch datasets** section, so `open_ephemeral` is documented for
+  consumers rather than only used internally — including the Windows caveat that an abnormal
+  termination leaks one file, and the two exceptions above.

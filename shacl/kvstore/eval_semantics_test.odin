@@ -46,7 +46,6 @@ ex:P_alt_overlap  a sh:PropertyShape ; sh:path [ sh:alternativePath ( ex:p ex:p 
 @(private = "file")
 Fixture :: struct {
 	db:      ^kvstore.Store,
-	path:    string,
 	session: Session,
 	shapes:  shacl.Shapes,
 	bindings: shacl.Path_Bindings,
@@ -54,8 +53,7 @@ Fixture :: struct {
 
 @(private = "file")
 fixture_init :: proc(t: ^testing.T, f: ^Fixture, source: string) -> bool {
-	f.path = temp_path("eval-semantics")
-	db, open_err := kvstore.open(f.path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return false
 	}
@@ -79,9 +77,6 @@ fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
 	if f.db != nil {
 		kvstore.close(f.db)
-	}
-	if f.path != "" {
-		remove_store(f.path)
 	}
 }
 

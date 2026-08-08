@@ -173,8 +173,9 @@ the model to the store holding the data once, then validate as often as you
 like. The examples below are compiled and asserted by `tests/readme`, so they
 cannot drift from the API. That package differs from what you see here in two
 ways and no others: it reaches sibling directories where a consumer writes
-`rdf:` and `store:` collection imports, and it opens a throwaway directory where
-these open a path you would have chosen.
+`rdf:` and `store:` collection imports, and it calls `kvstore.open_ephemeral`
+where these open a path you would have chosen — see [Scratch
+datasets](#scratch-datasets) below.
 
 ```odin
 package main
@@ -274,6 +275,31 @@ on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 
 `ex:bob` has no `ex:name`, so `sh:minCount 1` reports one violation; `ex:alice`
 conforms.
+
+### Scratch datasets
+
+Every dataset is a filesystem path, because LMDB has no in-memory mode. When the
+data is scratch — a test, a validation of something you are about to throw away,
+a staging graph — `kvstore.open_ephemeral()` gives you a store with no path to
+name, make unique, or clean up, and which does not outlive the process:
+
+```odin
+db, err := kvstore.open_ephemeral()   // same contract, same procedure set as open
+defer kvstore.close(db)               // no directory to remove afterwards
+```
+
+On POSIX the file is unlinked as soon as it is open, so it is invisible for the
+store's whole life and reclaimed on close *or on crash*. Windows has no
+unlink-while-open, so an abnormal termination leaks one file in the temp
+directory.
+
+The reason to reach for it is not only tidiness. Its default map is 16 MiB
+rather than `open`'s 1 GiB, and on Windows LMDB has no sparse-file handling, so
+**every `open` there materializes the full map size on disk**. A suite that
+opens a store per test spends minutes writing files it never reads. This
+repository's own suites use it throughout, with two deliberate exceptions: the
+LMDB linkage proof, which is worth running against the durable constructor, and
+the test that reopens a store read-only, which needs a path to reopen.
 
 ### Three consumers, one traversal
 

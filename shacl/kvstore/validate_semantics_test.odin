@@ -25,20 +25,17 @@ import shacl ".."
 @(private = "file")
 Fixture :: struct {
 	db:       ^kvstore.Store,
-	path:     string,
 	session:  Session,
 	shapes:   shacl.Shapes,
 	bindings: shacl.Bindings,
 }
 
 @(private = "file")
-fixture_init :: proc(t: ^testing.T, f: ^Fixture, name, shapes_src, data_src: string) -> bool {
+fixture_init :: proc(t: ^testing.T, f: ^Fixture, shapes_src, data_src: string) -> bool {
 	// The shapes store is built, read, and destroyed before the data store
 	// exists, so nothing the model hands out can be borrowing from it.
 	{
-		path := temp_path(strings.concatenate({name, "-shapes"}, context.temp_allocator))
-		defer remove_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 			return false
 		}
@@ -59,8 +56,7 @@ fixture_init :: proc(t: ^testing.T, f: ^Fixture, name, shapes_src, data_src: str
 		}
 	}
 
-	f.path = temp_path(strings.concatenate({name, "-data"}, context.temp_allocator))
-	db, open_err := kvstore.open(f.path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return false
 	}
@@ -80,9 +76,6 @@ fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
 	if f.db != nil {
 		kvstore.close(f.db)
-	}
-	if f.path != "" {
-		remove_store(f.path)
 	}
 }
 
@@ -234,7 +227,7 @@ ex:three ex:p ex:a ; ex:p ex:b ; ex:p ex:c .
 test_constraint_dispatch :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "dispatch", DISPATCH_SHAPES, DISPATCH_DATA) {
+	if !fixture_init(t, &f, DISPATCH_SHAPES, DISPATCH_DATA) {
 		return
 	}
 	seen: Seen
@@ -280,7 +273,7 @@ ex:n ex:p ex:v .
 test_absent_terms_mean_opposite_things :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "absence", ABSENCE_SHAPES, ABSENCE_DATA) {
+	if !fixture_init(t, &f, ABSENCE_SHAPES, ABSENCE_DATA) {
 		return
 	}
 	seen: Seen
@@ -329,7 +322,7 @@ ex:something ex:p ex:other .
 test_unbound_focus_node_is_validated :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "unbound", UNBOUND_SHAPES, UNBOUND_DATA) {
+	if !fixture_init(t, &f, UNBOUND_SHAPES, UNBOUND_DATA) {
 		return
 	}
 	seen: Seen
@@ -381,7 +374,7 @@ ex:n ex:p ex:v .
 test_deactivated_shapes_are_silent :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "deactivated", DEACTIVATED_SHAPES, DEACTIVATED_DATA) {
+	if !fixture_init(t, &f, DEACTIVATED_SHAPES, DEACTIVATED_DATA) {
 		return
 	}
 	seen: Seen
@@ -426,7 +419,7 @@ ex:n ex:p ex:v .
 test_severity_is_any_iri_and_always_breaks_conformance :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "severity", SEVERITY_SHAPES, SEVERITY_DATA) {
+	if !fixture_init(t, &f, SEVERITY_SHAPES, SEVERITY_DATA) {
 		return
 	}
 
@@ -491,7 +484,7 @@ ex:n4 ex:p ex:v . ex:n5 ex:p ex:v . ex:n6 ex:p ex:v .
 test_early_exit_stops_the_traversal :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "early_exit", EARLY_EXIT_SHAPES, EARLY_EXIT_DATA) {
+	if !fixture_init(t, &f, EARLY_EXIT_SHAPES, EARLY_EXIT_DATA) {
 		return
 	}
 
@@ -542,7 +535,7 @@ ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:a .
 test_recursive_shape_is_a_reported_failure :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "recursive", RECURSIVE_SHAPES, RECURSIVE_DATA) {
+	if !fixture_init(t, &f, RECURSIVE_SHAPES, RECURSIVE_DATA) {
 		return
 	}
 	seen: Seen
@@ -573,7 +566,7 @@ test_a_reused_shape_is_not_recursion :: proc(t: ^testing.T) {
 	`
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "shared", SHARED, DATA) {
+	if !fixture_init(t, &f, SHARED, DATA) {
 		return
 	}
 	seen: Seen
@@ -601,7 +594,7 @@ test_conforming_graph_reports_only_its_head :: proc(t: ^testing.T) {
 	`
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "shapes", SHAPES, DATA) {
+	if !fixture_init(t, &f, SHAPES, DATA) {
 		return
 	}
 
@@ -656,7 +649,7 @@ shape_index :: proc(s: ^shacl.Shapes, iri: string) -> int {
 test_conforms_node_answers_for_a_named_shape :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "suppress", SUPPRESS_SHAPES, SUPPRESS_DATA) {
+	if !fixture_init(t, &f, SUPPRESS_SHAPES, SUPPRESS_DATA) {
 		return
 	}
 
@@ -705,7 +698,7 @@ test_conforms_node_answers_for_a_named_shape :: proc(t: ^testing.T) {
 test_conforms_node_does_not_disturb_a_validation :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "suppress", SUPPRESS_SHAPES, SUPPRESS_DATA) {
+	if !fixture_init(t, &f, SUPPRESS_SHAPES, SUPPRESS_DATA) {
 		return
 	}
 
@@ -760,7 +753,7 @@ ex:P a sh:PropertyShape ; sh:targetNode ex:a ; sh:path ex:p ; sh:property ex:P .
 test_conforms_node_reports_recursion_as_a_failure :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "recursive", RECURSIVE_SHAPES, SUPPRESS_DATA) {
+	if !fixture_init(t, &f, RECURSIVE_SHAPES, SUPPRESS_DATA) {
 		return
 	}
 
@@ -808,7 +801,7 @@ ex:unused ex:p ex:q .
 test_value_range_boundaries :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "range", RANGE_SHAPES, RANGE_DATA) {
+	if !fixture_init(t, &f, RANGE_SHAPES, RANGE_DATA) {
 		return
 	}
 	seen: Seen
@@ -859,7 +852,7 @@ ex:NoBound a sh:NodeShape ; sh:targetNode 4 ; sh:minInclusive ex:NotANumber .
 test_value_range_incomparable_violates :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "compare", COMPARE_SHAPES, RANGE_DATA) {
+	if !fixture_init(t, &f, COMPARE_SHAPES, RANGE_DATA) {
 		return
 	}
 	seen: Seen
@@ -918,7 +911,7 @@ ex:hasBlank ex:p [ ex:q "irrelevant" ] .
 test_string_length_over_nodes_that_are_not_literals :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "string", STRING_SHAPES, STRING_DATA) {
+	if !fixture_init(t, &f, STRING_SHAPES, STRING_DATA) {
 		return
 	}
 	seen: Seen
@@ -966,7 +959,7 @@ ex:Insensitive a sh:NodeShape ; sh:pattern "joh" ; sh:flags "i" ;
 test_pattern_searches_and_honours_flags :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "pattern", PATTERN_SHAPES, STRING_DATA) {
+	if !fixture_init(t, &f, PATTERN_SHAPES, STRING_DATA) {
 		return
 	}
 	seen: Seen
@@ -1000,9 +993,7 @@ test_an_unsupported_flag_is_an_error :: proc(t: ^testing.T) {
 	defer shacl.shapes_destroy(&f.shapes)
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:pattern "a.b" ; sh:flags "s" .`
 
-	path := temp_path("unsupported-flag")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
@@ -1056,7 +1047,7 @@ ex:three ex:p "Me"@en , "Moi"@fr , "untagged" , "also untagged" .
 test_language_in_and_unique_lang :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "language", LANGUAGE_SHAPES, LANGUAGE_DATA) {
+	if !fixture_init(t, &f, LANGUAGE_SHAPES, LANGUAGE_DATA) {
 		return
 	}
 	seen: Seen
@@ -1099,7 +1090,7 @@ test_unique_lang_is_switched_on_by_the_term_true :: proc(t: ^testing.T) {
 	ex:S a sh:NodeShape ; sh:targetNode ex:one ;
 		sh:property [ sh:path ex:p ; sh:uniqueLang "1"^^xsd:boolean ] .
 	`
-	if !fixture_init(t, &f, "uniquelang-typed", shapes, LANGUAGE_DATA) {
+	if !fixture_init(t, &f, shapes, LANGUAGE_DATA) {
 		return
 	}
 	seen: Seen
@@ -1150,7 +1141,7 @@ ex:pairs ex:p "A" ; ex:p "B" ; ex:q "B" ; ex:q "C" .
 test_property_pair_equality :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "pair", PAIR_SHAPES, PAIR_DATA) {
+	if !fixture_init(t, &f, PAIR_SHAPES, PAIR_DATA) {
 		return
 	}
 	seen: Seen
@@ -1207,7 +1198,7 @@ ex:mixed ex:p 1 ; ex:p 2 ; ex:q "a" ; ex:q "b" .
 test_property_pair_ordering :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "order", ORDER_SHAPES, ORDER_DATA) {
+	if !fixture_init(t, &f, ORDER_SHAPES, ORDER_DATA) {
 		return
 	}
 	seen: Seen
@@ -1302,7 +1293,7 @@ ex:kid        ex:allowed 1 ; ex:extra 2 .
 test_closed :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "closed", CLOSED_SHAPES, CLOSED_DATA) {
+	if !fixture_init(t, &f, CLOSED_SHAPES, CLOSED_DATA) {
 		return
 	}
 	seen: Seen
@@ -1374,7 +1365,7 @@ ex:inC a ex:C .
 test_logical_combinators :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "logical", LOGICAL_SHAPES, LOGICAL_DATA) {
+	if !fixture_init(t, &f, LOGICAL_SHAPES, LOGICAL_DATA) {
 		return
 	}
 	seen: Seen
@@ -1436,7 +1427,7 @@ ex:bothC  a ex:C1 , ex:C2 .
 test_xone_is_exactly_one :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "xone", XONE_SHAPES, XONE_DATA) {
+	if !fixture_init(t, &f, XONE_SHAPES, XONE_DATA) {
 		return
 	}
 	seen: Seen
@@ -1488,7 +1479,7 @@ ex:neitherAB a ex:Other .
 test_combinators_nest :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "nest", NEST_SHAPES, NEST_DATA) {
+	if !fixture_init(t, &f, NEST_SHAPES, NEST_DATA) {
 		return
 	}
 	seen: Seen
@@ -1547,7 +1538,7 @@ ex:iri ex:something 1 .
 test_inner_results_do_not_reach_the_caller :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "no_leak", NO_LEAK_SHAPES, NO_LEAK_DATA) {
+	if !fixture_init(t, &f, NO_LEAK_SHAPES, NO_LEAK_DATA) {
 		return
 	}
 	seen: Seen
@@ -1589,7 +1580,7 @@ ex:a3 ex:p 1 .
 test_an_inner_stop_does_not_truncate_the_outer_traversal :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "stream", STREAM_SHAPES, STREAM_DATA) {
+	if !fixture_init(t, &f, STREAM_SHAPES, STREAM_DATA) {
 		return
 	}
 	seen: Seen
@@ -1631,7 +1622,7 @@ ex:n ex:p 1 .
 test_recursion_through_a_combinator_is_a_failure :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "self_not", SELF_NOT_SHAPES, SELF_NOT_DATA) {
+	if !fixture_init(t, &f, SELF_NOT_SHAPES, SELF_NOT_DATA) {
 		return
 	}
 	seen: Seen
@@ -1675,7 +1666,7 @@ ex:owner ex:child ex:good ; ex:child ex:bad .
 test_node_constraint :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "node", NODE_SHAPES, NODE_DATA) {
+	if !fixture_init(t, &f, NODE_SHAPES, NODE_DATA) {
 		return
 	}
 	seen: Seen
@@ -1728,7 +1719,7 @@ ex:four  ex:item ex:g1 , ex:g2 , ex:g3 , ex:g4 .
 test_qualified_value_shape :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "qualified", QUALIFIED_SHAPES, QUALIFIED_DATA) {
+	if !fixture_init(t, &f, QUALIFIED_SHAPES, QUALIFIED_DATA) {
 		return
 	}
 	seen: Seen
@@ -1810,7 +1801,7 @@ ex:cleanHand ex:digit ex:f1 , ex:f2 , ex:t1 .
 test_qualified_value_shapes_disjoint :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "disjoint", DISJOINT_SHAPES, DISJOINT_DATA) {
+	if !fixture_init(t, &f, DISJOINT_SHAPES, DISJOINT_DATA) {
 		return
 	}
 	seen: Seen
@@ -1875,7 +1866,7 @@ ex:k a ex:C2 .
 test_qualified_parameters_without_a_value_shape_are_inert :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "inert", INERT_SHAPES, INERT_DATA) {
+	if !fixture_init(t, &f, INERT_SHAPES, INERT_DATA) {
 		return
 	}
 	seen: Seen
@@ -1939,7 +1930,7 @@ test_recursion_through_shape_based_constraints_is_a_failure :: proc(t: ^testing.
 	for c in cases {
 		f: Fixture
 		defer fixture_destroy(&f)
-		if !fixture_init(t, &f, "recursion", c.shapes, RECURSION_DATA) {
+		if !fixture_init(t, &f, c.shapes, RECURSION_DATA) {
 			continue
 		}
 		seen: Seen

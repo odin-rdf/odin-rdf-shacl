@@ -52,7 +52,6 @@ ex:three ex:p ex:a ; ex:p ex:b ; ex:p ex:c .
 @(private = "file")
 Fixture :: struct {
 	db:       ^kvstore.Store,
-	path:     string,
 	session:  Session,
 	shapes:   shacl.Shapes,
 	bindings: shacl.Bindings,
@@ -62,11 +61,9 @@ Fixture :: struct {
 // then opens the data store — so every test here exercises the ownership
 // property rather than only the one that names it.
 @(private = "file")
-fixture_init :: proc(t: ^testing.T, f: ^Fixture, name, shapes_src, data_src: string) -> bool {
+fixture_init :: proc(t: ^testing.T, f: ^Fixture, shapes_src, data_src: string) -> bool {
 	{
-		path := temp_path(strings.concatenate({name, "-shapes"}, context.temp_allocator))
-		defer remove_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 			return false
 		}
@@ -87,8 +84,7 @@ fixture_init :: proc(t: ^testing.T, f: ^Fixture, name, shapes_src, data_src: str
 		}
 	}
 
-	f.path = temp_path(strings.concatenate({name, "-data"}, context.temp_allocator))
-	db, open_err := kvstore.open(f.path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return false
 	}
@@ -108,9 +104,6 @@ fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
 	if f.db != nil {
 		kvstore.close(f.db)
-	}
-	if f.path != "" {
-		remove_store(f.path)
 	}
 }
 
@@ -184,7 +177,7 @@ local_name :: proc(iri: string) -> string {
 test_kvstore_validation_matches_memstore :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "validate", VALIDATE_SHAPES, VALIDATE_DATA) {
+	if !fixture_init(t, &f, VALIDATE_SHAPES, VALIDATE_DATA) {
 		return
 	}
 
@@ -228,7 +221,7 @@ test_kvstore_validation_matches_memstore :: proc(t: ^testing.T) {
 test_kvstore_report_outlives_the_store :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "validate-report", VALIDATE_SHAPES, VALIDATE_DATA) {
+	if !fixture_init(t, &f, VALIDATE_SHAPES, VALIDATE_DATA) {
 		return
 	}
 
@@ -273,7 +266,7 @@ test_kvstore_report_outlives_the_store :: proc(t: ^testing.T) {
 test_kvstore_early_exit :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "validate-early", VALIDATE_SHAPES, VALIDATE_DATA) {
+	if !fixture_init(t, &f, VALIDATE_SHAPES, VALIDATE_DATA) {
 		return
 	}
 
@@ -310,7 +303,7 @@ test_kvstore_recursive_shape_is_a_reported_failure :: proc(t: ^testing.T) {
 	`
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "validate-recursive", RECURSIVE, CYCLE) {
+	if !fixture_init(t, &f, RECURSIVE, CYCLE) {
 		return
 	}
 
@@ -361,7 +354,7 @@ shape_index :: proc(s: ^shacl.Shapes, iri: string) -> int {
 test_kvstore_conforms_node :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, "conforms-node", SUPPRESS_SHAPES, SUPPRESS_DATA) {
+	if !fixture_init(t, &f, SUPPRESS_SHAPES, SUPPRESS_DATA) {
 		return
 	}
 

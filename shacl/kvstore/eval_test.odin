@@ -91,10 +91,7 @@ expect_set :: proc(t: ^testing.T, got: []string, want: []string, what: string) {
 
 @(test)
 test_kvstore_path_evaluation_matches_memstore :: proc(t: ^testing.T) {
-	path := temp_path("eval-paths")
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return
 	}
@@ -143,10 +140,7 @@ test_kvstore_path_evaluation_matches_memstore :: proc(t: ^testing.T) {
 // caller learns to ignore.
 @(test)
 test_kvstore_empty_path_is_not_an_error :: proc(t: ^testing.T) {
-	path := temp_path("eval-empty")
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return
 	}
@@ -225,10 +219,7 @@ collect_name :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
 
 @(test)
 test_kvstore_target_resolution :: proc(t: ^testing.T) {
-	path := temp_path("targets")
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return
 	}
@@ -287,10 +278,7 @@ test_kvstore_target_resolution :: proc(t: ^testing.T) {
 // before reading the graph.
 @(test)
 test_kvstore_report_owns_its_terms :: proc(t: ^testing.T) {
-	path := temp_path("report")
-	defer remove_store(path)
-
-	st, open_err := kvstore.open(path)
+	st, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "kvstore.open failed: %v", open_err) {
 		return
 	}

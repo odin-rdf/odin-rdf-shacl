@@ -2,7 +2,6 @@ package w3c
 
 import "core:fmt"
 import "core:os"
-import "core:sync"
 import "core:path/filepath"
 import "core:strings"
 
@@ -128,9 +127,7 @@ run_kvstore :: proc(
 	compile_err := shacl.Error{}
 	shapes_store_err: kvstore.Error
 	{
-		path := temp_store_path(tag, "shapes")
-		defer remove_temp_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if open_err != nil {
 			run.detail = "shapes store could not be opened"
 			return
@@ -164,9 +161,7 @@ run_kvstore :: proc(
 	}
 	run.ignored = ignored_text(&model)
 
-	path := temp_store_path(tag, "data")
-	defer remove_temp_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		run.detail = "data store could not be opened"
 		return
@@ -237,48 +232,6 @@ read_entry_file :: proc(dir, name: string) -> (source: string, ok: bool) {
 		return "", false
 	}
 	return string(data), true
-}
-
-// temp_store_path joins the OS temp directory with a run-unique name.
-//
-// The separator is added here rather than assumed, and the fallback order
-// matters: macOS exports TMPDIR with a trailing slash, Linux usually exports
-// nothing at all, and Windows names the variable TEMP or TMP and has no /tmp to
-// fall back to. The same helper `shacl/kvstore`'s tests carry, for the same
-// reason — it is private to that package, and a test package cannot import
-// another's.
-// The counter is what actually separates two concurrent stores. `tag` and
-// `role` are for a human reading a leftover directory; they are not unique
-// on their own, and were not required to be while the entry tag came from a
-// single-threaded suite walk. The report tests share one tag across five
-// parallel tests, so a deterministic path collided as a directory that
-// already exists (STORE-A-0006 port, SHACL-T-0028).
-@(private)
-store_path_counter: u64
-
-temp_store_path :: proc(tag, role: string) -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	if tmp[len(tmp) - 1] == '/' || tmp[len(tmp) - 1] == '\\' {
-		tmp = tmp[:len(tmp) - 1]
-	}
-	n := sync.atomic_add(&store_path_counter, 1)
-	return fmt.aprintf("%s/odin-rdf-shacl-w3c-%s-%s-%d-%d", tmp, tag, role, os.get_pid(), n)
-}
-
-remove_temp_store :: proc(path: string) {
-	os.remove(fmt.tprintf("%s/data.mdb", path))
-	os.remove(fmt.tprintf("%s/lock.mdb", path))
-	os.remove(path)
-	delete(path)
 }
 
 // graph_text renders a graph for a failure message. Diagnostics only: when a

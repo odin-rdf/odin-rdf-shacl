@@ -9,6 +9,14 @@ import kvstore "store:store/kvstore"
 
 // temp_path joins the OS temp directory with a run-unique name.
 //
+// **Two tests use this, and everything else in the suite opens an ephemeral
+// store instead** (odin-rdf-store v0.3.0, `kvstore.open_ephemeral` — no path to
+// name, make unique, or clean up, and a 16 MiB map rather than 1 GiB). What is
+// left here are the two cases that genuinely need a path on disk: the linkage
+// proof below, which is worth running against the constructor a consumer
+// actually uses, and `test_kvstore_compilation_does_not_write`, which closes a
+// store and reopens the same path read-only.
+//
 // The separator is added here rather than assumed, and the fallback order
 // matters: macOS exports TMPDIR with a trailing slash, Linux usually exports
 // nothing at all, and Windows names the variable TEMP or TMP and has no /tmp
@@ -16,12 +24,10 @@ import kvstore "store:store/kvstore"
 // the filesystem root on Linux, which a non-root user cannot create. Copied
 // deliberately from odin-rdf-store's own test helper, which is private to
 // that package.
-// Scratch paths must be unique per store, not merely per test name. The
-// suite grew from 14 tests to ~85 when the in-memory backend was retired
-// (odin-rdf-store STORE-A-0006), the runner uses ~10 threads, and several
-// tests hold two stores at once (shapes and data). A bare name would let
-// two of them collide, which fails as a store error and reproduces only
-// under load; it would also inherit a stale directory from a previous run.
+//
+// The counter is what makes two concurrent stores distinct, and it stays even
+// at two callers: the runner is threaded, and a name-only path would also
+// inherit a stale directory from a previous run.
 @(private)
 path_counter: u64
 
@@ -60,6 +66,13 @@ remove_store :: proc(path: string) {
 // package that merely imports kvstore would compile without ever proving the
 // foreign archive resolves and runs, so this opens a real store, reads
 // through it, and closes it.
+//
+// **A real one, on a real path, deliberately.** The rest of the suite moved to
+// open_ephemeral, which opens with NOSUBDIR | NOLOCK | NOSYNC — a different
+// flag set, no lock file, and on POSIX an unlinked inode. That is the right
+// default for a test, but it is not the configuration a consumer runs, and
+// proving the archive works is exactly the claim that should be made against
+// the configuration a consumer runs.
 //
 // It is a scaffolding test (SHACL-T-0001), not a validation test: it asserts
 // the link, not any SHACL behaviour. It stays after SHACL-T-0003 fills this

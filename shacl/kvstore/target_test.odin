@@ -61,7 +61,6 @@ ex:looper a ex:Loop_B .
 @(private = "file")
 Split :: struct {
 	data_db:      ^kvstore.Store,
-	data_path:    string,
 	data_session: Session,
 	shapes:       shacl.Shapes,
 	targets:      shacl.Target_Bindings,
@@ -72,9 +71,7 @@ split_init :: proc(t: ^testing.T, f: ^Split) -> bool {
 	// The shapes store is opened, compiled from, and closed before the data
 	// store exists, so nothing the model holds can be borrowing from it.
 	{
-		path := temp_path("target-shapes")
-		defer remove_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 			return false
 		}
@@ -92,8 +89,7 @@ split_init :: proc(t: ^testing.T, f: ^Split) -> bool {
 		}
 	}
 
-	f.data_path = temp_path("target-data")
-	db, open_err := kvstore.open(f.data_path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return false
 	}
@@ -114,9 +110,6 @@ split_destroy :: proc(f: ^Split) {
 	shacl.shapes_destroy(&f.shapes)
 	if f.data_db != nil {
 		kvstore.close(f.data_db)
-	}
-	if f.data_path != "" {
-		remove_store(f.data_path)
 	}
 }
 
@@ -332,9 +325,7 @@ test_visitor_can_stop_resolution :: proc(t: ^testing.T) {
 // them; its focus nodes are its parent's value nodes, resolved elsewhere.
 @(test)
 test_shape_without_targets_yields_nothing :: proc(t: ^testing.T) {
-	path := temp_path("no-targets")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}

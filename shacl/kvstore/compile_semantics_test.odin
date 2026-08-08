@@ -24,9 +24,7 @@ PREFIX :: `
 
 @(private = "file")
 compile_source :: proc(t: ^testing.T, s: ^shacl.Shapes, source: string) -> bool {
-	path := temp_path("compile-semantics")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 		return false
 	}
@@ -147,9 +145,7 @@ test_model_outlives_the_store :: proc(t: ^testing.T) {
 	// touching the model, so the assertion is unambiguous. On kvstore the
 	// close unmaps the pages the terms were read from, so a model that had
 	// borrowed rather than copied reads unmapped memory here.
-	path := temp_path("model-outlives")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
@@ -522,9 +518,7 @@ test_ill_formed_shapes :: proc(t: ^testing.T) {
 		s: shacl.Shapes
 		source := strings.concatenate({PREFIX, c.source})
 		defer delete(source)
-		path := temp_path("compile-cases")
-		defer remove_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if !testing.expectf(t, open_err == nil, "%s: store: %v", c.name, open_err) {
 			continue
 		}
@@ -590,9 +584,7 @@ test_cyclic_list_is_rejected :: proc(t: ^testing.T) {
 		_:cell <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> ex:x ;
 		       <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> _:cell .
 		`
-	path := temp_path("in-not-a-list")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
@@ -608,9 +600,7 @@ test_cyclic_list_is_rejected :: proc(t: ^testing.T) {
 // asserts the dictionary is the same size afterwards.
 @(test)
 test_compilation_does_not_intern :: proc(t: ^testing.T) {
-	path := temp_path("no-intern")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
@@ -773,9 +763,7 @@ test_a_literal_is_not_a_shape :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:node "not a shape" .`
-	path := temp_path("literal-not-shape")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}

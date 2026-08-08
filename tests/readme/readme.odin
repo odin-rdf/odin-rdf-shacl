@@ -6,10 +6,10 @@
 // The bodies below are the README's, verbatim, with two differences and no
 // others. The import lines: the README writes them the way a consumer would,
 // through the `rdf:` and `store:` collections and its own module path, and this
-// package reaches sibling directories instead. And the store path: the README
-// opens a path the reader would have chosen, while these open a throwaway
-// directory through the helper at the bottom of this file — everything between
-// `kvstore.open` and `kvstore.close` is the README's.
+// package reaches sibling directories instead. And the opening line: the README
+// opens a path the reader would have chosen, while these call open_ephemeral,
+// which is what a suite wants and what a consumer with a real dataset does not.
+// Everything after that line is the README's.
 //
 // Keeping that true is the whole point. It stopped being true once (the quick
 // start lost its `session_init` calls and named a `Sink` field that did not
@@ -21,13 +21,6 @@ import "core:testing"
 
 import rdf "rdf:rdf"
 import kvstore "store:store/kvstore"
-
-import "core:os"
-import "core:sync"
-
-import "core:fmt"
-
-import "core:strings"
 
 import shacl "../../shacl"
 import shacl_kvstore "../../shacl/kvstore"
@@ -59,9 +52,7 @@ validate_example :: proc(report: ^[dynamic]string) -> shacl.Failure {
 	// 1. Open the store. It is a directory on disk, opened once and kept.
 	//    Shapes and data live in graphs of it; this example uses one store and
 	//    loads both into the default graph.
-	path := readme_store_path()
-	defer remove_readme_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		return .None
 	}
@@ -138,9 +129,7 @@ test_readme_validate_example :: proc(t: ^testing.T) {
 // The conformance-only form, which is the README's second example: it stops at
 // the first violation instead of finding them all.
 conforms_example :: proc() -> (bool, shacl.Failure) {
-	path := readme_store_path()
-	defer remove_readme_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		return false, .None
 	}
@@ -174,9 +163,7 @@ test_readme_conforms_example :: proc(t: ^testing.T) {
 // odin-rdf-parser's job through any of its four emitters — this produces the
 // graph and leaves the format to the caller.
 report_example :: proc(r: ^shacl.Report) -> shacl.Failure {
-	path := readme_store_path()
-	defer remove_readme_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		return .None
 	}
@@ -221,9 +208,7 @@ test_readme_report_example :: proc(t: ^testing.T) {
 // example, and the public face of suppressed validation (SHACL-A-0002) — it
 // produces no results, and it does not care what the shapes graph targets.
 conforms_node_example :: proc() -> (bool, shacl.Failure) {
-	path := readme_store_path()
-	defer remove_readme_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		return false, .None
 	}
@@ -284,9 +269,7 @@ ex:alice ex:name "Alice Smith" .
 
 // Returns whether the candidate was kept.
 validate_before_commit_example :: proc() -> (kept: bool, failure: shacl.Failure) {
-	path := readme_store_path()
-	defer remove_readme_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if open_err != nil {
 		return false, .None
 	}
@@ -343,33 +326,4 @@ test_readme_validate_before_commit_example :: proc(t: ^testing.T) {
 	// Validated on its own it would carry no ex:Person target at all and would
 	// conform vacuously, which is the answer this pattern exists to avoid.
 	testing.expect(t, !kept)
-}
-
-// A throwaway database directory for the example. A real consumer opens a
-// path it chose and keeps it.
-@(private)
-readme_store_counter: u64
-
-@(private)
-readme_store_path :: proc() -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	n := sync.atomic_add(&readme_store_counter, 1)
-	return fmt.aprintf("%s/odin-rdf-shacl-readme-%d-%d", strings.trim_right(tmp, `/\`), os.get_pid(), n)
-}
-
-@(private)
-remove_readme_store :: proc(path: string) {
-	os.remove(fmt.tprintf("%s/data.mdb", path))
-	os.remove(fmt.tprintf("%s/lock.mdb", path))
-	os.remove(path)
-	delete(path)
 }

@@ -56,15 +56,13 @@ ex:alice ex:name "Alice" .
 @(private = "file")
 Fixture :: struct {
 	db:      ^kvstore.Store,
-	path:    string,
 	session: shacl_kvstore.Session,
 	shapes:  shacl.Shapes,
 }
 
 @(private = "file")
 fixture_init :: proc(t: ^testing.T, f: ^Fixture) -> bool {
-	f.path = temp_store_path("report", "shapes")
-	db, open_err := kvstore.open(f.path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return false
 	}
@@ -83,9 +81,6 @@ fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
 	if f.db != nil {
 		kvstore.close(f.db)
-	}
-	if f.path != "" {
-		remove_temp_store(f.path)
 	}
 }
 
@@ -474,9 +469,7 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 	{
-		path := temp_store_path("blank-report", "shapes")
-		defer remove_temp_store(path)
-		db, open_err := kvstore.open(path)
+		db, open_err := kvstore.open_ephemeral()
 		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 			return
 		}
@@ -493,9 +486,7 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 		}
 	}
 
-	path := temp_store_path("blank-report", "data")
-	defer remove_temp_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}

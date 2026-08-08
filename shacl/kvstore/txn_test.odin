@@ -1,6 +1,5 @@
 package shacl_kvstore
 
-import "core:strings"
 import "core:testing"
 
 import rdf "rdf:rdf"
@@ -54,11 +53,8 @@ ex:alice a ex:Person ; ex:email "alice@work.example.org" .
 // every test below holds a model that outlives the store it came from — the
 // arrangement SHACL-A-0001 promises and the one a long-lived validator uses.
 @(private = "file")
-txn_shapes :: proc(t: ^testing.T, s: ^shacl.Shapes, name: string) -> bool {
-	path := temp_path(strings.concatenate({name, "-shapes"}, context.temp_allocator))
-	defer remove_store(path)
-
-	db, open_err := kvstore.open(path)
+txn_shapes :: proc(t: ^testing.T, s: ^shacl.Shapes) -> bool {
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
 		return false
 	}
@@ -99,15 +95,13 @@ conforms_in :: proc(t: ^testing.T, shapes: ^shacl.Shapes, session: ^Session, wha
 @(test)
 test_validate_before_commit_sees_the_committed_data :: proc(t: ^testing.T) {
 	shapes: shacl.Shapes
-	if !txn_shapes(t, &shapes, "before-commit") {
+	if !txn_shapes(t, &shapes) {
 		return
 	}
 	defer shacl.shapes_destroy(&shapes)
 
 	// The dataset the write would join.
-	path := temp_path("before-commit-data")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -149,9 +143,7 @@ test_validate_before_commit_sees_the_committed_data :: proc(t: ^testing.T) {
 	// The half that makes this a test of the feature. The same candidate, the
 	// same shapes, no committed data — and it conforms, which is the answer the
 	// isolated-candidate workaround would have returned for the real dataset.
-	iso_path := temp_path("before-commit-isolated")
-	defer remove_store(iso_path)
-	iso, iso_open := kvstore.open(iso_path)
+	iso, iso_open := kvstore.open_ephemeral()
 	if !testing.expectf(t, iso_open == nil, "isolated store: %v", iso_open) {
 		return
 	}
@@ -176,14 +168,12 @@ test_validate_before_commit_sees_the_committed_data :: proc(t: ^testing.T) {
 @(test)
 test_aborting_discards_the_rejected_candidate :: proc(t: ^testing.T) {
 	shapes: shacl.Shapes
-	if !txn_shapes(t, &shapes, "abort") {
+	if !txn_shapes(t, &shapes) {
 		return
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	path := temp_path("abort-data")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -226,14 +216,12 @@ test_aborting_discards_the_rejected_candidate :: proc(t: ^testing.T) {
 @(test)
 test_read_txn_answers_as_autocommit_does :: proc(t: ^testing.T) {
 	shapes: shacl.Shapes
-	if !txn_shapes(t, &shapes, "read-txn") {
+	if !txn_shapes(t, &shapes) {
 		return
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	path := temp_path("read-txn-data")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -275,14 +263,12 @@ test_read_txn_answers_as_autocommit_does :: proc(t: ^testing.T) {
 @(test)
 test_read_txn_does_not_see_a_later_commit :: proc(t: ^testing.T) {
 	shapes: shacl.Shapes
-	if !txn_shapes(t, &shapes, "snapshot") {
+	if !txn_shapes(t, &shapes) {
 		return
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	path := temp_path("snapshot-data")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
 		return
 	}
@@ -325,9 +311,7 @@ test_read_txn_does_not_see_a_later_commit :: proc(t: ^testing.T) {
 // transaction, and a model that survives the transaction being thrown away.
 @(test)
 test_compile_turtle_txn_compiles_uncommitted_shapes :: proc(t: ^testing.T) {
-	path := temp_path("compile-txn")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
@@ -403,14 +387,12 @@ test_compile_turtle_txn_compiles_uncommitted_shapes :: proc(t: ^testing.T) {
 @(test)
 test_autocommit_session_cannot_see_the_open_write :: proc(t: ^testing.T) {
 	shapes: shacl.Shapes
-	if !txn_shapes(t, &shapes, "two-sessions") {
+	if !txn_shapes(t, &shapes) {
 		return
 	}
 	defer shacl.shapes_destroy(&shapes)
 
-	path := temp_path("two-sessions-data")
-	defer remove_store(path)
-	db, open_err := kvstore.open(path)
+	db, open_err := kvstore.open_ephemeral()
 	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
 		return
 	}
