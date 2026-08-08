@@ -96,6 +96,84 @@ conforms :: proc(
 	return c.conforms, failure
 }
 
+// validate_node validates one node against one shape and streams the results —
+// `conforms_node`'s question with the answer a caller can act on.
+//
+// The consumer is a write path: accept a resource, validate it, and tell
+// whoever submitted it *which constraint* it broke. The alternative available
+// before this was to run a whole `validate` and filter by focus node, which
+// costs the dataset to answer about one resource.
+//
+// `node` is given as an `rdf.Term` and resolved through the store's
+// non-interning lookup, exactly as `conforms_node` resolves it: **a term the
+// data graph never mentions is still a perfectly good focus node**, validated
+// as unbound, and every path from it reaches nothing. That emptiness is
+// meaningful rather than an error — `sh:minCount 1` on such a node violates.
+//
+// Same caveat as every other entry point here: check `session_error(session)`
+// as well as the Failure.
+validate_node :: proc(
+	s: ^shacl.Shapes,
+	b: ^shacl.Bindings,
+	session: ^Session,
+	node: rdf.Term,
+	shape_index: int,
+	visit: shacl.Result_Visitor,
+	visit_data: rawptr,
+	allocator := context.allocator,
+) -> shacl.Failure {
+	access := shacl.Access {
+		scan      = scan_adapter,
+		step      = step_adapter,
+		outgoing  = outgoing_adapter,
+		load      = load_adapter,
+		data      = session,
+		load_data = session,
+	}
+	return shacl.validate_node(s, b, access, shape_index, node_focus(session, node), visit, visit_data, allocator)
+}
+
+// validate_node_report validates one node against one shape and builds the
+// `sh:ValidationReport` graph for it — standing to `validate_node` as
+// `validate_report` stands to `validate`.
+//
+// The report is about that one node, so `sh:conforms` in it answers the narrow
+// question and not the graph's. It owns every term in it and outlives the store,
+// for the reason `validate_report`'s does.
+validate_node_report :: proc(
+	r: ^shacl.Report,
+	s: ^shacl.Shapes,
+	b: ^shacl.Bindings,
+	session: ^Session,
+	node: rdf.Term,
+	shape_index: int,
+	allocator := context.allocator,
+) -> shacl.Failure {
+	sink := Report_Sink {
+		report  = r,
+		shapes  = s,
+		session = session,
+	}
+	failure := validate_node(s, b, session, node, shape_index, report_sink_visitor, &sink, allocator)
+	shacl.report_finish(r)
+	return failure
+}
+
+// node_focus resolves a caller's term to a focus node: bound when the data
+// store holds it, unbound when it does not. Shared by the two entry points that
+// take a node by name, so they cannot drift on what an absent term means.
+@(private)
+node_focus :: proc(session: ^Session, node: rdf.Term) -> shacl.Focus_Node {
+	focus := shacl.Focus_Node {
+		term = node,
+	}
+	if id, found := find_adapter(session, node); found {
+		focus.id = id
+		focus.bound = true
+	}
+	return focus
+}
+
 // conforms_node answers the conformance question for one node against one
 // shape: does `node` conform to `s.shapes[shape_index]` and every property
 // shape below it (§3.4)? No results are produced — the question is the boolean.
@@ -123,12 +201,5 @@ conforms_node :: proc(
 		data      = session,
 		load_data = session,
 	}
-	focus := shacl.Focus_Node {
-		term = node,
-	}
-	if id, found := find_adapter(session, node); found {
-		focus.id = id
-		focus.bound = true
-	}
-	return shacl.conforms_node(s, b, access, shape_index, focus, allocator)
+	return shacl.conforms_node(s, b, access, shape_index, node_focus(session, node), allocator)
 }

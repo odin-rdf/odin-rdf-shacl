@@ -222,6 +222,66 @@ validate :: proc(
 	return v.failure
 }
 
+// validate_node validates **one node against one shape** and streams the
+// results, which is the question `conforms_node` answers with a boolean.
+//
+// The two are the same walk and differ only in what receives the results:
+// `conforms_node` swaps in a probe that records the first one and stops,
+// because its six internal consumers — `sh:not`, `sh:or`, `sh:xone`, and the
+// three qualified parameters — want conformance *without* a report. This is the
+// third caller, the one that supplies its own visitor. An application checking a
+// resource it is about to accept asks exactly the narrow question and needs
+// exactly the opposite answer shape: not "no", but *which constraint*.
+//
+// **Use this rather than filtering `validate`'s results by focus node.** That
+// works and is correct, and it validates every targeted node in the dataset to
+// answer about one — so the cost of asking about a single resource scales with
+// the data around it, which for a consumer doing this per write is a latency
+// problem before it is anything worse.
+//
+// The `Failure` means what it means everywhere else: `.None` says the walk
+// completed or the visitor stopped it, and anything else says the stream is
+// incomplete and must not be read as conformance. Recursion detection, the
+// subclass-closure cache, and the stop-on-false visitor contract are the shared
+// ones, because this is the shared walk.
+//
+// An out-of-range `shape_index` produces no results and no failure, mirroring
+// `conforms_node`, which answers "does not conform" rather than reading memory
+// it has no business reading.
+//
+// **The shape need not target the node.** §3.4 defines conformance for any node
+// and any shape, and that is deliberate — naming a shape is the point of this
+// entry point. It does mean a caller can validate a resource against one shape
+// while several others also target it and believe the resource checked out; what
+// this answers is the question asked, not every question that applies.
+validate_node :: proc(
+	s: ^Shapes,
+	b: ^Bindings,
+	access: Access,
+	shape_index: int,
+	focus: Focus_Node,
+	visit: Result_Visitor,
+	visit_data: rawptr,
+	allocator := context.allocator,
+) -> Failure {
+	if shape_index < 0 || shape_index >= len(s.shapes) {
+		return .None
+	}
+	v := Validation {
+		s          = s,
+		b          = b,
+		access     = access,
+		visit      = visit,
+		visit_data = visit_data,
+		allocator  = allocator,
+	}
+	validation_init(&v, allocator)
+	defer validation_destroy(&v)
+
+	validate_focus(&v, shape_index, focus)
+	return v.failure
+}
+
 // validation_init prepares the two pieces of per-validation state that outlive
 // a single frame: the recursion set and the subclass-closure cache. Split out
 // of `validate` because a suppressed sub-run needs them too — and needs to

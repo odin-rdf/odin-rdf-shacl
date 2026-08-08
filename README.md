@@ -361,6 +361,35 @@ the shape. This is also the mechanism `sh:not`, `sh:or`, `sh:xone`, `sh:node`,
 and `sh:qualifiedValueShape` are built on, which is why it exists before they do
 (SHACL-A-0002).
 
+When you need to say *why not*, `validate_node` is the same question with the
+results:
+
+```odin
+failure := shacl_kvstore.validate_node(
+	&shapes, &bindings, &session,
+	rdf.IRI("http://example.org/alice"), shape_index,
+	visit, visit_data,
+)
+
+// Or straight to a sh:ValidationReport about that one node:
+failure = shacl_kvstore.validate_node_report(
+	&report, &shapes, &bindings, &session,
+	rdf.IRI("http://example.org/alice"), shape_index,
+)
+```
+
+This is what a write path wants: accept a resource, check it, and tell whoever
+submitted it which constraint it broke. **Reach for it rather than filtering
+`validate`'s results by focus node** — that works, and it validates every
+targeted node in the dataset to answer about one, so asking about a single
+resource costs the data around it.
+
+The two are one walk, not two evaluators: `conforms_node` is `validate_node`
+with a probe that records the first result and stops. A node the data graph
+never mentions is a perfectly good focus node in both — validated as unbound,
+with every path from it reaching nothing, which is emptiness and violates
+`sh:minCount 1`.
+
 `shacl/kvstore` has the same entry points against the persistent backend, taking
 a `Session` where these take a dictionary and a dataset.
 

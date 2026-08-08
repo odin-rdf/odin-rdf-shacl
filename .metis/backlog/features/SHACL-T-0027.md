@@ -4,18 +4,18 @@ level: task
 title: "Validation results for one focus node, not only the boolean"
 short_code: "SHACL-T-0027"
 created_at: 2026-08-07T15:11:19.646429+00:00
-updated_at: 2026-08-07T15:11:19.646429+00:00
+updated_at: 2026-08-08T16:50:41.593349+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#feature"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -83,13 +83,13 @@ can reach it".
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] A public per-focus-node validation in `shacl`, taking the shape index, the focus node, and a `Result_Visitor`. Results stream as `validate`'s do; a visitor returning false stops the walk.
-- [ ] Instantiated in `shacl/kvstore`, in the signature shape `conforms_node` already established there — node given as an `rdf.Term`, resolved through the non-interning lookup, `graph` defaulting to `store.DEFAULT_GRAPH`. *(Amended 2026-08-08: this read "in `shacl/memstore` and `shacl/kvstore` as peers". odin-rdf-store retired its in-memory backend (STORE-A-0006) and SHACL-T-0028 deleted this repository's memstore instantiation, so there is one instantiation package to add this to. The core/instantiation split it was appealing to survives, so a second backend would still get it as a peer.)*
-- [ ] A report-building consumer alongside it, standing to it as `validate_report` stands to `validate`, producing a `sh:ValidationReport` for the one node.
-- [ ] **An unbound focus node behaves as it does in `conforms_node`**: a term the store has never seen is validated as an unbound focus node, paths from it reach nothing, and that emptiness is meaningful. The existing contract wording is correct and should be reused rather than restated differently.
-- [ ] Same recursion set, same subclass-closure cache, same `Failure` semantics — `.None` means the walk completed or was stopped, anything else means the stream is incomplete and the answer must not be read as conformance.
-- [ ] **The subset property is a test**: for a shapes graph targeting several nodes, the results this entry point yields for node N are exactly the results `validate` yields whose focus is N, in the same order. This is what makes the new entry point trustworthy rather than merely plausible.
-- [ ] Tests run against both backends at both `Term_ID` widths, per the family convention.
+- [x] A public per-focus-node validation in `shacl`, taking the shape index, the focus node, and a `Result_Visitor`. Results stream as `validate`'s do; a visitor returning false stops the walk.
+- [x] Instantiated in `shacl/kvstore`, in the signature shape `conforms_node` already established there — node given as an `rdf.Term`, resolved through the non-interning lookup, `graph` defaulting to `store.DEFAULT_GRAPH`. *(Amended 2026-08-08: this read "in `shacl/memstore` and `shacl/kvstore` as peers". odin-rdf-store retired its in-memory backend (STORE-A-0006) and SHACL-T-0028 deleted this repository's memstore instantiation, so there is one instantiation package to add this to. The core/instantiation split it was appealing to survives, so a second backend would still get it as a peer.)*
+- [x] A report-building consumer alongside it, standing to it as `validate_report` stands to `validate`, producing a `sh:ValidationReport` for the one node.
+- [x] **An unbound focus node behaves as it does in `conforms_node`**: a term the store has never seen is validated as an unbound focus node, paths from it reach nothing, and that emptiness is meaningful. The existing contract wording is correct and should be reused rather than restated differently.
+- [x] Same recursion set, same subclass-closure cache, same `Failure` semantics — `.None` means the walk completed or was stopped, anything else means the stream is incomplete and the answer must not be read as conformance.
+- [x] **The subset property is a test**: for a shapes graph targeting several nodes, the results this entry point yields for node N are exactly the results `validate` yields whose focus is N, in the same order. This is what makes the new entry point trustworthy rather than merely plausible.
+- [x] Tests run against both backends at both `Term_ID` widths, per the family convention.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -139,3 +139,38 @@ this repository states rather than lets a reader discover.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created from a consumer design review.** The first application-shaped consumer of the family (`odin-rdf-app`) needed per-resource validation feedback on a write path and found only the boolean. Awaiting pickup in an odin-rdf-shacl session.
+- **2026-08-08 — Done. `validate_node` in the core, `validate_node` and
+  `validate_node_report` in `shacl/kvstore`.**
+
+  It was the entry point and two instantiations it was billed as: no new evaluation logic,
+  and `validate_focus` is untouched. The core entry point is `conforms_node` with the
+  caller's visitor where the suppressing probe goes — same `Validation` construction, same
+  recursion set, same subclass-closure cache, same `Failure` semantics, same out-of-range
+  answer.
+
+  **The naming question the item flagged resolved by precedent rather than by argument.**
+  `conforms_node` already means "one node, one shape" in this package, so `validate_node`
+  reads the same way beside it; the ambiguity the item worried about ("validate a node
+  against every targeted shape") is one this repository has already spent. Named for the
+  pair it takes, and the doc comment says so explicitly, including that §3.4 permits
+  validating a node against a shape that does not target it — and that a caller doing so may
+  believe a resource checked out when other shapes also target it.
+
+  **The subset property is the test that matters and it is exact.** For a shapes graph
+  targeting three nodes, the results `validate_node` yields for node N are compared entry for
+  entry, *in order*, against the results a whole `validate` yields with focus N. Making that
+  comparison meaningful constrained the fixture: a property shape's focus node is its
+  parent's value node, which for a root node shape is the root focus node itself — so at two
+  levels every result carries one of the three targets as its focus and filtering by focus is
+  the right filter. Deeper, and "filter by focus" would silently stop being the property
+  being asserted.
+
+  Also pinned: the visitor's false stops the walk without becoming a `Failure`, an
+  out-of-range shape index answers nothing, and an unbound focus node reports the cardinality
+  violation *and* agrees with `conforms_node` on the same input — the two are one walk, and
+  the tests say so rather than trusting it.
+
+  One small refactor came with it: `conforms_node` and `validate_node` now share a
+  `node_focus` helper for resolving a caller's `rdf.Term` through the non-interning lookup, so
+  the two cannot drift on what an absent term means. That was the item's stated failure mode
+  — a second evaluator — arriving in miniature at the resolution step rather than at the walk.

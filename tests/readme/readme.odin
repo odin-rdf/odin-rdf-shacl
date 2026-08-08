@@ -248,6 +248,69 @@ test_readme_conforms_node_example :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 }
 
+// The same question with the results: `validate_node`, and its report-building
+// sibling. The README's answer to "which constraint did this resource break?"
+// (SHACL-T-0027).
+validate_node_example :: proc(r: ^shacl.Report, node: string) -> shacl.Failure {
+	db, open_err := kvstore.open_ephemeral()
+	if open_err != nil {
+		return .None
+	}
+	defer kvstore.close(db)
+
+	shapes: shacl.Shapes
+	defer shacl.shapes_destroy(&shapes)
+	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
+
+	kvstore.load_turtle(db, transmute([]byte)string(DATA))
+	session: shacl_kvstore.Session
+	shacl_kvstore.session_init(&session, db)
+
+	bindings: shacl.Bindings
+	shacl_kvstore.bind(&bindings, &shapes, &session)
+	defer shacl.bindings_destroy(&bindings)
+
+	shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
+
+	return shacl_kvstore.validate_node_report(
+		r,
+		&shapes,
+		&bindings,
+		&session,
+		rdf.IRI(node),
+		shape_index,
+	)
+}
+
+@(test)
+test_readme_validate_node_example :: proc(t: ^testing.T) {
+	{
+		report: shacl.Report
+		shacl.report_init(&report)
+		defer shacl.report_destroy(&report)
+		testing.expect_value(t, validate_node_example(&report, "http://example.org/alice"), shacl.Failure.None)
+		testing.expect(t, shacl.report_conforms(&report))
+	}
+	{
+		// ex:bob is the one the graph-wide report blames, and asking about him
+		// alone gives the same result — which is the property that makes the
+		// narrow entry point trustworthy.
+		report: shacl.Report
+		shacl.report_init(&report)
+		defer shacl.report_destroy(&report)
+		testing.expect_value(t, validate_node_example(&report, "http://example.org/bob"), shacl.Failure.None)
+		testing.expect(t, !shacl.report_conforms(&report))
+
+		results := 0
+		for triple in shacl.report_triples(&report) {
+			if pred, is_iri := triple.predicate.(rdf.IRI); is_iri && string(pred) == shacl.RESULT {
+				results += 1
+			}
+		}
+		testing.expect_value(t, results, 1)
+	}
+}
+
 
 // The validate-before-commit form: the candidate is decided against the dataset
 // it would produce. The README's fifth example (SHACL-T-0029).

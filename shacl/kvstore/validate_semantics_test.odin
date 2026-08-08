@@ -1,5 +1,6 @@
 package shacl_kvstore
 
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:testing"
@@ -738,6 +739,240 @@ test_conforms_node_does_not_disturb_a_validation :: proc(t: ^testing.T) {
 	// One result, from the one targeted shape: ex:a is an IRI, not a literal.
 	testing.expect_value(t, len(after.lines), 1)
 	testing.expect_value(t, after.lines[0], "Targeted|NodeKindConstraintComponent|a|a")
+}
+
+// ---- validate_node: one node, one shape, with the results -----------------
+//
+// The same walk `conforms_node` runs, with the caller's visitor instead of the
+// suppressing probe (SHACL-T-0027). The property that makes it trustworthy
+// rather than merely plausible is that it agrees with `validate` — so that is
+// what is asserted here, exactly, rather than a hand-written expectation that
+// could be wrong in the same direction as the code.
+
+@(private = "file")
+VALIDATE_NODE_SHAPES :: PREFIX + `
+# One root targeting three nodes, and only two levels deep — so every result
+# this model can produce has one of the three as its focus node, which is what
+# lets a full validation be filtered by focus and compared entry for entry.
+ex:Root a sh:NodeShape ; sh:targetNode ex:a, ex:b, ex:c ;
+	sh:nodeKind sh:IRI ;
+	sh:property [ sh:path ex:p ; sh:minCount 2 ] ;
+	sh:property [ sh:path ex:q ; sh:maxCount 1 ] .
+`
+
+@(private = "file")
+VALIDATE_NODE_DATA :: PREFIX + `
+ex:a ex:p ex:x , ex:y ; ex:q ex:z .
+ex:b ex:p ex:x ; ex:q ex:z , ex:w .
+ex:c ex:q ex:z .
+`
+
+@(private = "file")
+focus_field :: proc(line: string) -> string {
+	// record writes "shape|component|focus|value".
+	parts := strings.split(line, "|", context.temp_allocator)
+	return len(parts) > 2 ? parts[2] : ""
+}
+
+// The subset property: what validate_node yields for a node is exactly what a
+// whole validation yields for that node, in the same order.
+//
+// This is the criterion that keeps the new entry point from becoming a second
+// evaluator. Both call `validate_focus`; if one ever stopped doing so, the
+// symptom would be two answers to the same question, which is the worst bug a
+// validator can have — so the agreement is pinned rather than trusted.
+@(test)
+test_validate_node_agrees_with_a_whole_validation :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, VALIDATE_NODE_SHAPES, VALIDATE_NODE_DATA) {
+		return
+	}
+
+	root := shape_index(&f.shapes, "http://example.org/Root")
+	if !testing.expect(t, root >= 0, "fixture: ex:Root must compile") {
+		return
+	}
+
+	whole: Seen
+	defer seen_destroy(&whole)
+	testing.expect_value(t, validate_into(&f, &whole), shacl.Failure.None)
+	// The fixture is only useful if it produces results for more than one node.
+	testing.expect(t, len(whole.lines) >= 2, "fixture: the model must violate for several nodes")
+
+	for name in ([?]string{"a", "b", "c"}) {
+		node := rdf.Term(rdf.IRI(fmt.tprintf("http://example.org/%s", name)))
+
+		want := make([dynamic]string, context.temp_allocator)
+		for line in whole.lines {
+			if focus_field(line) == name {
+				append(&want, line)
+			}
+		}
+
+		got: Seen
+		got.fixture = &f
+		defer seen_destroy(&got)
+		failure := validate_node(&f.shapes, &f.bindings, &f.session, node, root, record, &got)
+		testing.expect_value(t, failure, shacl.Failure.None)
+		testing.expect(t, session_error(&f.session) == nil)
+
+		if !testing.expectf(
+			t,
+			len(got.lines) == len(want),
+			"ex:%s: got %d results, the whole validation gave %d for that node",
+			name,
+			len(got.lines),
+			len(want),
+		) {
+			continue
+		}
+		for line, i in got.lines {
+			testing.expectf(t, line == want[i], "ex:%s result %d: got %s, want %s", name, i, line, want[i])
+		}
+	}
+	free_all(context.temp_allocator)
+}
+
+// The two things that come with being the shared walk: the visitor's false
+// stops it, and an out-of-range shape index answers nothing rather than
+// reading a shape that is not there.
+@(test)
+test_validate_node_stops_and_bounds_check :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, VALIDATE_NODE_SHAPES, VALIDATE_NODE_DATA) {
+		return
+	}
+	root := shape_index(&f.shapes, "http://example.org/Root")
+	b := rdf.Term(rdf.IRI("http://example.org/b"))
+
+	all: Seen
+	all.fixture = &f
+	defer seen_destroy(&all)
+	testing.expect_value(
+		t,
+		validate_node(&f.shapes, &f.bindings, &f.session, b, root, record, &all),
+		shacl.Failure.None,
+	)
+	if !testing.expect(t, len(all.lines) >= 2, "fixture: ex:b must break more than one constraint") {
+		return
+	}
+
+	stopped: Seen
+	stopped.fixture = &f
+	stopped.stop_at = 1
+	defer seen_destroy(&stopped)
+	// A stop is not a failure: .None means the walk completed *or* the visitor
+	// ended it, and both are ordinary.
+	testing.expect_value(
+		t,
+		validate_node(&f.shapes, &f.bindings, &f.session, b, root, record, &stopped),
+		shacl.Failure.None,
+	)
+	testing.expect_value(t, len(stopped.lines), 1)
+
+	out_of_range: Seen
+	out_of_range.fixture = &f
+	defer seen_destroy(&out_of_range)
+	testing.expect_value(
+		t,
+		validate_node(
+			&f.shapes,
+			&f.bindings,
+			&f.session,
+			b,
+			len(f.shapes.shapes),
+			record,
+			&out_of_range,
+		),
+		shacl.Failure.None,
+	)
+	testing.expect_value(t, len(out_of_range.lines), 0)
+}
+
+// An unbound focus node behaves exactly as it does in conforms_node: a term the
+// data graph never mentions is a perfectly good focus node, every path from it
+// reaches nothing, and that emptiness violates a cardinality constraint. The
+// difference is that here you get to see *which* one.
+@(test)
+test_validate_node_reports_for_an_unbound_node :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, VALIDATE_NODE_SHAPES, VALIDATE_NODE_DATA) {
+		return
+	}
+	root := shape_index(&f.shapes, "http://example.org/Root")
+	absent := rdf.Term(rdf.IRI("http://example.org/never_mentioned"))
+
+	seen: Seen
+	seen.fixture = &f
+	defer seen_destroy(&seen)
+	testing.expect_value(
+		t,
+		validate_node(&f.shapes, &f.bindings, &f.session, absent, root, record, &seen),
+		shacl.Failure.None,
+	)
+
+	// Unbound, so the focus renders with the `?` prefix write_node gives a node
+	// that has a term but no ID.
+	expect_results(
+		t,
+		&seen,
+		// The blamed shape is the anonymous sh:property shape, not ex:Root —
+		// the constraint is the property shape's, and a result names the shape
+		// that carries it.
+		[]string{"_:|MinCountConstraintComponent|?never_mentioned|-"},
+		"an absent node reaches nothing through ex:p",
+	)
+
+	// And the boolean form agrees, which is the whole point of the two being
+	// one walk.
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.session, absent, root)
+	testing.expect_value(t, failure, shacl.Failure.None)
+	testing.expect(t, !conforms)
+}
+
+// The report form: a sh:ValidationReport about one node, answering the narrow
+// question rather than the graph's.
+@(test)
+test_validate_node_report_is_about_one_node :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, VALIDATE_NODE_SHAPES, VALIDATE_NODE_DATA) {
+		return
+	}
+	root := shape_index(&f.shapes, "http://example.org/Root")
+
+	// ex:a satisfies every constraint; the graph as a whole does not.
+	{
+		report: shacl.Report
+		shacl.report_init(&report)
+		defer shacl.report_destroy(&report)
+		a := rdf.Term(rdf.IRI("http://example.org/a"))
+		testing.expect_value(
+			t,
+			validate_node_report(&report, &f.shapes, &f.bindings, &f.session, a, root),
+			shacl.Failure.None,
+		)
+		testing.expect(t, shacl.report_conforms(&report), "ex:a conforms even though the graph does not")
+		// rdf:type sh:ValidationReport and sh:conforms true, and nothing else.
+		testing.expect_value(t, len(shacl.report_triples(&report)), 2)
+	}
+
+	{
+		report: shacl.Report
+		shacl.report_init(&report)
+		defer shacl.report_destroy(&report)
+		c := rdf.Term(rdf.IRI("http://example.org/c"))
+		testing.expect_value(
+			t,
+			validate_node_report(&report, &f.shapes, &f.bindings, &f.session, c, root),
+			shacl.Failure.None,
+		)
+		testing.expect(t, !shacl.report_conforms(&report), "ex:c has no ex:p and breaks sh:minCount 2")
+		testing.expect(t, len(shacl.report_triples(&report)) > 2)
+	}
 }
 
 @(private = "file")
