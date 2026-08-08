@@ -4,15 +4,15 @@ level: task
 title: "Validate a past dataset: an as-of validation test, and the read-vs-write distinction"
 short_code: "SHACL-T-0030"
 created_at: 2026-08-08T20:04:41.286340+00:00
-updated_at: 2026-08-08T20:04:41.286340+00:00
+updated_at: 2026-08-08T20:26:44.604310+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#feature"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
