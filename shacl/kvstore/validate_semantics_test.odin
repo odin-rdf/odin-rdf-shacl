@@ -1976,6 +1976,81 @@ test_qualified_value_shape :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+BOTH_BOUNDS_SHAPES :: PREFIX + `
+# A minimum above the maximum, so one focus node can break both at once.
+ex:Impossible a sh:NodeShape ; sh:targetNode ex:two, ex:one ;
+	sh:property ex:ImpossibleItems .
+ex:ImpossibleItems sh:path ex:item ;
+	sh:qualifiedValueShape [ sh:class ex:Good ] ;
+	sh:qualifiedMinCount 3 ;
+	sh:qualifiedMaxCount 1 .
+
+# A maximum of zero and no minimum at all: the control for the absent-bound
+# sentinel, in both directions at once.
+ex:NoneAllowed a sh:NodeShape ; sh:targetNode ex:two, ex:none ;
+	sh:property ex:NoItems .
+ex:NoItems sh:path ex:item ;
+	sh:qualifiedValueShape [ sh:class ex:Good ] ;
+	sh:qualifiedMaxCount 0 .
+`
+
+@(private = "file")
+BOTH_BOUNDS_DATA :: PREFIX + `
+ex:g1 a ex:Good . ex:g2 a ex:Good .
+ex:b1 a ex:Bad .
+
+ex:two  ex:item ex:g1 , ex:g2 , ex:b1 .
+ex:one  ex:item ex:g1 , ex:b1 .
+ex:none ex:item ex:b1 .
+`
+
+// The two bounds share one walk and still report separately (SHACL-T-0026).
+//
+// **This is the case the merge can get wrong while looking entirely right, and
+// no entry in the vendored suite has its shape.** Both counts of a property
+// shape are one compiled constraint counting one conforming set, so the obvious
+// implementation tests the bounds in an if/else and emits at most one result.
+// §4.7.3 gives each count its own constraint component, and a focus node whose
+// count is below the minimum *and* above the maximum breaks both: `ex:two` has
+// two conforming values against a minimum of three and a maximum of one, and
+// owes two results naming two different components.
+//
+// **`ex:NoItems` is the absent-bound half**, and it is why -1 rather than 0
+// marks a bound the shapes graph did not write. `sh:qualifiedMaxCount 0` is a
+// real constraint — no value node may conform — and it fires on `ex:two` here;
+// a zero doubling as "unwritten" would make it inert. The same shape declares no
+// minimum, so `ex:none`, with nothing conforming, must produce nothing at all
+// rather than a minimum of zero it could never miss.
+@(test)
+test_qualified_both_bounds_violate :: proc(t: ^testing.T) {
+	f: Fixture
+	defer fixture_destroy(&f)
+	if !fixture_init(t, &f, BOTH_BOUNDS_SHAPES, BOTH_BOUNDS_DATA) {
+		return
+	}
+	seen: Seen
+	defer seen_destroy(&seen)
+	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+
+	expect_results(
+		t,
+		&seen,
+		[]string {
+			// Two conforming values: under three and over one, both at once.
+			"ImpossibleItems|QualifiedMinCountConstraintComponent|two|-",
+			"ImpossibleItems|QualifiedMaxCountConstraintComponent|two|-",
+			// One conforming value: under the minimum, within the maximum.
+			"ImpossibleItems|QualifiedMinCountConstraintComponent|one|-",
+			// A maximum of zero against two conforming values. No minimum was
+			// written, so nothing reports one — here or on ex:none, which has
+			// nothing conforming and appears nowhere below.
+			"NoItems|QualifiedMaxCountConstraintComponent|two|-",
+		},
+		"both qualified bounds",
+	)
+}
+
+@(private = "file")
 DISJOINT_SHAPES :: PREFIX + `
 ex:Hand a sh:NodeShape ; sh:targetNode ex:mixedHand, ex:cleanHand ;
 	sh:property ex:HandThumb ;

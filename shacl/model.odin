@@ -141,10 +141,27 @@ Constraint_Kind :: enum u8 {
 	Not,
 	Xone,
 	// The shape-based constraints (SHACL-T-0018), and the last of SHACL Core.
-	// `Node` reads exactly like `Not` without the inversion. The qualified pair
-	// carries a `count` as well as its shape, and is the only place `siblings` is
-	// used.
+	// `Node` reads exactly like `Not` without the inversion.
 	Node,
+	// The qualified family (§4.7.3), which is **one compiled constraint carrying
+	// up to two bounds** and the only place `siblings` is used. It holds its
+	// `sh:qualifiedValueShape` in `shapes`, its `sh:qualifiedMinCount` in `count`
+	// and its `sh:qualifiedMaxCount` in `count_max`, either bound being -1 when
+	// the shapes graph did not write it.
+	//
+	// **One constraint rather than two, since SHACL-T-0026.** The two counts share
+	// one qualified shape and one value-node set by definition, so compiling them
+	// separately made `check_qualified` walk those value nodes once per bound —
+	// the same `(shape, node)` question asked twice with an answer that cannot
+	// have changed in between. Merging removes the duplicate rather than
+	// remembering its answer, which is why it wins where the conformance cache
+	// SHACL-A-0002 measured and declined does not.
+	Qualified_Value_Shape,
+	// The two counts remain in this enum because a **result** names one of them:
+	// `Result.component` is a `Constraint_Kind`, and a merged constraint that
+	// breaks both bounds emits one result per bound with the matching component
+	// (§4.7.3 gives each count its own). No constraint is ever compiled with
+	// either kind — see `check_qualified`.
 	Qualified_Min_Count,
 	Qualified_Max_Count,
 }
@@ -169,7 +186,8 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 
 // Constraint is one constraint component with its parameter. Which field
 // carries the parameter depends on kind: `count` for the cardinality components
-// and the two lengths, `term` for Class/Datatype/Has_Value and the four
+// and the two lengths — and `count` with `count_max` for the qualified family,
+// which is one constraint with two bounds — `term` for Class/Datatype/Has_Value and the four
 // value-range bounds, `node_kind` for Node_Kind, `values` — a range into
 // Shapes.values — for In, Language_In and Closed, and `pattern` for Pattern.
 // The four property-pair components also use `term`, but it holds a *predicate*
@@ -205,9 +223,18 @@ NODE_KIND_IRI_OR_LITERAL :: Node_Kind{.IRI, .Literal}
 // disjoint from excludes nothing, which is exactly what the parameter being off
 // means, so the two collapse into one representation rather than into a flag the
 // evaluator would have to consult.
+//
+// `count_max` is the sixth kind of parameter and, like `siblings`, exists for
+// one component: `Qualified_Value_Shape` carries **two** bounds, so it needs a
+// second integer beside `count`. **-1 is absence, for both of them**, and it has
+// to be a sentinel rather than a zero — `sh:qualifiedMaxCount 0` is a real and
+// useful constraint, so a zero cannot mean "unwritten" the way it can for the
+// spans. Every other kind leaves `count_max` at its zero value and never reads
+// it.
 Constraint :: struct {
 	kind:      Constraint_Kind,
 	count:     int,
+	count_max: int,
 	term:      rdf.Term,
 	node_kind: Node_Kind,
 	values:    Span,

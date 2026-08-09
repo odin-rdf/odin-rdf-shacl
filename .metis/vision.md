@@ -151,6 +151,15 @@ that is still the most useful thing it records:**
   requires *measured* cost — a trigger that cannot currently be pulled. Active, decomposed
   into three tasks. The `v0.1.0` tag waits for it, because every sibling shipped `v0.1.0`
   with performance evidence.
+  *(Amended 2026-08-09, SHACL-T-0026: every clause above is now false and the paragraph
+  stands as the record. `bench/` exists with eight standing configurations and a pinned read
+  count each; the trigger was pulled at SHACL-T-0025 and **discharged — no conformance
+  cache**; `v0.1.0` shipped. What the measurement produced instead was one duplicate worth
+  deleting, and SHACL-T-0026 deleted it: a property shape's two qualified bounds compile to
+  one constraint that counts once and tests the count twice, so `qualified-minmax` and
+  `qualified-min` are now identical in reads, allocations and bytes. SHACL-A-0002's
+  *As Built* section has the numbers. **The performance line is idle again**, and nothing in
+  the backlog schedules more of it.)*
 - **The SHACL-SPARQL phase.** `docs/handover-sparql.md` is its starting point:
   what it inherits, where the `sparql:` collection goes in all three places, the dispatch
   seam as it actually is (five edits, not the four `docs/handover-catalogue.md` described),

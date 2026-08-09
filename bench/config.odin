@@ -143,6 +143,12 @@ CONFIGS := []Config {
 	// `sh:qualifiedValueShape`. The difference is the structural duplicate and
 	// nothing else, which is what makes it a measurement rather than an
 	// argument.
+	//
+	// **They now measure the same thing, and that is the result rather than a
+	// reason to drop one** (SHACL-T-0026). The duplicate is gone, so the pair has
+	// become a regression test for its absence: a change that reintroduces a
+	// per-bound walk separates two configurations that are supposed to agree, and
+	// the two pins below catch it in the same run.
 	{
 		name = "qualified-min",
 		seed = 0x5EED_0001,
@@ -204,10 +210,21 @@ Pin :: struct {
 // And the pair SHACL-T-0025 measured, which differ only in the second bound:
 //
 //	qualified-min     9003   one bound, one walk of the value nodes
-//	qualified-minmax 10003   two bounds sharing one sh:qualifiedValueShape.
-//	                         +1000 reads -- exactly the 1000 ex:q value nodes,
-//	                         walked a second time to answer a question whose
-//	                         answer cannot have changed
+//	qualified-minmax  9003   two bounds sharing one sh:qualifiedValueShape --
+//	                         and, since SHACL-T-0026, one walk between them
+//
+// **The second of those was 10003 and is re-pinned here**, which is the one
+// re-pin in this file so far and the reason the mechanism is worth having. The
+// +1000 was exactly the 1000 `ex:q` value nodes, walked a second time to answer
+// a question whose answer could not have changed; the two counts now compile to
+// a single constraint that counts once and tests the count twice, so the second
+// walk is gone rather than remembered. The pin falling to `qualified-min`'s was
+// the prediction SHACL-T-0026 made in advance and is the sharpest evidence the
+// change is exactly what it claims: the two configurations differed only in the
+// duplicate, so they are now indistinguishable in reads, in allocations (11018
+// -> 9018) and in wall clock (+10% -> noise). `qualified` does *not* move, and
+// that matters as much: it is the `Disjoint_Pair` form, two property shapes with
+// one bound each, where there is nothing to share.
 PINNED_READS := []Pin {
 	{"baseline", 7503},
 	{"qualified", 11504},
@@ -216,7 +233,7 @@ PINNED_READS := []Pin {
 	{"clean", 7503},
 	{"alternative-path", 9003},
 	{"qualified-min", 9003},
-	{"qualified-minmax", 10003},
+	{"qualified-minmax", 9003},
 }
 
 pinned_reads :: proc(name: string) -> (reads: int, found: bool) {

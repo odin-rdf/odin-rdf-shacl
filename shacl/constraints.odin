@@ -269,6 +269,15 @@ compile_constraints :: proc(
 	// `sh:qualifiedValueShape`, which is read here only to decide whether they
 	// exist at all.
 	//
+	// **They compile to one constraint carrying both bounds, not to one each**
+	// (SHACL-T-0026). The sharing is structural rather than incidental: §4.7.3
+	// gives a shape at most one `sh:qualifiedValueShape`, so both counts are
+	// counting the same conforming value nodes, and two constraints made the
+	// evaluator walk them twice for an answer that cannot differ. `count` is the
+	// minimum and `count_max` the maximum, each -1 where the shapes graph wrote
+	// nothing; a violation of either still names its own component, because the
+	// merge is in the model and not in the report.
+	//
 	// **Nothing compiles without `sh:qualifiedValueShape`**, and that is a
 	// requirement rather than an optimisation: `node/qualified-001` declares
 	// `sh:qualifiedMinCount 5` and `sh:qualifiedMaxCount 2` with no qualified
@@ -287,17 +296,31 @@ compile_constraints :: proc(
 	if v.found[QUALIFIED_VALUE_SHAPE] {
 		if _, has_shape := first_object(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPE], MATCH, NEXT, DESTROY);
 		   has_shape {
+			// Where this shape's qualified constraints begin. The two passes below
+			// fill the *same* constraints from opposite sides — the k-th minimum
+			// and the k-th maximum are one constraint — so the second pass has to
+			// be able to find what the first appended. Nothing else appends
+			// between, this block being the last in the procedure.
+			//
+			// **Pairing by ordinal is for a shape that should not exist.** §4.7.3
+			// gives a property shape at most one of each count, which is the case
+			// that matters and the case this collapses to: one minimum and one
+			// maximum become one constraint, and either alone becomes one
+			// constraint with the other bound absent. A shapes graph writing a
+			// count twice is ill-formed and gets what it got before the merge —
+			// every value checked — rather than a silently dropped bound.
+			start := len(s.constraints)
 			qualified := [2]struct {
-				iri:  string,
-				kind: Constraint_Kind,
-			}{{QUALIFIED_MIN_COUNT, .Qualified_Min_Count}, {QUALIFIED_MAX_COUNT, .Qualified_Max_Count}}
+				iri:    string,
+				is_max: bool,
+			}{{QUALIFIED_MIN_COUNT, false}, {QUALIFIED_MAX_COUNT, true}}
 			for entry in qualified {
 				if !v.found[entry.iri] {
 					continue
 				}
 				vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
 				defer delete(vals)
-				for id in vals {
+				for id, i in vals {
 					n, ok := integer_value(materialize_term(s, load, load_data, id))
 					if !ok {
 						return Error {
@@ -309,7 +332,18 @@ compile_constraints :: proc(
 					if n < 0 {
 						return Error{.Qualified_Count_Negative, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
 					}
-					append(&s.constraints, Constraint{kind = entry.kind, count = n})
+					index := start + i
+					if index == len(s.constraints) {
+						append(
+							&s.constraints,
+							Constraint{kind = .Qualified_Value_Shape, count = -1, count_max = -1},
+						)
+					}
+					if entry.is_max {
+						s.constraints[index].count_max = n
+					} else {
+						s.constraints[index].count = n
+					}
 				}
 			}
 		}
@@ -374,19 +408,21 @@ compile_shape_operands :: proc(
 	for shape_index in 0 ..< len(s.shapes) {
 		shape := s.shapes[shape_index]
 
-		// `sh:qualifiedValueShape` first, and outside the ordinal table: the two
-		// counts on one shape share a single shape, so there is nothing to pair
-		// by position. Both constraints get the same one-entry span.
+		// `sh:qualifiedValueShape` first, and outside the ordinal table: it names
+		// no constraint of its own, and the constraint that carries it holds both
+		// counts (SHACL-T-0026), so there is nothing to pair by position. A
+		// well-formed shape has exactly one qualified constraint here; an
+		// ill-formed one repeating a count has several, and they all get the same
+		// one-entry span, because there is only ever one qualified shape to give.
 		if v.found[QUALIFIED_VALUE_SHAPE] {
-			qualified := -1
+			carries_qualified := false
 			for offset in 0 ..< shape.constraints.count {
-				kind := s.constraints[shape.constraints.start + offset].kind
-				if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
-					qualified = shape.constraints.start + offset
+				if s.constraints[shape.constraints.start + offset].kind == .Qualified_Value_Shape {
+					carries_qualified = true
 					break
 				}
 			}
-			if qualified >= 0 {
+			if carries_qualified {
 				start := len(s.shape_children)
 				if value, has := first_object(
 					r,
@@ -403,8 +439,7 @@ compile_shape_operands :: proc(
 				span := Span{start, len(s.shape_children) - start}
 				for offset in 0 ..< shape.constraints.count {
 					index := shape.constraints.start + offset
-					kind := s.constraints[index].kind
-					if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
+					if s.constraints[index].kind == .Qualified_Value_Shape {
 						s.constraints[index].shapes = span
 					}
 				}
@@ -551,11 +586,12 @@ compile_qualified_siblings :: proc(
 				}
 				for offset in 0 ..< s.shapes[other].constraints.count {
 					c := s.constraints[s.shapes[other].constraints.start + offset]
-					if c.kind != .Qualified_Min_Count && c.kind != .Qualified_Max_Count {
+					if c.kind != .Qualified_Value_Shape {
 						continue
 					}
-					// A sibling's two counts share one shape, so take it from
-					// whichever comes first and stop.
+					// One qualified constraint per well-formed sibling, and where
+					// there are several they share the one shape, so take the first
+					// and stop.
 					for operand in constraint_shapes(s, c) {
 						append(&s.shape_children, operand)
 					}
@@ -566,8 +602,7 @@ compile_qualified_siblings :: proc(
 
 			for offset in 0 ..< shape.constraints.count {
 				index := shape.constraints.start + offset
-				kind := s.constraints[index].kind
-				if kind == .Qualified_Min_Count || kind == .Qualified_Max_Count {
+				if s.constraints[index].kind == .Qualified_Value_Shape {
 					s.constraints[index].siblings = span
 				}
 			}

@@ -114,6 +114,13 @@ component_iri :: proc(kind: Constraint_Kind) -> string {
 	// `sh:qualifiedValueShape` and `sh:qualifiedValueShapesDisjoint` name no
 	// component of their own: the two counts are the components, and a result
 	// from the family names whichever count it broke.
+	//
+	// So `Qualified_Value_Shape` — the *constraint* the family compiles to, both
+	// bounds in one (SHACL-T-0026) — has no component IRI to return, and the empty
+	// string here is §4.7.3's answer rather than a hole. No result ever carries
+	// that kind: `check_qualified` emits one of the two below per bound it broke.
+	case .Qualified_Value_Shape:
+		return ""
 	case .Qualified_Min_Count:
 		return QUALIFIED_MIN_COUNT_COMPONENT
 	case .Qualified_Max_Count:

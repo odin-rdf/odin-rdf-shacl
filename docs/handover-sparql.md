@@ -142,6 +142,16 @@ the only thing that distinguishes a test from a comment.
   to decide the cache — and recorded with its numbers already taken, which is
   what a future task needs to act on it. `compile_constraints` and
   `check_qualified` are the two procedures involved.
+
+  **Closed 2026-08-09 by SHACL-T-0026**, in those two procedures and with those
+  numbers: the qualified family is now one `Constraint` of kind
+  `Qualified_Value_Shape` carrying both bounds, and `qualified-minmax` is
+  byte-for-byte identical to `qualified-min`. So this is no longer an open engine
+  change and the paragraph above stands only as the record of what was proposed.
+  The one thing a reader coming to it fresh should know is the trap it hides:
+  both bounds can break at one focus node, §4.7.3 gives each count its own
+  component, and the merged constraint therefore emits two results where the
+  obvious implementation emits one — untested by the whole W3C corpus.
 - **The `sh:pattern` dialect gap.** `core:text/regex` is not XML Schema's regex
   language. `s` and `q` are rejected at compile time rather than ignored, and the
   common subset is what the corpus uses. Unmeasured beyond that, deliberately.

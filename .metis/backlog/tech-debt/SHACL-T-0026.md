@@ -4,18 +4,18 @@ level: task
 title: "Share one walk between a property shape's two qualified bounds"
 short_code: "SHACL-T-0026"
 created_at: 2026-08-07T13:20:42.675058+00:00
-updated_at: 2026-08-07T13:20:42.675058+00:00
+updated_at: 2026-08-09T13:48:17.155220+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#tech-debt"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -71,27 +71,27 @@ not.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] **Both bounds of one property shape are evaluated from a single walk** of the value
+- [x] **Both bounds of one property shape are evaluated from a single walk** of the value
       nodes. One `conformed` count, tested against each bound present.
-- [ ] **`qualified-minmax`'s pinned read count falls to `qualified-min`'s — 10003 → 9003.**
+- [x] **`qualified-minmax`'s pinned read count falls to `qualified-min`'s — 10003 → 9003.**
       This is the sharpest criterion available and the benchmark predicts it in advance: the
       change is correct exactly when the two configurations become indistinguishable in
       reads, because the only thing between them was the duplicate walk.
-- [ ] **`qualified`'s pin (11504) does *not* move.** That configuration is the
+- [x] **`qualified`'s pin (11504) does *not* move.** That configuration is the
       `Disjoint_Pair` form — two separate property shapes with one bound each — so there is
       nothing to share and nothing should change. A pin that moves there means the merge
       caught a case it should not have.
-- [ ] **Both bounds can still violate on one focus node, and both results are emitted with
+- [x] **Both bounds can still violate on one focus node, and both results are emitted with
       the right `sh:sourceConstraintComponent`.** `sh:qualifiedMinCount 3` with
       `sh:qualifiedMaxCount 1` and a count of 2 violates both; the merged constraint must
       emit `sh:QualifiedMinCountConstraintComponent` *and*
       `sh:QualifiedMaxCountConstraintComponent`, not one merged result and not the wrong
       component. **A unit test for this specifically**, because no suite entry has that
       shape and the obvious implementation emits one result.
-- [ ] **W3C suite still 98 of 98**, both backends, both `Term_ID` widths.
-- [ ] `make check` green and **`tests/guards` still net-zero** — a merged constraint changes
+- [x] **W3C suite still 98 of 98**, both backends, both `Term_ID` widths.
+- [x] `make check` green and **`tests/guards` still net-zero** — a merged constraint changes
       what `check_qualified` allocates and when.
-- [ ] **The read-count invariants still hold** — identical across both backends and both
+- [x] **The read-count invariants still hold** — identical across both backends and both
       widths — and the re-pin is explained in the commit message, per `config.odin`'s note
       that a pin may move but must never move unnoticed.
 
@@ -138,4 +138,43 @@ and said no; this task removes one specific duplicate and stops there.
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+**2026-08-09 — implemented.** Every acceptance criterion is met and the sharpest one was met
+exactly as predicted: `qualified-minmax` fell from 10003 reads to 9003, `qualified-min`'s
+number, and the two configurations are now indistinguishable in *every* measured quantity —
+9018 allocations each, 2 757 382 total bytes each, wall clock inside the noise where it was
++10%. The full 1 216 000 bytes are removed rather than reduced. `qualified` did not move
+(11504), which is the criterion that says the merge caught only the case it was aimed at.
+
+**The shape it took.** The two counts no longer compile to a constraint each. There is one
+`Constraint_Kind.Qualified_Value_Shape` carrying `count` and a new `count_max`, **-1 meaning
+a bound the shapes graph did not write** — a sentinel rather than a zero, because
+`sh:qualifiedMaxCount 0` is a real constraint. The old two kinds stay in the enum because
+`Result.component` is a `Constraint_Kind` and a result still names one count or the other;
+no constraint is ever compiled with either.
+
+**On the things the task said to check rather than assume:**
+
+- *How many `sh:qualifiedValueShape` values the compiler tolerates.* It reads it with
+  `first_object` — functional by treatment, not enforced — so several would silently take
+  the first. The merge does not rest on that after all: it rests on there being one *shape*
+  per constraint, which `first_object` guarantees whatever the graph says. The counts
+  themselves are the multiplicity the compiler tolerates, and the new code pairs them by
+  ordinal, so an ill-formed shape repeating a count still gets every value checked rather
+  than a silently dropped bound.
+- *`sh:qualifiedValueShapesDisjoint` stays inside the shared walk*, unchanged — it was
+  already part of the counting loop and the merge did not touch it.
+- *The fifth seam edit* was not needed: the qualified family compares no parameter by ID, so
+  `bindings_init` never mentioned these kinds and still does not.
+- *The failure path.* One loop now, with the same three `v.failure` checks and the same early
+  return; the two emit sites after it are guarded by `v.stopped` between them.
+
+**The risk the task named was real.** Both bounds violating at one focus node emits two
+results with two different components, and the obvious implementation emits one.
+`test_qualified_both_bounds_violate` (`shacl/kvstore/validate_semantics_test.odin`) pins it,
+along with the absent-bound sentinel in both directions: `sh:qualifiedMaxCount 0` fires, and
+a shape with no minimum reports none.
+
+Suite 98/98 at both widths, `make check` green, `tests/guards` net-zero. SHACL-A-0002 gained
+an *As Built* section, `docs/store-evidence.md` and `docs/handover-sparql.md` are amended
+where they described the duplicate as open, and the vision's stale SHACL-I-0003 bullet is
+amended rather than rewritten.

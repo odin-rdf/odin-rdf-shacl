@@ -286,3 +286,42 @@ here as an evidence-backed proposal with its numbers already taken.
 **Discharged.** Memoisation is decided against on measured cost rather than deferred again.
 Reopening it needs new evidence of a different kind — a workload where the repeated ask
 dominates *and* the working-set growth is affordable — not a repeat of this measurement.
+
+## As Built (SHACL-T-0026, 2026-08-09)
+
+The proposal in *What should be done instead* is implemented. The two counts of a property
+shape compile to **one** constraint — `Constraint_Kind.Qualified_Value_Shape`, carrying
+`count` and `count_max` with -1 for a bound the shapes graph did not write — and
+`check_qualified` walks the value nodes once and tests the count against each bound present.
+
+The prediction the table above made was exact, and it is worth saying that it was made in
+advance of the change rather than fitted to it. Same two configurations, same seed, kvstore
+this time rather than memstore (retired at SHACL-T-0028), 64- and 32-bit:
+
+| | reads | allocations | total allocated | validate |
+| --- | ---: | ---: | ---: | ---: |
+| `qualified-min` | 9003 | 9018 | 2 757 382 B | ~6.5 ms |
+| `qualified-minmax` **before** | 10003 | 11018 | 3 973 382 B | ~7.2 ms |
+| `qualified-minmax` **after** | 9003 | 9018 | 2 757 382 B | ~6.6 ms |
+
+**The two configurations are now indistinguishable in every measured number**, which is the
+strongest form the evidence could take: the only difference between them was the duplicate,
+so identity is what "the duplicate is gone" looks like. The 1 216 000 bytes are removed
+rather than reduced — the figure that decided this against a cache, and the one an arena
+caller would have paid. Wall clock moves from +10% to inside the noise.
+
+`qualified` — the `Disjoint_Pair` form, two property shapes with one bound each — does not
+move, and its pin (11504) is what asserts that the merge caught only the case it was aimed
+at. Sibling shapes do not share a value-node set, so there is nothing there to share.
+
+**Two things this does not do.** It does not memoise: nothing is remembered, a duplicate is
+deleted, and the trigger above stays discharged on the reasoning it already had. And it does
+not generalise — the temptation to notice that other components ask overlapping questions
+and to build the cache by another name is exactly what the *no cache* decision rejected.
+
+One correctness detail the suite could not have caught, recorded because the obvious
+implementation gets it wrong: both bounds can break at the same focus node
+(`sh:qualifiedMinCount 3` with `sh:qualifiedMaxCount 1` over two conforming values), and
+§4.7.3 gives each count its own constraint component, so the merged constraint emits **two**
+results rather than one. No entry in the vendored corpus has that shape;
+`test_qualified_both_bounds_violate` in `shacl/kvstore` does.

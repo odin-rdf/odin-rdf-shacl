@@ -289,6 +289,18 @@ Recorded so the log's silence is legible rather than ambiguous:
   under every allocator. SHACL-A-0002's "As Measured" section has the full
   reasoning, the correction, and the numbers.
 
+  **And now removed, at SHACL-T-0026 (2026-08-09).** The two counts compile to one
+  constraint that counts once and tests the count twice, so the qualified pair
+  costs the store 9003 reads where it cost 10003 — identical to the one-bound
+  configuration in reads, allocations and total bytes. What that leaves for this
+  note is the part that was never about the duplicate: the combinators still run a
+  suppressed sub-walk per branch per value node, and
+  `sh:qualifiedValueShapesDisjoint` still asks each sibling's shape per value
+  node. **Those are not duplicates and cannot be merged away** — different shapes
+  and, for the siblings, different value-node sets — so if the read window ever
+  becomes a real complaint, they are what is left of it, and the answer there
+  would still be memoisation rather than a store verb.
+
   So the read volume this section worried about is unchanged and will stay
   unchanged: **the engine still asks the store nothing it did not ask before**,
   and nothing here becomes a request upstream.

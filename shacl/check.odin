@@ -128,11 +128,15 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	// graph is per *focus* node, so asking per value node would repeat it once
 	// for every value.
 	//
-	// The qualified pair joins them, and reads as though it should not: it looks
+	// The qualified family joins them, and reads as though it should not: it looks
 	// like `sh:node` with a count bolted on. It is not — the count is over the
 	// value-node *set*, so `qualifiedValueShape-001` expects one result naming the
 	// focus node and the path and **no `sh:value`**, because no single value node
 	// is to blame for there being two of them where three were wanted.
+	//
+	// `Qualified_Min_Count` and `Qualified_Max_Count` are here for completeness
+	// rather than for use: no constraint is compiled with either kind, and the
+	// scope they would have is the one the merged constraint has.
 	case .Min_Count,
 	     .Max_Count,
 	     .Has_Value,
@@ -141,6 +145,7 @@ constraint_scope :: proc(kind: Constraint_Kind) -> Constraint_Scope {
 	     .Disjoint,
 	     .Less_Than,
 	     .Less_Than_Or_Equals,
+	     .Qualified_Value_Shape,
 	     .Qualified_Min_Count,
 	     .Qualified_Max_Count:
 		return .Node_Set
@@ -260,7 +265,7 @@ check_node_set :: proc(
 	case .Equals, .Disjoint, .Less_Than, .Less_Than_Or_Equals:
 		check_property_pair(v, shape_index, c, constraint_index, values)
 
-	case .Qualified_Min_Count, .Qualified_Max_Count:
+	case .Qualified_Value_Shape:
 		check_qualified(v, shape_index, c, values)
 	}
 }
@@ -282,11 +287,21 @@ check_node_set :: proc(
 // is both a finger and a thumb drops out of the finger count *and* the thumb
 // count, and the entry expects both to violate.
 //
-// Both counts share one `sh:qualifiedValueShape`, so a shape carrying a minimum
-// and a maximum walks its value nodes twice. That is one suppressed validation
-// per value node per bound, which is the cost SHACL-A-0002 declined to memoise
-// until a consumer measured it; a shapes graph wanting one walk can write one
-// bound.
+// **One walk, both bounds** (SHACL-T-0026). A shape carrying a minimum and a
+// maximum used to walk its value nodes once per bound — one suppressed
+// validation per value node per bound, asking the same `(shape, node)` question
+// twice with an answer that cannot have changed in between. The two counts now
+// compile to a single constraint (`Qualified_Value_Shape`), so the walk below
+// runs once and its `conformed` is tested against each bound that is present.
+// SHACL-T-0025 measured what that duplicate cost — +1000 reads, +1.2 MB, ~11% of
+// validation on a 500-focus-node configuration — and SHACL-A-0002 chose removing
+// it over caching its answer.
+//
+// **Both bounds can break on one focus node, and then there are two results.**
+// `sh:qualifiedMinCount 3` with `sh:qualifiedMaxCount 1` over two conforming
+// values violates each, and §4.7.3 gives each count its own constraint
+// component, so the merge must not collapse them into one result. No entry in
+// the vendored suite has that shape; `test_qualified_both_bounds_violate` does.
 @(private = "file")
 check_qualified :: proc(v: ^Validation, shape_index: int, c: Constraint, values: Value_Set) {
 	operands := constraint_shapes(v.s, c)
@@ -327,9 +342,17 @@ check_qualified :: proc(v: ^Validation, shape_index: int, c: Constraint, values:
 		return
 	}
 
-	violates := c.kind == .Qualified_Min_Count ? conformed < c.count : conformed > c.count
-	if violates {
-		emit_result(v, shape_index, values.focus, {}, false, c.kind)
+	// -1 is a bound the shapes graph did not write. It has to be a sentinel and
+	// not a zero: `sh:qualifiedMaxCount 0` says no value node may conform, which
+	// is a constraint an absent maximum is not.
+	if c.count >= 0 && conformed < c.count {
+		emit_result(v, shape_index, values.focus, {}, false, .Qualified_Min_Count)
+		if v.stopped {
+			return
+		}
+	}
+	if c.count_max >= 0 && conformed > c.count_max {
+		emit_result(v, shape_index, values.focus, {}, false, .Qualified_Max_Count)
 	}
 }
 
@@ -607,6 +630,7 @@ check_value :: proc(
 	     .Less_Than,
 	     .Less_Than_Or_Equals,
 	     .Closed,
+	     .Qualified_Value_Shape,
 	     .Qualified_Min_Count,
 	     .Qualified_Max_Count:
 		return

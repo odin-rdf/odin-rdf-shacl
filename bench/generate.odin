@@ -63,14 +63,21 @@ Path_Form :: enum {
 //	Min_And_Max    one property shape, both bounds, **sharing one
 //	               sh:qualifiedValueShape**. This is the structural duplicate
 //	               SHACL-T-0018 found and SHACL-A-0002 declined to memoise:
-//	               check_qualified walks the value nodes once per bound, so the
-//	               same (shape, node) question is asked twice with an answer that
-//	               cannot have changed in between
+//	               check_qualified walked the value nodes once per bound, so the
+//	               same (shape, node) question was asked twice with an answer that
+//	               could not have changed in between
 //	Disjoint_Pair  two sibling shapes with sh:qualifiedValueShapesDisjoint, which
 //	               multiplies the walk by the sibling count instead
 //
 // `Min_And_Max` minus `Min` is therefore the exact cost of the duplicate, and
 // the only difference between those two configurations is the second bound.
+//
+// **That difference is now zero** (SHACL-T-0026): the two bounds compile to one
+// constraint that counts once and tests the count twice, so the past tense above
+// is deliberate and the pair's job has changed from measuring the duplicate to
+// asserting it has not come back. `Disjoint_Pair` is untouched — its repetition
+// is across *sibling shapes*, which do not share a value-node set and so have
+// nothing to merge.
 Qualified_Form :: enum {
 	None,
 	Min,
