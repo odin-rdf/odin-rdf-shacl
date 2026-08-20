@@ -349,3 +349,15 @@ no width matrix; the 98 W3C `core/` entries green; validate-before-
 commit demonstrated through the record's `Validator` hook; CI green
 on all legs with the record pinned at `v0.1.0`; the odin-rdf-sparql
 port unblocked with a written handoff.
+
+## Status
+
+**2026-08-20, end of the founding day.** T-0031 … T-0036 complete; six
+commits unpushed on `main` (see SHACL-T-0037's Status §1). Three record
+releases were cut from this port's findings in one day — `v0.2.0` (ingest
+emits a document's set), `v0.3.0` (distinct `Term_ID`/`Fact_ID`/`Epoch`) —
+and this repository pins `v0.3.0` as a floor. The read pins survived the
+port to the integer (T-0036). What remains is T-0037, the record of the
+port; its Status carries the handoff for the next session and the
+material for the sparql port.
+
