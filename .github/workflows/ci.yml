@@ -98,10 +98,15 @@ jobs:
       # resolved in the *importing* compilation, so the record's sources are
       # built against whichever parser this file names, and moving one without
       # the other is how two versions of the data model end up in one binary.
+      # odin-rdf-parser `v0.1.1` (2026-08-20): one scanner fix, RDF-T-0025 —
+      # an unterminated long string now reports the opener's line and
+      # column instead of the EOF line and a negative column. Nothing this
+      # repository reads changed; the bump is the family's walk-the-consumers
+      # rule on release, and the bug was found by a sibling's W3C sweep.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-parser
-          ref: v0.1.0
+          ref: v0.1.1
           path: odin-rdf-parser
 
       # **odin-rdf-record `v0.3.0` is the pin and a floor**, the third in a

@@ -87,8 +87,9 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   questions it asked before. `make bench` is two builds, since read counting is
   now a build-time switch in the engine (`SHACL_COUNT_READS`) rather than a
   seam. SHACL-A-0002's trigger stays discharged.
-- **Dependencies:** odin-rdf-parser `v0.1.0` and **odin-rdf-record `v0.3.0` as a
-  floor** (`v0.2.0` for `ingest`'s set semantics, `v0.3.0` for the distinct
+- **Dependencies:** odin-rdf-parser `v0.1.1` (bumped the day it was tagged;
+  RDF-T-0025's scanner fix, found by the record's W3C sweep) and
+  **odin-rdf-record `v0.3.0` as a floor** (`v0.2.0` for `ingest`'s set semantics, `v0.3.0` for the distinct
   `Term_ID`/`Fact_ID`/`Epoch` types the engine holds). odin-rdf-sparql is still
   relevant only to the SHACL-SPARQL phase, which has not started; its handover
   (`docs/handover-sparql.md`) predates the port and carries a translation note.

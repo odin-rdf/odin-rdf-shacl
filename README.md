@@ -167,7 +167,7 @@ are reached through Odin collections:
 Both collections are required even though this engine only names the record:
 the record's own sources import `rdf:`, and a collection is resolved in the
 *importing* compilation, not the imported checkout. The `Makefile` and
-`ols.json` both declare them. CI pins `odin-rdf-parser@v0.1.0` and
+`ols.json` both declare them. CI pins `odin-rdf-parser@v0.1.1` and
 **`odin-rdf-record@v0.3.0`, which is a floor**: `v0.2.0` is where `ingest`
 began emitting a document's *set* of statements (below it one W3C entry whose
 shapes graph repeats a triple cannot load), and `v0.3.0` is where the record's
