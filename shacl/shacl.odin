@@ -56,6 +56,14 @@
 // reported. It is how validate-before-commit is done here, and the one place
 // the engine is called by the store rather than the other way round.
 //
+// The past is the same code over `record.store_at(&db, epoch)`: the snapshot
+// is pinned, the session binds it, and every read answers about that moment.
+// The coordinate is the **epoch** — the record keeps no wall-clock index, and a
+// caller holding a time finds its epoch through `snapshot_epoch_meta`. Terms
+// are not epoch-scoped, only facts are, so one compiled model binds at any
+// epoch; and a model compiled from a pinned snapshot's shapes graph validates
+// that snapshot's data under the rules in force at the time (as_of_test.odin).
+//
 //
 // # Memory contract
 //

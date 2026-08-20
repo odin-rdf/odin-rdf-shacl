@@ -716,7 +716,7 @@ test_validator_is_net_zero :: proc(t: ^testing.T) {
 		fs: record.Mem_FS
 		defer record.mem_fs_destroy(&fs)
 		st: record.Store
-		_, err, _, _ := record.store_open(&st, "judged", record.mem_file_ops(&fs), validator = shacl.validator_hook(&v), allocator = allocator)
+		_, err, _, _ := record.store_open(&st, "wired", record.mem_file_ops(&fs), validator = shacl.validator_hook(&v), allocator = allocator)
 		if err != .None {
 			return
 		}

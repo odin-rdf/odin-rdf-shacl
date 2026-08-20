@@ -3,16 +3,15 @@ id: as-of-validation-on-record-the
 level: task
 title: "As-of validation on record: the SHACL-T-0030 scenarios via store_at"
 short_code: "SHACL-T-0035"
-created_at: 2026-08-20T15:20:22.000000+00:00
-updated_at: 2026-08-20T15:20:22.000000+00:00
+created_at: 2026-08-20T15:20:22+00:00
+updated_at: 2026-08-20T17:46:14.273244+00:00
 parent: SHACL-I-0004
-blocked_by:
-  - SHACL-T-0033
+blocked_by: [SHACL-T-0033]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -91,4 +90,66 @@ both ride the same session.
 
 ## Status Updates
 
-*To be added during implementation*
+**2026-08-20 — implemented, all criteria met; awaiting review.** Test code
+and documentation only, as the objective predicted: no library change.
+`store_at` is the one as-of call; everything below the session is head
+validation's code.
+
+**The scenarios** (`shacl/as_of_test.odin`, five tests, a `History` store
+built one `apply` per epoch, every verdict paired with the visible quad
+count so a vacuous pass cannot impersonate a real one):
+
+- *The dataset as it was* — the T-0030 handover: epoch 1 one owner
+  (conforms, 2 visible), epoch 2 two owners (violates, 3 visible; one
+  result on the report path), epoch 3 the old owner retracted (conforms, 2
+  visible), epoch 0 the empty world (conforms vacuously, 0 visible); head
+  via `store_latest` agrees with epoch 3 and disagrees with epoch 2;
+  `store_at(4)` is `.Future_Epoch`, refused rather than clamped.
+- *A retracted class hierarchy* — the reverse direction, on the report
+  path: epoch 1 conforms with 0 results, epoch 2 (the `rdfs:subClassOf`
+  edge retracted, data untouched) violates with 1.
+- *A retracted graph* — a named graph loaded and then wholly retracted:
+  populated and violating at epoch 1, empty and vacuously conforming at
+  head; the label still resolves at head, so it is an empty graph, not an
+  absent one.
+- *Epoch metadata beside the verdict* — a hand bisect finds the first
+  violating epoch (2); `snapshot_epoch_meta` on the pinned snapshot yields
+  `wall > 0`, and actor and reason decode through the session to the IRIs
+  the changeset named (`ex:ops`, `ex:handover-2026-08`); epoch 1's reason
+  is 0, "none", as the log records it.
+- *Shapes-as-of-then* — shapes in a graph of the same store, tightened from
+  `sh:maxCount 2` to `1` across epochs 3–4 (property shape named by IRI so a
+  parameter can be retracted and re-asserted); `conforms_node` (the
+  suppressed path) over one pinned snapshot feeding both sessions: the data
+  at epoch 2 conforms under epoch 2's shapes, violates under head's, and
+  head violates under head's; at epoch 0 the shapes graph compiles to zero
+  shapes. **Test code only, as expected** — compile reads through a
+  session, and SHACL-A-0001 releases the shapes snapshot the moment it
+  returns.
+
+Both paths the notes asked for are present: `conforms_node` carries the
+shapes-as-of-then scenario and `validate_report` the hierarchy one (and
+epoch 2 of the handover).
+
+**One record fact learned, recorded in the file header and the README:
+terms are not epoch-scoped; facts are.** A pinned snapshot bounds which
+facts are visible, not which terms resolve — a term resolves at every
+epoch, including before it was first written (as the old store's
+dictionary did, STORE-A-0008 §7). My first assertion expected the
+shapes-graph label *not* to resolve at epoch 0; it does, and reads an empty
+graph. This is the right semantics and is what lets one compiled model bind
+at any epoch without re-binding by hand.
+
+**Documented** (AC 5): the as-of coordinate is the epoch, not a wall-clock
+time — no `epoch_at(wall)`, the wall is advisory, a caller holding a time
+finds its epoch by its own bookkeeping or by walking `snapshot_epoch_meta`.
+Stated in the test header, the package doc (`shacl.odin`, after the
+`Validator` paragraph), and a new README subsection "Validating the past"
+with a compile-verified example in `tests/readme` (`as_of_example`: epoch 1
+conforms, epoch 2 does not, the metadata's wall is set). The README
+paragraph also carries the owner's three reasons to validate the past and
+names decision 5's recomputation.
+
+`tdb_compile` (compile a shapes document from a scratch store and close it)
+moved from `validator_test.odin` into the shared `harness_test.odin`, used
+by both. `make test`/`make check` green; `windows_amd64` check clean.

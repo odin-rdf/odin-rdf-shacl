@@ -427,7 +427,7 @@ if open_err != .None {
 }
 defer record.store_close(&db)
 
-// 3. Every apply is judged against the dataset it would produce. Under
+// 3. Every apply is validated against the dataset it would produce. Under
 //    Enforce a violation is refused and nothing is written; under Record it
 //    commits and `conforms` carries the verdict.
 ops, _ := ingest.turtle(transmute([]byte)string(CANDIDATE), nil, context.allocator, blank_prefix = "c_")
@@ -468,6 +468,52 @@ Four things the binding decides, each stated in `validator.odin`:
   default), not only the nodes the changeset touched — a change to one node
   can make another violate. The candidate snapshot is never retained past
   the check, which is record's contract for it.
+
+### Validating the past
+
+The record never erases: a retraction ends a fact's lifetime and leaves it
+readable at every earlier epoch. So a past dataset is validated exactly as the
+present one is — `record.store_at` where the examples above say
+`store_latest`, and nothing below the session changes:
+
+```odin
+// A snapshot pinned at `epoch` — 0 is the empty world before the first
+// commit, and the future is refused (Snapshot_Error.Future_Epoch), not clamped.
+snap, snap_err := record.store_at(&db, epoch)
+if snap_err != .None {
+	return
+}
+defer record.snapshot_release(&snap)
+se: shacl.Session
+shacl.session_init(&se, snap)
+
+bindings: shacl.Bindings
+shacl.bindings_init(&bindings, &shapes, se)
+defer shacl.bindings_destroy(&bindings)
+
+conforms, failure := shacl.conforms(&shapes, &bindings, se)
+
+// Who committed that epoch, why, and when — decoded like any other term.
+meta := record.snapshot_epoch_meta(snap, epoch)
+```
+
+**The coordinate is the epoch, not a time.** The record has no `epoch_at(wall)`:
+its wall clock is advisory evidence, not an index. A caller holding a time finds
+the epoch by its own bookkeeping, or by walking `snapshot_epoch_meta`, whose
+`wall` is there to be compared against. Terms are not epoch-scoped — a term
+resolves at every epoch, including before it was first written — only facts
+are, so one compiled model binds at any epoch.
+
+Three reasons to ask, since the record is immutable and remediation is never
+one of them: validating past data under the *current* shapes explains the
+present (bisect for the epoch that introduced a violation; the metadata names
+who and why) and reports exposure windows for newly adopted rules; validating
+past data under the *then-current* shapes is the accountability question —
+compile the model from the pinned snapshot's shapes graph and validate the same
+snapshot's data graph with it, one moment feeding both sessions. That second
+form is the recomputation `RECORD-A-0006` decision 5 leans on: the log does not
+record that a validator objected, so a verdict about the past is recoverable
+only by recomputing it over the epoch-pinned dataset.
 
 ## Memory contract
 

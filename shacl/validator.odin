@@ -119,7 +119,7 @@ validator_hook :: proc(v: ^Validator) -> record.Validator {
 
 // validator_report is the last check's `sh:ValidationReport`, finished and ready
 // to read or emit, or nil for a validator that is not reporting or has not yet
-// judged anything. Valid until the next `apply` on the store or
+// validated anything. Valid until the next `apply` on the store or
 // `validator_destroy` — see the reset rule on `Validator`.
 validator_report :: proc(v: ^Validator) -> ^Report {
 	if !v.reporting || !v.has_report {
@@ -163,7 +163,7 @@ validator_check :: proc(
 	v.failure = .None
 
 	// The graph is resolved against the candidate, so a graph the changeset
-	// is the first to name is judged rather than read as absent.
+	// is the first to name is validated rather than read as absent.
 	se: Session
 	session_init(&se, candidate, v.graph)
 

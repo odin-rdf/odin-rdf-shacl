@@ -441,7 +441,7 @@ validator_example :: proc() -> (refused: bool, results: int) {
 	}
 	defer record.store_close(&db)
 
-	// 3. Every apply is judged against the dataset it would produce. Under
+	// 3. Every apply is validated against the dataset it would produce. Under
 	//    Enforce a violation is refused and nothing is written; under Record it
 	//    commits and `conforms` carries the verdict.
 	ops, _ := ingest.turtle(transmute([]byte)string(CANDIDATE), nil, context.allocator, blank_prefix = "c_")
@@ -467,4 +467,59 @@ test_readme_validator_example :: proc(t: ^testing.T) {
 	// written, with one result in the validator's report.
 	testing.expect(t, refused)
 	testing.expect_value(t, results, 1)
+}
+
+// Validating the past: the README's sixth example. The data gains a second
+// name at epoch 2, so the verdict at epoch 1 and at epoch 2 differ.
+as_of_example :: proc(epoch: u32) -> (conforms: bool, failure: shacl.Failure, actor_set: bool) {
+	shapes: shacl.Shapes
+	defer shacl.shapes_destroy(&shapes)
+	compile_shapes(&shapes, MAX_ONE_NAME)
+
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "history", record.mem_file_ops(&fs))
+	if open_err != .None {
+		return
+	}
+	defer record.store_close(&db)
+	if !load(&db, `@prefix ex: <http://example.org/> . ex:alice a ex:Person ; ex:name "Alice" .`, "e1_") {
+		return
+	}
+	if !load(&db, `@prefix ex: <http://example.org/> . ex:alice ex:name "Alicia" .`, "e2_") {
+		return
+	}
+
+	// A snapshot pinned at `epoch` — 0 is the empty world before the first
+	// commit, and the future is refused (Snapshot_Error.Future_Epoch), not clamped.
+	snap, snap_err := record.store_at(&db, epoch)
+	if snap_err != .None {
+		return
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
+
+	bindings: shacl.Bindings
+	shacl.bindings_init(&bindings, &shapes, se)
+	defer shacl.bindings_destroy(&bindings)
+
+	conforms, failure = shacl.conforms(&shapes, &bindings, se)
+
+	// Who committed that epoch, why, and when — decoded like any other term.
+	meta := record.snapshot_epoch_meta(snap, epoch)
+	return conforms, failure, meta.wall > 0
+}
+
+@(test)
+test_readme_as_of_example :: proc(t: ^testing.T) {
+	then, f1, wall1 := as_of_example(1)
+	testing.expect_value(t, f1, shacl.Failure.None)
+	testing.expect(t, then, "at epoch 1 alice has one name")
+	testing.expect(t, wall1, "an epoch carries its wall time")
+
+	now, f2, _ := as_of_example(2)
+	testing.expect_value(t, f2, shacl.Failure.None)
+	testing.expect(t, !now, "at epoch 2 alice has two names against sh:maxCount 1")
 }

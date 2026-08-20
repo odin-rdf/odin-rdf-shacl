@@ -114,3 +114,18 @@ test_term :: proc(se: Session, id: u32) -> rdf.Term {
 	}
 	return rdf.clone_term(term, context.temp_allocator)
 }
+
+// tdb_compile compiles a shapes document from a store of its own and closes
+// that store, so the caller holds a model that outlives the store it came
+// from — the arrangement SHACL-A-0001 promises and every long-lived model
+// (a Validator, an as-of audit) relies on.
+@(private)
+tdb_compile :: proc(t: ^testing.T, s: ^Shapes, source: string) -> bool {
+	db: Test_DB
+	defer tdb_close(&db)
+	if !tdb_open(t, &db) || !tdb_load(t, &db, source, blank_prefix = "s_") {
+		return false
+	}
+	err := compile(s, tdb_session(&db))
+	return testing.expectf(t, err.kind == .None, "compile: %s", error_message(err.kind))
+}
