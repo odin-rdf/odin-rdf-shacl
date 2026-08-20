@@ -1,17 +1,19 @@
 // Package main is odin-rdf-shacl's benchmark: what validation costs, measured
-// rather than argued (SHACL-I-0003). Run with:
+// rather than argued (SHACL-I-0003; rebuilt against odin-rdf-record at
+// SHACL-T-0036). Run with:
 //
 //	make bench
 //
-// which builds with `-o:speed -no-bounds-check` and runs the binary at each
-// `Term_ID` width, exactly as `make test` runs the suite at each.
+// which builds with `-o:speed -no-bounds-check` **twice** and runs each: once
+// plain, for timings; once with `-define:SHACL_COUNT_READS=true`, for reads,
+// allocation and the assertions. See "Two modes" below for why.
 //
 //
 // # What it reports, and in what units
 //
 // **Three phases, separately**, because they scale differently and are paid at
 // different rates. `compile` (shapes graph to model) and `bind` (model to
-// data-store IDs) are once-per-process; `validate` is the repeated one. Rolling
+// snapshot ids) are once-per-process; `validate` is the repeated one. Rolling
 // them into a single number would hide the interesting one — and the
 // once-per-process pair is not a footnote here, because the deployment this
 // family is designed around is ~200 processes per machine each compiling a
@@ -24,13 +26,23 @@
 // it is quoted.
 //
 // **Two modes over one workload, because every instrument here perturbs what it
-// measures.**
+// measures** — and since the port they are two *builds* rather than two code
+// paths in one binary:
 //
-//   - *Timing* — the real path through `shacl/kvstore`,
-//     the real allocator, nothing wrapped. Wall clock only.
-//   - *Instrumented* — this package's counting `Access` (see `access.odin`) and
-//     a `mem.Tracking_Allocator`. Reports store reads and allocation. **No
-//     timing is taken here and none should ever be quoted from it.**
+//   - *Timing* — the plain build. The real path through the engine over a
+//     record snapshot, the real allocator, nothing wrapped. Wall clock only.
+//   - *Instrumented* — built with `SHACL_COUNT_READS`, which compiles a tally
+//     into the engine's four session verbs (`shacl/counting.odin`), plus a
+//     `mem.Tracking_Allocator` around each consumer. Reports store reads and
+//     allocation. **No timing is taken here and none should ever be quoted
+//     from it.**
+//
+// The old store's benchmark counted reads by supplying its own procedure set
+// to a seam the engine read through, so no shipped code changed. That seam
+// went with the backend abstraction (SHACL-I-0004 — record is the one and only
+// store and the engine calls it directly), and a `when`-gated counter at the
+// read sites is what replaced it: compiled out of every build but this one's
+// instrumented half, so the plain build is still the one a consumer gets.
 //
 // Allocation joins reads in the instrumented mode rather than taking a third:
 // both are deterministic for a fixed seed, neither belongs in a timed run, and
@@ -40,38 +52,35 @@
 // **`validate` is a warm-up plus the best of REPS; `compile` and `bind` are
 // measured once, cold.** That asymmetry is deliberate rather than sloppy. The
 // question about validation is what it costs in steady state, and the first
-// pass pays for cold pages and an unwarmed allocator — the very first run of
-// this benchmark reported memstore as *slower* than LMDB on the reference
-// configuration, purely because memstore went first. (Historical: the in-memory
-// backend was retired in 2026-08 — odin-rdf-store STORE-A-0006.) The question about compile
-// and bind is the opposite: they happen once per process, so a cold number is
-// not noise in the measurement, it is the measurement. Reporting a warmed
-// figure for a cost nobody pays twice would flatter it.
+// pass pays for cold pages and an unwarmed allocator. The question about
+// compile and bind is the opposite: they happen once per process, so a cold
+// number is not noise in the measurement, it is the measurement. Reporting a
+// warmed figure for a cost nobody pays twice would flatter it.
 //
 //
 // # What it asserts
 //
-// A benchmark that only prints is a benchmark nobody reads. Three things fail
-// the run rather than appearing in the output:
+// A benchmark that only prints is a benchmark nobody reads. Two things fail
+// the run rather than appearing in the output, and a third set of promises is
+// checked across configurations (`assert_promises`):
 //
 //  1. **The generator is deterministic.** One seed, byte-identical graphs.
 //     Everything below rests on it. Note what this does and does not catch: it
 //     catches a generator that varies *within a process* — a global RNG, a
 //     clock, a map iteration order — because both calls would disagree. It
 //     cannot catch a generator whose stream merely *changed*, since both calls
-//     would agree on the new one. That case is caught by (3), which was
+//     would agree on the new one. That case is caught by (2), which was
 //     confirmed by perturbing the PRNG and watching the pins fail rather than
 //     this assertion.
-//  2. **The read count was identical on memstore and kvstore** — historical,
-//     and no longer checkable with one backend (STORE-A-0006). The
-//     backend-independent core decides *what* to ask and the adapter decides
-//     only *how*, so a divergence is a bug rather than a property of a backend.
-//  3. **The read count matches its pin.** See `config.odin` — a constant per
+//  2. **The read count matches its pin.** See `config.odin` — a constant per
 //     configuration, changed only by deliberate edit.
 //
-// The width half of (2) is asserted across runs rather than within one: ID
-// width is a build-time choice, so `make bench` runs the binary at each width
-// and the same pins have to hold. One integer, four ways.
+// There used to be a third — the read count was identical on two backends and
+// at two id widths — and both halves went with what they compared: one store,
+// fixed widths. What replaced it is a fact rather than an assertion: the pins
+// measured over the old store came through the port to the integer, so the
+// count has now held across three stores. Nothing checks that on each run any
+// more; the pin is what keeps the number from moving unnoticed from here.
 //
 //
 // # What these numbers are not
@@ -80,24 +89,27 @@
 // comparative one — the engine against itself over time, and with a change
 // against without — not a claim about what SHACL costs in the world. See
 // `generate.odin` for the shape of the workload and why it is synthetic.
+//
+// **And the timings and allocations are not comparable with the numbers the
+// old store produced** — a read there was an LMDB cursor, here a range over a
+// memory-resident permutation, and the materialised-term accounting differs.
+// **The read counts are**: they came out identical to the last integer, which
+// says the engine asks exactly the questions it asked before (`config.odin`).
+// The old baselines stand in Metis as the record of what that store cost.
 package main
 
 import "core:fmt"
 import "core:os"
 import "core:time"
 
-import store "store:store"
-import kvstore "store:store/kvstore"
-
-import shacl "../shacl"
-import shacl_kvstore "../shacl/kvstore"
+import "../shacl"
 
 // REPS is how many timed validations a configuration runs after its warm-up.
 // The reported figure is the fastest of them: a minimum is the statistic that
 // resists the scheduler, which only ever makes a run slower.
 REPS :: 5
 
-// Timing is one configuration's wall clock on one backend.
+// Timing is one configuration's wall clock.
 Timing :: struct {
 	compile:  time.Duration,
 	bind:     time.Duration,
@@ -105,13 +117,14 @@ Timing :: struct {
 	results:  int,
 }
 
-// Instrumented is one configuration's reads and allocation on one backend.
+// Instrumented is one configuration's store reads.
 Instrumented :: struct {
-	reads:       Reads,
-	results:     int,
-	peak:        int,
-	total_bytes: int,
-	allocations: int,
+	reads:   shacl.Read_Counts,
+	results: int,
+}
+
+reads_total :: proc(r: shacl.Read_Counts) -> int {
+	return r.scan + r.step + r.outgoing + r.term
 }
 
 // Observation is what one configuration contributed to the cross-configuration
@@ -140,10 +153,12 @@ fail :: proc(format: string, args: ..any) {
 }
 
 main :: proc() {
-	fmt.printfln("odin-rdf-shacl bench — Term_ID width %d bits", store.TERM_ID_BITS)
-	fmt.println(
-		"Synthetic workload; a regression instrument, not a claim about real-world cost.",
-	)
+	when shacl.SHACL_COUNT_READS {
+		fmt.println("odin-rdf-shacl bench — instrumented: store reads, allocation, assertions. No timings.")
+	} else {
+		fmt.println("odin-rdf-shacl bench — timing: nothing wrapped.")
+	}
+	fmt.println("Synthetic workload over odin-rdf-record (memory seam); a regression instrument, not a claim about real-world cost.")
 
 	// A process-level warm-up, discarded entirely, before any configuration is
 	// timed.
@@ -159,15 +174,19 @@ main :: proc() {
 	// That is the kind of artifact that reads as a finding. A benchmark whose
 	// answer depends on the order of its own list is worse than none, so the
 	// process is warmed once here and no number below is the first thing this
-	// binary did.
-	warm_up()
+	// binary did. The instrumented build takes no timings and skips it.
+	when !shacl.SHACL_COUNT_READS {
+		warm_up()
+	}
 
 	for c in CONFIGS {
 		fmt.printfln("\n== %s ==", c.name)
 		run_config(c)
 	}
 
-	assert_promises()
+	when shacl.SHACL_COUNT_READS {
+		assert_promises()
+	}
 
 	fmt.println()
 	if failures > 0 {
@@ -189,7 +208,7 @@ warm_up :: proc() {
 	w := generate(c)
 	defer workload_destroy(&w)
 	for _ in 0 ..< 3 {
-		_, _ = time_kvstore(c, w)
+		_, _ = time_config(c, w)
 	}
 }
 
@@ -221,62 +240,52 @@ run_config :: proc(c: Config) {
 		c.qualified,
 	)
 
-	kv_t, kv_ok := time_kvstore(c, w)
-	if kv_ok {
-		report_timing("kvstore ", c, kv_t)
-	}
+	when shacl.SHACL_COUNT_READS {
+		i, i_ok := instrument_config(c, w)
+		if !i_ok {
+			return
+		}
+		report_instrumented(c, i)
 
-	kv_i, kv_i_ok := instrument_kvstore(c, w)
-	if kv_i_ok {
-		report_instrumented("kvstore ", c, kv_i)
-	}
-	if !kv_i_ok {
-		return
-	}
+		if k, k_ok := measure_consumers(c, w); k_ok {
+			report_consumers(c, k)
+			append(
+				&observations,
+				Observation {
+					config = c,
+					raw_peak = k.raw.peak,
+					raw_total_bytes = k.raw.total_bytes,
+					raw_allocs = k.raw.allocations,
+					conformance_allocs = k.conformance.allocations,
+					conforms = k.conforms,
+					report_bytes = k.report.total_bytes,
+					report_triples = triple_count(k.report),
+				},
+			)
+		}
 
-	// (2) The cross-backend invariant is gone with the second backend
-	// (odin-rdf-store STORE-A-0006, SHACL-T-0028). It asserted that memstore
-	// and kvstore performed the same number of reads per verb and produced the
-	// same results — the core decides what to ask and the adapter only how, so
-	// a disagreement was a defect rather than a measurement. With one adapter
-	// there is nothing to disagree with, and no check replaces it: the read
-	// counts below are now a description of what the engine does, not a
-	// cross-checked invariant.
-
-	if k, k_ok := measure_consumers(c, w); k_ok {
-		report_consumers(c, k)
-		append(
-			&observations,
-			Observation {
-				config = c,
-				raw_peak = k.raw.peak,
-				raw_total_bytes = k.raw.total_bytes,
-				raw_allocs = k.raw.allocations,
-				conformance_allocs = k.conformance.allocations,
-				conforms = k.conforms,
-				report_bytes = k.report.total_bytes,
-				report_triples = triple_count(k.report),
-			},
-		)
-	}
-
-	// (3) The pin.
-	total := reads_total(kv_i.reads)
-	pinned, has_pin := pinned_reads(c.name)
-	switch {
-	case !has_pin:
-		fail("%s: no entry in PINNED_READS — measured %d reads", c.name, total)
-	case pinned == UNPINNED:
-		fmt.printfln("   pin: UNPINNED — measured %d reads; write this into config.odin", total)
-	case pinned != total:
-		fail(
-			"%s: %d reads, pinned at %d. If the engine legitimately asks the store a different number of questions, re-pin and say why",
-			c.name,
-			total,
-			pinned,
-		)
-	case:
-		fmt.printfln("   pin: %d reads, as pinned", total)
+		// (2) The pin.
+		total := reads_total(i.reads)
+		pinned, has_pin := pinned_reads(c.name)
+		switch {
+		case !has_pin:
+			fail("%s: no entry in PINNED_READS — measured %d reads", c.name, total)
+		case pinned == UNPINNED:
+			fmt.printfln("   pin: UNPINNED — measured %d reads; write this into config.odin", total)
+		case pinned != total:
+			fail(
+				"%s: %d reads, pinned at %d. If the engine legitimately asks the store a different number of questions, re-pin and say why",
+				c.name,
+				total,
+				pinned,
+			)
+		case:
+			fmt.printfln("   pin: %d reads, as pinned", total)
+		}
+	} else {
+		if t, ok := time_config(c, w); ok {
+			report_timing(c, t)
+		}
 	}
 }
 
@@ -289,85 +298,107 @@ count_visitor :: proc(data: rawptr, result: shacl.Result) -> bool {
 	return true
 }
 
+// time_config is the timing mode: compile cold, bind cold, validate warm-up
+// plus best-of-REPS, over the plain engine.
 @(private = "file")
-time_kvstore :: proc(c: Config, w: Workload) -> (t: Timing, ok: bool) {
+time_config :: proc(c: Config, w: Workload) -> (t: Timing, ok: bool) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
-
-	shapes_db, shapes_path, shapes_open := open_temp_store(c.name, "shapes-t")
-	if !shapes_open {
-		return
-	}
-	defer close_temp_store(shapes_db, shapes_path)
-
-	if _, parse_err, load_err := kvstore.load_turtle(
-		shapes_db,
-		transmute([]byte)w.shapes_ttl,
-	); load_err != nil || parse_err.message != "" {
-		fail("%s: shapes graph failed to load into kvstore", c.name)
+	compile_ok: bool
+	if t.compile, compile_ok = compile_model(c, w, &model); !compile_ok {
 		return
 	}
 
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, shapes_db)
-	start := time.tick_now()
-	compile_err := shacl_kvstore.compile(&model, &session)
-	t.compile = time.tick_since(start)
-	if compile_err.kind != .None || shacl_kvstore.session_error(&session) != nil {
-		fail("%s: shapes graph did not compile on kvstore", c.name)
+	data: Graph_Store
+	defer graph_close(&data)
+	if !graph_open(&data, c.name, w.data_ttl, "d_") {
 		return
 	}
-
-	db, path, opened := open_temp_store(c.name, "data-t")
-	if !opened {
-		return
-	}
-	defer close_temp_store(db, path)
-	if _, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)w.data_ttl);
-	   load_err != nil || parse_err.message != "" {
-		fail("%s: data graph failed to load into kvstore", c.name)
-		return
-	}
-
-	data_session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&data_session, db)
+	se := graph_session(&data)
 
 	bindings: shacl.Bindings
 	defer shacl.bindings_destroy(&bindings)
-	start = time.tick_now()
-	shacl_kvstore.bind(&bindings, &model, &data_session)
+	start := time.tick_now()
+	shacl.bindings_init(&bindings, &model, se)
 	t.bind = time.tick_since(start)
 
 	t.validate = max(time.Duration)
 	for rep in 0 ..< REPS + 1 {
 		t.results = 0
 		start = time.tick_now()
-		failure := shacl_kvstore.validate(
-			&model,
-			&bindings,
-			&data_session,
-			count_visitor,
-			&t.results,
-		)
+		failure := shacl.validate(&model, &bindings, se, count_visitor, &t.results)
 		elapsed := time.tick_since(start)
 		if failure != .None {
-			fail("%s: kvstore validation failed — %s", c.name, shacl.failure_message(failure))
+			fail("%s: validation failed — %s", c.name, shacl.failure_message(failure))
 			return
 		}
 		if rep > 0 && elapsed < t.validate {
 			t.validate = elapsed
 		}
 	}
-	// A failed LMDB read yields no value nodes, which looks exactly like a
-	// conforming graph — so a fast, silent, empty validation would be a broken
-	// store reported as good news.
-	if err := shacl_kvstore.session_error(&data_session); err != nil {
-		fail("%s: a store read failed during kvstore validation — %v", c.name, err)
-		return
-	}
 	return t, true
 }
 
+report_timing :: proc(c: Config, t: Timing) {
+	per_focus := c.focus_nodes > 0 ? time.duration_nanoseconds(t.validate) / i64(c.focus_nodes) : 0
+	fmt.printfln(
+		"   compile %8v   bind %8v   validate %8v  (%d ns/focus node, %d results)",
+		t.compile,
+		t.bind,
+		t.validate,
+		per_focus,
+		t.results,
+	)
+}
+
+when shacl.SHACL_COUNT_READS {
+	// instrument_config is the read count: one validation with the tally reset
+	// immediately before it. `bindings_init` resolves terms and is not part of
+	// what is counted; `compile` reads the shapes graph through the same verbs,
+	// which is why the reset comes after it.
+	instrument_config :: proc(c: Config, w: Workload) -> (out: Instrumented, ok: bool) {
+		model: shacl.Shapes
+		defer shacl.shapes_destroy(&model)
+		if _, compile_ok := compile_model(c, w, &model); !compile_ok {
+			return
+		}
+
+		data: Graph_Store
+		defer graph_close(&data)
+		if !graph_open(&data, c.name, w.data_ttl, "d_") {
+			return
+		}
+		se := graph_session(&data)
+
+		bindings: shacl.Bindings
+		defer shacl.bindings_destroy(&bindings)
+		shacl.bindings_init(&bindings, &model, se)
+
+		shacl.read_counts_reset()
+		failure := shacl.validate(&model, &bindings, se, count_visitor, &out.results)
+		if failure != .None {
+			fail("%s: instrumented validation failed — %s", c.name, shacl.failure_message(failure))
+			return
+		}
+		out.reads = shacl.read_counts_get()
+		return out, true
+	}
+
+	report_instrumented :: proc(c: Config, i: Instrumented) {
+		total := reads_total(i.reads)
+		per_focus := c.focus_nodes > 0 ? total / c.focus_nodes : 0
+		fmt.printfln(
+			"   reads %d (scan %d step %d outgoing %d term %d, %d/focus node, %d results)",
+			total,
+			i.reads.scan,
+			i.reads.step,
+			i.reads.outgoing,
+			i.reads.term,
+			per_focus,
+			i.results,
+		)
+	}
+}
 
 // same_workload_but_density reports whether two configurations differ only in
 // how much of their data violates. Compared structurally rather than by name:

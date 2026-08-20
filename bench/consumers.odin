@@ -3,10 +3,7 @@ package main
 import "core:fmt"
 import "core:mem"
 
-import kvstore "store:store/kvstore"
-
-import shacl "../shacl"
-import shacl_kvstore "../shacl/kvstore"
+import "../shacl"
 
 // The three result consumers, measured against the same walk (SHACL-T-0024).
 //
@@ -15,10 +12,9 @@ import shacl_kvstore "../shacl/kvstore"
 // the three together. Two of the `shacl` package's promises are only checkable
 // this way, and both are checked here at a size `tests/guards` cannot build:
 //
-//   - **`Conformance` allocates nothing at all, whatever the violation count.**
-//     An absolute claim, so it is an exact assertion — `total_allocation_count`
-//     must be zero, on the configuration with the most violations in the set,
-//     not merely small or steady.
+//   - **`Conformance` allocates nothing over the walk it rides on.** On a
+//     conforming graph its allocation count equals the raw stream's exactly;
+//     on a violating one it is strictly less (`assert_promises`).
 //   - **Memory stays flat exactly when the data is worst.** Peak must not move
 //     as violation density goes 0 → 20 → 100 percent over an otherwise
 //     identical workload.
@@ -29,6 +25,16 @@ import shacl_kvstore "../shacl/kvstore"
 // just as well on an engine that had stopped reporting anything, so the report
 // is measured too and its growth is the evidence that the other two are flat
 // for the right reason.
+//
+// **What the figures include changed with each store.** On memstore they were
+// the engine alone — its `lookup_term` borrowed. On kvstore every materialised
+// term was copied into the caller's allocator and counted. On record,
+// `session_term` borrows again (the dictionary arena, or a stack buffer for an
+// inlined id) and the engine interns what it keeps — so these are once more
+// the engine's own allocation, with one systematic shift against the memstore
+// numbers: ids are u32 natively, so every id-holding structure is smaller
+// (the 64-bit peak of 27076 B became 20868 B, the 32-bit build's old figure).
+// Allocation *counts* came through the port unchanged.
 
 // Consumer_Stats is one consumer's allocation profile over one validation.
 Consumer_Stats :: struct {
@@ -47,68 +53,37 @@ Consumers :: struct {
 }
 
 // measure_consumers runs the same validation three ways, each under its own
-// tracking allocator.
-//
-// **The question these figures answer changed on 2026-08-07 (SHACL-T-0028), and
-// the old numbers are not comparable to the new ones.** This ran on memstore
-// deliberately: the question was what *this engine* allocates, and memstore's
-// `lookup_term` borrowed its dictionary's storage, so nothing the store did
-// showed up in the count. odin-rdf-store retired that backend (STORE-A-0006),
-// and kvstore copies every materialised term into the caller's allocator — so
-// every figure below now includes term materialisation as well as the engine's
-// own work.
-//
-// That is arguably the more useful number, since it is what a real consumer
-// pays; it is simply not the number this benchmark used to report. What is no
-// longer measurable anywhere is the engine's allocation in isolation.
+// tracking allocator. Allocation is tracked around validation and nothing
+// else: the promise under test is about validation — memory flat as the
+// violation count rises — and folding compile and bind into the same tally
+// would bury it under a one-off cost that scales with the shapes graph.
 measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
-
-	shapes_db, shapes_path, shapes_ok := open_temp_store(c.name, "consumers-shapes")
-	if !shapes_ok {
-		return
-	}
-	defer close_temp_store(shapes_db, shapes_path)
-	if _, err, _ := kvstore.load_turtle(shapes_db, transmute([]byte)w.shapes_ttl);
-	   err.message != "" {
-		fail("%s: shapes graph failed to load", c.name)
-		return
-	}
-	shapes_session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&shapes_session, shapes_db)
-	if e := shacl_kvstore.compile(&model, &shapes_session); e.kind != .None {
-		fail("%s: shapes graph did not compile", c.name)
+	if _, compile_ok := compile_model(c, w, &model); !compile_ok {
 		return
 	}
 
-	db, path, db_ok := open_temp_store(c.name, "consumers-data")
-	if !db_ok {
+	data: Graph_Store
+	defer graph_close(&data)
+	if !graph_open(&data, c.name, w.data_ttl, "d_") {
 		return
 	}
-	defer close_temp_store(db, path)
-	if _, err, _ := kvstore.load_turtle(db, transmute([]byte)w.data_ttl);
-	   err.message != "" {
-		fail("%s: data graph failed to load", c.name)
-		return
-	}
-
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	se := graph_session(&data)
 
 	bindings: shacl.Bindings
 	defer shacl.bindings_destroy(&bindings)
-	shacl_kvstore.bind(&bindings, &model, &session)
+	shacl.bindings_init(&bindings, &model, se)
 
 	// (1) The raw stream, counting and keeping nothing.
 	{
 		tracker: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracker, context.allocator)
 		defer mem.tracking_allocator_destroy(&tracker)
-		failure := shacl_kvstore.validate(
+		failure := shacl.validate(
 			&model,
 			&bindings,
-			&session,
+			se,
 			count_visitor,
 			&out.raw.results,
 			allocator = mem.tracking_allocator(&tracker),
@@ -117,28 +92,23 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 			fail("%s: raw validation failed — %s", c.name, shacl.failure_message(failure))
 			return
 		}
-		record(&out.raw, &tracker)
+		record_stats(&out.raw, &tracker)
 	}
 
 	// (2) Conformance. It stops at the first result of any severity, so its
 	// result count is not comparable with the others' — what is measured is the
-	// allocation, and the promise is that there is none.
+	// allocation, and the promise is that the consumer adds none.
 	{
 		tracker: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracker, context.allocator)
 		defer mem.tracking_allocator_destroy(&tracker)
-		conforms, failure := shacl_kvstore.conforms(
-			&model,
-			&bindings,
-			&session,
-			allocator = mem.tracking_allocator(&tracker),
-		)
+		conforms, failure := shacl.conforms(&model, &bindings, se, allocator = mem.tracking_allocator(&tracker))
 		if failure != .None {
 			fail("%s: conformance check failed — %s", c.name, shacl.failure_message(failure))
 			return
 		}
 		out.conforms = conforms
-		record(&out.conformance, &tracker)
+		record_stats(&out.conformance, &tracker)
 	}
 
 	// (3) The report graph. The one that is supposed to grow.
@@ -148,13 +118,7 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 		defer mem.tracking_allocator_destroy(&tracker)
 		r: shacl.Report
 		shacl.report_init(&r, mem.tracking_allocator(&tracker))
-		failure := shacl_kvstore.validate_report(
-			&r,
-			&model,
-			&bindings,
-			&session,
-			allocator = mem.tracking_allocator(&tracker),
-		)
+		failure := shacl.validate_report(&r, &model, &bindings, se, allocator = mem.tracking_allocator(&tracker))
 		if failure != .None {
 			fail("%s: report validation failed — %s", c.name, shacl.failure_message(failure))
 			shacl.report_destroy(&r)
@@ -168,11 +132,7 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 		out.report.results = len(shacl.report_triples(&r))
 		shacl.report_destroy(&r)
 		if len(tracker.allocation_map) != 0 {
-			fail(
-				"%s: report building leaked %d allocation(s)",
-				c.name,
-				len(tracker.allocation_map),
-			)
+			fail("%s: report building leaked %d allocation(s)", c.name, len(tracker.allocation_map))
 		}
 	}
 
@@ -180,7 +140,7 @@ measure_consumers :: proc(c: Config, w: Workload) -> (out: Consumers, ok: bool) 
 }
 
 @(private = "file")
-record :: proc(s: ^Consumer_Stats, t: ^mem.Tracking_Allocator) {
+record_stats :: proc(s: ^Consumer_Stats, t: ^mem.Tracking_Allocator) {
 	s.peak = int(t.peak_memory_allocated)
 	s.total_bytes = int(t.total_memory_allocated)
 	s.allocations = int(t.total_allocation_count)
@@ -188,8 +148,9 @@ record :: proc(s: ^Consumer_Stats, t: ^mem.Tracking_Allocator) {
 
 report_consumers :: proc(c: Config, k: Consumers) {
 	fmt.printfln(
-		"   consumers  raw: peak %d B, %d allocs, %d results",
+		"   consumers  raw: peak %d B, %d B total, %d allocs, %d results",
 		k.raw.peak,
+		k.raw.total_bytes,
 		k.raw.allocations,
 		k.raw.results,
 	)

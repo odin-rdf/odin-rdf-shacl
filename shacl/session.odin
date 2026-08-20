@@ -85,6 +85,9 @@ Term_Buf :: [record.INLINE_LEXICAL_MAX]u8
 // `record.apply` contains one (its encoder emits full IRIs only), and this
 // engine reads apply-written stores.
 session_term :: proc(se: Session, id: u32, buf: []byte) -> (term: rdf.Term, ok: bool) {
+	when SHACL_COUNT_READS {
+		read_counts.term += 1
+	}
 	return record.snapshot_term(se.snap, id, buf)
 }
 
@@ -121,6 +124,9 @@ session_scan :: proc(
 	visit: proc(data: rawptr, id: u32) -> bool,
 	visit_data: rawptr,
 ) -> bool {
+	when SHACL_COUNT_READS {
+		read_counts.scan += 1
+	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, p = predicate, o = object, g = se.graph})
 	sc := record.range_iter(rng, record.Filter{origin = .Any})
 	for {
@@ -140,6 +146,9 @@ session_scan :: proc(
 // `inverted`. The path evaluator's one read.
 @(private)
 session_step :: proc(se: Session, from, predicate: u32, inverted: bool, out: ^[dynamic]u32) {
+	when SHACL_COUNT_READS {
+		read_counts.step += 1
+	}
 	p :=
 		inverted \
 		? record.Pattern{p = predicate, o = from, g = se.graph} \
@@ -166,6 +175,9 @@ session_outgoing :: proc(
 	visit: proc(data: rawptr, predicate, object: u32) -> bool,
 	visit_data: rawptr,
 ) -> bool {
+	when SHACL_COUNT_READS {
+		read_counts.outgoing += 1
+	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, g = se.graph})
 	sc := record.range_iter(rng, record.Filter{origin = .Any})
 	for {

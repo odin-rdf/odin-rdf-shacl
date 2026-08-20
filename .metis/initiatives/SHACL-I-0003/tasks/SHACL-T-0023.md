@@ -196,3 +196,13 @@ nothing else. A single figure quoting both is the failure this split exists to p
   (1181) and `dense` (6000).** That is the package doc's "memory stays flat exactly when
   the data is worst" promise, already visible at a size `tests/guards` cannot build.
   T-0024 should confirm it deliberately rather than inherit it as an observation.
+
+- **2026-08-20 — dated note (SHACL-T-0036).** The pins and findings above were measured
+  over **odin-rdf-store** (memstore and kvstore), retired by the SHACL-I-0004 port; the
+  benchmark was rebuilt against odin-rdf-record and the read counter moved from the
+  `Access` seam into the engine's session verbs behind `-define:SHACL_COUNT_READS`.
+  **Every pin came through the port unchanged** — 7503 / 11504 / 11596 / 7503 / 7503 /
+  9003 / 9003 / 9003 — which is the cross-backend invariant this task asserted between
+  memstore and kvstore, re-established after the fact by a third store. Timings are the
+  numbers that do not carry over (a read is no longer an LMDB cursor); they are
+  re-baselined in SHACL-T-0036's Status and the README.

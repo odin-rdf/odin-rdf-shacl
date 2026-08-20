@@ -186,3 +186,10 @@ date and a seed beside them saying what they were measured against.
     list walk and the two branches cost more in allocation than in store traffic. Nothing
     is wrong; it is simply the one place where reads are a poor proxy for cost, which is
     worth knowing before anyone uses the read count as a stand-in for time.
+
+- **2026-08-20 — dated note (SHACL-T-0036).** The tables above measured odin-rdf-store,
+  retired by the SHACL-I-0004 port; they stand as the record of what that store cost.
+  Over odin-rdf-record the flat-memory promises hold with the same allocation counts and
+  report sizes, at the old **32-bit** peak (20868 bytes) on every configuration — record's
+  ids are `u32` by design, so the width row of the second table has no successor. The
+  record-store baselines are in SHACL-T-0036's Status and the README.

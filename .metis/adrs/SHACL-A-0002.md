@@ -325,3 +325,33 @@ implementation gets it wrong: both bounds can break at the same focus node
 §4.7.3 gives each count its own constraint component, so the merged constraint emits **two**
 results rather than one. No entry in the vendored corpus has that shape;
 `test_qualified_both_bounds_violate` in `shacl/kvstore` does.
+
+## Re-read after the port (SHACL-T-0036, 2026-08-20)
+
+**The numbers above measured odin-rdf-store** — memstore in *As Measured*,
+kvstore in *As Built* — and that store is retired (SHACL-I-0004): the engine
+now reads odin-rdf-record, and `bench/` was rebuilt against it with the read
+counter moved from the old seam into the engine's session verbs behind a
+build-time switch. The tables stand as the record of what was measured then.
+Over record, same configurations, same seed, Apple M-series:
+
+| | reads | allocations | total allocated | validate |
+| --- | ---: | ---: | ---: | ---: |
+| `qualified-min` | 9003 | 9018 | 2 477 094 B | ~1.54 ms |
+| `qualified-minmax` | 9003 | 9018 | 2 477 094 B | ~1.53 ms |
+| `qualified` (`Disjoint_Pair`) | 11504 | 14522 | 4 909 800 B | ~2.10 ms |
+
+**Reads and allocation counts are the old store's to the integer.** The
+port predicted otherwise and was wrong in the direction that matters: the
+engine asks exactly the questions it asked before. Total bytes shrank with
+the native `u32` ids (2 757 382 → 2 477 094 B for the pair), and wall clock
+is ~4x faster for the same walk — a read is a range over a resident
+permutation rather than an LMDB cursor. Neither changes anything above.
+
+**Status of the trigger: still discharged.** The reasoning that sharing one
+walk dominates caching on every axis, under every allocator, did not depend
+on what a read costs, and the pair is still indistinguishable in every
+measured number — the duplicate has not come back. Reopening still needs
+evidence of a different kind: a workload where a repeated ask that *does
+not* share a property shape dominates, and the working-set growth is
+affordable. A faster store makes that bar higher, not lower.

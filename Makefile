@@ -78,8 +78,8 @@ test: ## Run the full suite
 # odin-rdf-record is the one and only store, and shacl imports it directly.
 # With LMDB out of the link entirely the check was trivially true.
 #
-# bench/ is temporarily out of the vet loop while SHACL-T-0036 rebuilds it
-# against the record store; the guard below comes back with it.
+# bench/ has an entry point, so it is vetted outside the PKGS loop -- and both
+# ways, since the instrumented half of it only compiles with the switch on.
 #
 # The last step is a style rule the vet cannot express: Odin binds an import to
 # the last component of its path, so `import rdf "rdf:rdf"` says nothing that
@@ -93,25 +93,34 @@ check: ## Vet every package
 		echo "-- $$pkg --"; \
 		odin check $$pkg -no-entry-point -vet -strict-style $(COLL) || exit 1; \
 	done
+	@echo "-- $(BENCH) --"
+	@odin check $(BENCH) -vet -strict-style $(COLL) || exit 1
+	@odin check $(BENCH) -vet -strict-style $(COLL) -define:SHACL_COUNT_READS=true || exit 1
 	@echo "-- import aliases --"
-	@if grep -rnE '^import ([A-Za-z_]+) "([^"]*[:/])?\1"' --include='*.odin' shacl tests; then \
+	@if grep -rnE '^import ([A-Za-z_]+) "([^"]*[:/])?\1"' --include='*.odin' shacl tests $(BENCH); then \
 		echo "error: redundant import alias -- Odin already binds the last path component"; exit 1; \
 	fi
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.
 #
-# **Unbuildable until SHACL-T-0036.** bench/ still binds odin-rdf-store and
-# the `Access` seam the port collapsed (SHACL-I-0004 design par. 8), so it is
-# rebuilt against the record store rather than patched -- read counting
-# rehomed onto record's read API, baselines re-measured, the old numbers
-# standing as the record. Until then the target says so instead of failing on
-# a collection this repository no longer declares.
-bench: ## Build and run the benchmarks with release flags (pending SHACL-T-0036)
-	@echo "bench/ is being rebuilt against odin-rdf-record (SHACL-T-0036); it does not build until that lands"; exit 1
+# **Two builds, not one** (SHACL-T-0036). The benchmark's instrumented mode
+# counts the engine's store reads, and with the backend seam gone the counter
+# lives in the engine's own session verbs behind `-define:SHACL_COUNT_READS`
+# (shacl/counting.odin) -- compiled out entirely otherwise. So the timing run is
+# the plain build, nothing wrapped, and the instrumented run -- reads, allocation,
+# the cross-configuration assertions, no timings -- is a second build with the
+# switch on. The read pins are asserted by the second; the first only reports.
+bench: ## Build and run the benchmarks with release flags: timing, then instrumented
+	@mkdir -p build
+	@echo "== timing =="
+	@odin run $(BENCH) -out:$(OUT) -o:speed -no-bounds-check $(COLL) || exit 1
+	@echo
+	@echo "== instrumented =="
+	@odin run $(BENCH) -out:$(OUT) -o:speed -no-bounds-check $(COLL) -define:SHACL_COUNT_READS=true || exit 1
 
-build-bench: ## Build the benchmark binary without running it (pending SHACL-T-0036)
-	@echo "bench/ is being rebuilt against odin-rdf-record (SHACL-T-0036); it does not build until that lands"; exit 1
+build-bench: ## Build the timing benchmark binary without running it
+	@mkdir -p build && odin build $(BENCH) -out:$(OUT) -o:speed -no-bounds-check $(COLL)
 
 clean: ## Remove build/
 	rm -rf build

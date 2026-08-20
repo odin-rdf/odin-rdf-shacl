@@ -95,23 +95,25 @@ protecting a consumer.
 Numbers from `make bench`, on the **reference configuration**: 500 focus nodes,
 3 property shapes, 4 value nodes each — 6000 value nodes, 20% of them
 violating — with predicate paths and `sh:class` constraints, seed `0x5EED0001`.
-Measured on Apple M-series, `-o:speed -no-bounds-check`, 64-bit `Term_ID`.
+Measured on Apple M-series, `-o:speed -no-bounds-check`, over odin-rdf-record's
+memory seam (SHACL-T-0036, 2026-08-20).
 
-| | kvstore (LMDB) |
+| | odin-rdf-record |
 | --- | ---: |
-| `compile` (shapes graph → model) | 146 µs |
-| `bind` (model → store IDs) | 27 µs |
-| `validate` | 4.69 ms |
-| per focus node | 9.4 µs |
+| `compile` (shapes graph → model) | 35 µs |
+| `bind` (model → snapshot ids) | 8 µs |
+| `validate` | 1.17 ms |
+| per focus node | 2.3 µs |
 | store reads | 7503 |
 
-This is what a process embedding a persistent store pays. The table used to
-carry a second column for the in-memory backend — the engine's own cost with
-storage out of the way, 1.3 µs per focus node against 9.4 — but odin-rdf-store
-retired that backend (STORE-A-0006), and the isolated figure is no longer
-measurable. The read count was identical across both, which is how the family
-knew the core decided *what* to ask and the adapter only *how*; with one
-adapter there is nothing left to cross-check it against.
+**The read count is the integer the old store produced**, here and on every
+one of the eight standing configurations. The port expected the counts to
+differ and said so in advance; they did not, and that is the strongest
+statement it could make about itself: the engine asks the store exactly the
+questions it asked before, and only what a question *costs* changed — a read
+on odin-rdf-store was an LMDB cursor, on record it is a range over a
+memory-resident permutation, and `validate` went from 4.69 ms to 1.17 ms on the
+same walk.
 
 `compile` and `bind` are measured **cold, once**, because that is what a process
 pays — the deployment this family is designed around is ~200 processes per
@@ -119,16 +121,24 @@ machine each compiling a shapes graph at start-up. `validate` is a warm-up plus
 the best of five, because the question there is steady-state cost.
 
 **Memory.** Validation's working set is flat in the violation count, and the
-benchmark asserts it rather than reporting it: peak is **27076 bytes** on the
-identical walk whether 0, 1181, or 6000 results come out of it. `conforms` stops
-at the first result and costs 2372 bytes and 16 allocations. A `Report` is the
-one consumer meant to grow, and does — 2 triples for a conforming graph, 9450
-for the reference configuration, 48002 when everything violates.
+benchmark asserts it rather than reporting it: peak is **20868 bytes** on the
+identical walk whether 0, 1181, or 6000 results come out of it, over 5518
+allocations either way. `conforms` stops at the first result and costs 2148
+bytes and 16 allocations. A `Report` is the one consumer meant to grow, and
+does — 2 triples for a conforming graph, 9450 for the reference configuration,
+48002 when everything violates.
 
-**32-bit `Term_ID`** buys about 23% of that working set — 27076 → 20868 bytes —
-and no measurable time. Same allocation count, same store reads, timings within
-noise. At this size the working set already fits in cache, so halving it has
-nothing to win back; a much larger graph might say otherwise.
+There is no id width to choose any more. The old store made `Term_ID` a
+build-time choice and this table used to carry both; record's ids are `u32` by
+design, which is why the peak above is the figure the old **32-bit** build
+reported (27076 → 20868 bytes) and not the 64-bit one.
+
+**The odin-rdf-store numbers, for the record** (retired 2026-08-20 by
+SHACL-I-0004; same configuration, same machine, kvstore over LMDB, 64-bit
+`Term_ID`): `compile` 146 µs, `bind` 27 µs, `validate` 4.69 ms — 9.4 µs per
+focus node — 7503 reads; peak 27076 bytes. The in-memory backend it retired in
+turn measured 1.3 µs per focus node, the engine's own cost with storage out of
+the way; record lands between the two, closer to the engine than to LMDB.
 
 **What these numbers are not.** A synthetic workload this project chose. They
 are a regression instrument and a comparative one — the engine against itself

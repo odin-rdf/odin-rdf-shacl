@@ -175,24 +175,23 @@ CONFIGS := []Config {
 
 // PINNED_READS is the expected total store reads per configuration.
 //
-// One integer per configuration, and it holds across **both backends and both
-// `Term_ID` widths** — see `access.odin` for why that is an architectural
-// consequence rather than a coincidence. The backend half is asserted within a
-// single run; the width half is asserted by `make bench` running the binary at
-// each width, the same way `make test` covers the suite.
+// One integer per configuration. It used to hold across two backends and two
+// `Term_ID` widths — see the history below — and now describes one engine over
+// one store with fixed widths: the pin is what keeps the number from moving
+// unnoticed, and nothing cross-checks it.
 //
 // A slice rather than a map: package-level map literals need
 // `#+feature dynamic-literals` and would allocate into whatever allocator
-// happened to be in scope, for a lookup over six entries that a linear scan
+// happened to be in scope, for a lookup over eight entries that a linear scan
 // answers.
 Pin :: struct {
 	name:  string,
 	reads: int,
 }
 
-// Measured at SHACL-T-0023, identical on both backends then shipped and at both
-// `Term_ID` widths. What the differences say, since a pin is more useful with
-// its neighbours in view:
+// **Measured at SHACL-T-0036 over odin-rdf-record**, after the port; the
+// instrumented build (`-define:SHACL_COUNT_READS=true`) counts one tick per
+// `session_scan`, `session_step`, `session_outgoing` and `session_term`.
 //
 //	baseline          7503   500 focus nodes x 3 shapes x 4 values, plus targets
 //	dense             7503   identical: density changes what is *reported*, not
@@ -201,30 +200,36 @@ Pin :: struct {
 //	                         independent of everything else.
 //	alternative-path  9003   +1500 = one extra step per focus node per shape,
 //	                         the second branch of the alternative
-//	qualified        11504   +4001 over baseline. This is the number
-//	                         SHACL-T-0025 argues over: what the qualified
-//	                         family costs when it is present at all
+//	qualified        11504   +4001 over baseline: what the qualified family
+//	                         costs when it is present at all (SHACL-T-0025)
 //	nested           11596   +4093 for three levels of sh:node, each a
 //	                         suppressed sub-walk per focus node
-//
-// And the pair SHACL-T-0025 measured, which differ only in the second bound:
-//
 //	qualified-min     9003   one bound, one walk of the value nodes
 //	qualified-minmax  9003   two bounds sharing one sh:qualifiedValueShape --
 //	                         and, since SHACL-T-0026, one walk between them
 //
-// **The second of those was 10003 and is re-pinned here**, which is the one
-// re-pin in this file so far and the reason the mechanism is worth having. The
-// +1000 was exactly the 1000 `ex:q` value nodes, walked a second time to answer
-// a question whose answer could not have changed; the two counts now compile to
-// a single constraint that counts once and tests the count twice, so the second
-// walk is gone rather than remembered. The pin falling to `qualified-min`'s was
-// the prediction SHACL-T-0026 made in advance and is the sharpest evidence the
-// change is exactly what it claims: the two configurations differed only in the
-// duplicate, so they are now indistinguishable in reads, in allocations (11018
-// -> 9018) and in wall clock (+10% -> noise). `qualified` does *not* move, and
-// that matters as much: it is the `Disjoint_Pair` form, two property shapes with
-// one bound each, where there is nothing to share.
+// **These are the integers odin-rdf-store produced, to the last one** (measured
+// at SHACL-T-0023 over memstore and kvstore, re-pinned once at SHACL-T-0026,
+// identical at both `Term_ID` widths). The port expected them to differ and
+// said so in advance; they did not, and that is the strongest statement the
+// port could make about itself: the engine asks the store exactly the
+// questions it asked before -- the four session verbs map one-to-one onto the
+// old seam's four -- and only what a question *costs* changed. A read on the
+// old store was an LMDB cursor; here it is a range over a memory-resident
+// permutation. So the pins survived a change of store, which is the invariant
+// the old benchmark asserted across two backends and could no longer check
+// after memstore was retired, re-established after the fact by a third.
+// **Wall clock and allocation are the numbers that are not comparable across
+// the port**, not these.
+//
+// The one re-pin in this file's history: `qualified-minmax` was 10003 before
+// SHACL-T-0026. The +1000 was exactly the 1000 `ex:q` value nodes, walked a
+// second time to answer a question whose answer could not have changed; the
+// two counts now compile to a single constraint that counts once and tests
+// the count twice. The pin falling to `qualified-min`'s was the prediction
+// SHACL-T-0026 made in advance, and `qualified` not moving mattered as much:
+// it is the `Disjoint_Pair` form, two property shapes with one bound each,
+// where there is nothing to share.
 PINNED_READS := []Pin {
 	{"baseline", 7503},
 	{"qualified", 11504},
