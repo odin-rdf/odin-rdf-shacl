@@ -4,6 +4,35 @@
 **Status:** for review. **Not filed into odin-rdf-store's Metis from this repository.**
 **Evidence:** [`store-evidence.md`](store-evidence.md), kept from SHACL-T-0005 onward.
 
+> **Annotated 2026-08-20 (SHACL-I-0004, recorded by SHACL-T-0037).** This
+> document is addressed to odin-rdf-store, which this repository stopped
+> consuming on 2026-08-20: the engine reads odin-rdf-record, and by the family's
+> decision of the same day odin-rdf-store is to be retired once odin-rdf-sparql's
+> port follows. The text stands as the record of what the spine and the catalogue
+> found, and it was never filed upstream. Three things to know reading it now:
+>
+> - **The one documentation suggestion (SHACL-T-0019) is moot on this side.** The
+>   record does not mint blank-node labels densely per dictionary; `ingest` hands
+>   over the document's own labels under a caller-chosen `blank_prefix`, and the
+>   record interns them as given. The collision this document describes is therefore
+>   *constructed* (two documents loaded under one prefix with one label) rather
+>   than inherited, and the harness test that guards the report's three blank-node
+>   namespaces was rewritten to construct it (`tests/w3c/harness/report_test.odin`).
+>   The engine's side of the fix — `s`-prefixing shapes-graph labels in the report
+>   — is unchanged and still needed.
+> - **The "near-misses" survived the port unchanged**, which is worth recording
+>   because they were arguments about the *interface* and the interface is gone:
+>   a `sh:targetNode` the data never mentions is still a `Focus_Node` with
+>   `bound = false` and the model's term (and on the record a small canonical
+>   integer or date named there is bound anyway — the inline encoding gives it an
+>   id without the dictionary; the verdict does not change); `sh:class` is still a
+>   closure built above the store and one bound read per value node. The questions
+>   were about validation, not about odin-rdf-store.
+> - **STORE-T-0019 (snapshot reads)** — the item this document called most likely
+>   to become evidence — is answered by construction on the record: a `Snapshot`
+>   is epoch-pinned and a `Session` reads one, so a validation describes one
+>   state of the dataset whatever a writer does meanwhile.
+
 ## The proposal
 
 The initiative found **no capability gap** in odin-rdf-store's match interface, and

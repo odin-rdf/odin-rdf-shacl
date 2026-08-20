@@ -5,7 +5,7 @@ title: "Suppressed validation: conformance without results"
 number: 2
 short_code: "SHACL-A-0002"
 created_at: 2026-08-06T22:02:15.434731+00:00
-updated_at: 2026-08-06T22:02:15.434731+00:00
+updated_at: 2026-08-20T18:00:00.000000+00:00
 decision_date: 2026-08-06
 decision_maker: Greger Olsson
 parent:
@@ -355,3 +355,22 @@ measured number — the duplicate has not come back. Reopening still needs
 evidence of a different kind: a workload where a repeated ask that *does
 not* share a property shape dominates, and the working-set growth is
 affordable. A faster store makes that bar higher, not lower.
+
+## Amendments
+
+- **2026-08-20 (SHACL-I-0004, SHACL-T-0037) — the prose pass after the port.**
+  The mechanism is untouched by the move to odin-rdf-record: `node_conforms`
+  still swaps three fields on the in-flight `Validation`, the suppressed run
+  still shares `on_stack`, `classes` and `failure`, and `shacl/suppress_test.odin`
+  still asserts each of the three restored fields by name. What the text above
+  names that no longer exists: the public entry point reads
+  `conforms_node(s, b, access, shape_index, focus)` "with a wrapper per
+  instantiation package" — it is `conforms_node(&shapes, &bindings, se,
+  shape_index, focus)` over a `Session`, and there are no instantiation
+  packages and no wrappers; "the store access" among the whole-run state is the
+  session; `test_qualified_both_bounds_violate` lives in
+  `shacl/validate_semantics_test.odin`, not `shacl/kvstore`; and the suppress
+  tests' stand-in backend (an `Access` whose triple list was empty) became a
+  real one-quad store over `Mem_FS` at SHACL-T-0032. The memory bound — a
+  suppressed walk's depth is bounded by the shapes graph, not the data — did
+  not depend on the store and does not now.

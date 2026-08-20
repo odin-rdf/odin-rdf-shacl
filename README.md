@@ -4,10 +4,12 @@
 
 Shape-based validation for the Odin RDF family: a SHACL implementation that
 validates RDF data graphs against shapes graphs. Shapes are themselves RDF,
-parsed with [odin-rdf-parser](../odin-rdf-parser); the data graph is read
-through [odin-rdf-store](../odin-rdf-store)'s match interface alone, so the
-same shapes validate against any backend the store offers. Written in
-Odin with no external dependencies.
+parsed with [odin-rdf-parser](../odin-rdf-parser); the data graph is a
+snapshot of [odin-rdf-record](../odin-rdf-record) — the family's system of
+record, an append-only hash-chained log replayed into a memory-resident
+projection — read through one file of session verbs and nothing else. Written
+in Odin with no external dependencies: the record has none, and nothing here
+links native code.
 
 **Status: SHACL Core is complete and the vendored W3C suite is green.** Every
 constraint component of §4 that does not need SPARQL is implemented — the
@@ -17,7 +19,7 @@ shapes compilation, target resolution, property paths, and
 `sh:ValidationReport` emission.
 
 **All 98 entries of the W3C SHACL 1.0 suite's `core/` tree pass**, across all
-seven directories, against the LMDB-backed store, at both `Term_ID` widths.
+seven directories, against odin-rdf-record over its in-memory file seam.
 There is no skip list and no expected-failure file: this repository claims
 conformance only for directories where *every* entry passes, and every directory
 is now one of them. See `.metis/` for the vision, the initiatives, and the ADRs.
@@ -77,18 +79,21 @@ permanently.
 
 ## Packages
 
-| Package          | Description                                                     |
-| ---------------- | --------------------------------------------------------------- |
-| `shacl`          | The backend-independent core: shapes compilation, targets, paths, constraint dispatch, validation results |
-| `shacl/kvstore`  | The validator instantiated against the persistent (LMDB) backend |
+| Package | Description                                                                                                 |
+| ------- | ----------------------------------------------------------------------------------------------------------- |
+| `shacl` | The engine: shapes compilation, targets, paths, constraint dispatch, validation results, the report graph, the `Validator` |
 
-`shacl` names no storage backend and imports none. That split was originally
-what kept LMDB out of the link of a program that only wanted an in-memory
-store; odin-rdf-store retired that backend (STORE-A-0006), so today it is the
-seam a future backend would bind to rather than a linkage guarantee. `make
-check` still builds a core-only consumer and fails if the binary carries LMDB
-symbols, which now catches a stray backend import in the core rather than
-protecting a consumer.
+One package, importing `rdf` and `record` and nothing else. **There is no
+backend seam, by decision** (SHACL-I-0004, 2026-08-20): odin-rdf-record is the
+one and only store this engine reads, now and in future, so the store is
+touched in exactly one file — `shacl/session.odin`, six session verbs over a
+snapshot — and nowhere is there an abstraction for a second store to bind to.
+Until that day the engine was written backend-independent against
+odin-rdf-store's match interface with `shacl/kvstore` instantiating it, and
+`make check` grepped a built binary for LMDB symbols to prove the core linked
+none; the port deleted the instantiation package, the width matrix and the
+`purity` target together, and the old shape survives in this repository's
+history.
 
 ## Performance
 
@@ -150,51 +155,73 @@ workload's shape and the seven knobs that vary it.
 
 ## Building
 
-The parser and the store are **sibling checkouts**, not vendored copies, and
+The parser and the record are **sibling checkouts**, not vendored copies, and
 are reached through Odin collections:
 
 ```
 ../odin-rdf-parser   -collection:rdf=../odin-rdf-parser
-../odin-rdf-store    -collection:store=../odin-rdf-store
+../odin-rdf-record   -collection:record=../odin-rdf-record
 ../odin-rdf-shacl    (this repository)
 ```
 
-Both collections are required even though SHACL Core only names the store: the
-store's own sources import `rdf:`, and a collection is resolved in the
+Both collections are required even though this engine only names the record:
+the record's own sources import `rdf:`, and a collection is resolved in the
 *importing* compilation, not the imported checkout. The `Makefile` and
-`ols.json` both declare them.
+`ols.json` both declare them. CI pins `odin-rdf-parser@v0.1.0` and
+**`odin-rdf-record@v0.3.0`, which is a floor**: `v0.2.0` is where `ingest`
+began emitting a document's *set* of statements (below it one W3C entry whose
+shapes graph repeats a triple cannot load), and `v0.3.0` is where the record's
+`Term_ID`, `Fact_ID` and `Epoch` became distinct types, which this engine holds
+natively and does not compile without.
 
 ```
-make test    # the full suite at both Term_ID widths (64-bit default, 32-bit opt-in)
-make check   # vet every package, then assert the core links no LMDB
-make bench   # build and run benchmarks with release flags (once bench/ exists)
+make test    # the full suite, once — there is no width matrix
+make check   # vet every package, both bench builds, then the import-alias rule
+make bench   # timing build, then the instrumented build (reads, allocation, pins)
 make help    # list targets
 ```
 
-`Term_ID` width is a build-time choice in odin-rdf-store (STORE-A-0001) and
-this project compiles the store's sources into its own binaries, so validation
-code must not assume 64-bit IDs. `make test` runs the whole matrix rather than
-one configuration.
+There is no id width to choose. The record's ids are fixed by design (its
+inline term encoding is frozen at first write), so the `Term_ID` matrix the old
+store's build-time width imposed on this repository's suite is gone, and every
+CI runner runs the same `make test`. `make check` ends with a style rule the
+vet cannot express: an import alias that repeats the last path component
+(`import rdf "rdf:rdf"`) fails the build, because Odin already binds that name
+and the alias says nothing. `make bench` builds twice because read counting is
+a build-time switch in the engine (`-define:SHACL_COUNT_READS=true`,
+`shacl/counting.odin`) that is compiled out of the timing run entirely.
+
+**Platforms.** The record's real file operations are POSIX (`posix_file_ops`,
+`#+build linux, darwin`); there is no Windows `File_Ops`. The package still
+compiles on Windows without it, and every suite here opens its stores over the
+platform-free memory seam (`Mem_FS` + `mem_file_ops`), so CI runs on all three
+runners and nothing in this repository touches a real record directory. A
+consumer on Windows that wants durable storage supplies its own `File_Ops`.
+The record's *own* `make test` needs `python3` for its cross-implementation
+verifier; a consumer compiling the library does not.
 
 ## Quick start
 
-Validation is three objects and three steps: compile a shapes graph once, bind
-the model to the store holding the data once, then validate as often as you
-like. The examples below are compiled and asserted by `tests/readme`, so they
-cannot drift from the API. That package differs from what you see here in two
-ways and no others: it reaches sibling directories where a consumer writes
-`rdf:` and `store:` collection imports, and it calls `kvstore.open_ephemeral`
-where these open a path you would have chosen — see [Scratch
-datasets](#scratch-datasets) below.
+Validation is a compiled shapes model, a binding of that model to the snapshot
+holding the data, and a visitor the results stream to: compile once, bind once
+per snapshot, validate as often as you like. The examples below are compiled
+and asserted by `tests/readme`, so they cannot drift from the API. That package
+differs from what you see here in two ways and no others: it reaches sibling
+directories where a consumer writes `rdf:` and `record:` collection imports,
+and it opens its stores over the memory seam (`record.Mem_FS` +
+`record.mem_file_ops`) where these open a directory on disk — see [Scratch
+stores](#scratch-stores) below.
 
 ```odin
 package main
 
-import rdf "rdf:rdf"
-import kvstore "store:store/kvstore"
+import "core:strings"
 
-import shacl "shacl"
-import shacl_kvstore "shacl/kvstore"
+import "rdf:rdf"
+import "record:record"
+import "record:record/ingest"
+
+import "shacl"
 
 SHAPES :: `
 @prefix sh:  <http://www.w3.org/ns/shacl#> .
@@ -217,65 +244,91 @@ ex:alice a ex:Person ; ex:name "Alice" .
 ex:bob   a ex:Person .
 `
 
-// Validation is a compiled shapes model, a binding of that model to the store
-// holding the data, and a visitor the results stream to.
+// load turns one Turtle document into ops and commits them as one epoch. The
+// blank prefix scopes the document's blank nodes, so two documents cannot
+// collide on `_:b0`.
+load :: proc(db: ^record.Store, source: string, blank_prefix: string) -> bool {
+	ops, ingest_err := ingest.turtle(
+		transmute([]byte)source,
+		nil,
+		context.allocator,
+		blank_prefix = blank_prefix,
+	)
+	if ingest_err.kind != .None {
+		return false
+	}
+	defer ingest.ops_destroy(ops, context.allocator)
+	_, _, apply_err := record.apply(db, {ops = ops})
+	return apply_err == record.Apply_Error{}
+}
+
+// Validation is a compiled shapes model, a binding of that model to the
+// snapshot holding the data, and a visitor the results stream to.
 validate_example :: proc(report: ^[dynamic]string) -> shacl.Failure {
-	// 1. Open the store. It is a directory on disk, opened once and kept.
-	//    Shapes and data live in graphs of it; this example uses one store and
-	//    loads both into the default graph.
-	db, open_err := kvstore.open("/var/lib/example/rdf")
-	if open_err != nil {
+	// 1. Open the store. Shapes and data live in graphs of it; this example
+	//    uses one store and loads both into the default graph.
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "/var/lib/example/rdf", record.posix_file_ops())
+	if open_err != .None {
 		return .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
 
-	// 2. Compile the shapes graph. The model owns every term it holds, so the
-	//    store may be closed afterwards and the model bound to another one.
-	//    Compile once and keep the model: loading a shapes graph twice does not
-	//    dedupe, because each load mints fresh blank nodes.
+	// 2. Load the two documents — each is one changeset, one epoch.
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return .None
+	}
+
+	// 3. Take a snapshot and bind a session over the graph to read. A
+	//    snapshot is a value: acquire, use, release.
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
+
+	// 4. Compile the shapes graph. The model owns every term it holds, so the
+	//    snapshot may be released afterwards and the model bound to another
+	//    store entirely. Compile once and keep the model.
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-
-	err, parse_err, _ := shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-	if parse_err.message != "" || err.kind != .None {
+	if shacl.compile(&shapes, se).kind != .None {
 		return .None
 	}
 
-	// 3. Load the data graph.
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
-
-	// 4. Bind the model's terms to this store's IDs — once per validation, not
-	//    once per check. A model compiled elsewhere binds here just as well.
+	// 5. Bind the model's terms to this snapshot's ids — once per validation,
+	//    not once per check. A model compiled elsewhere binds here just as well.
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
-	// 5. Validate. Results are handed to the visitor as they are found and
+	// 6. Validate. Results are handed to the visitor as they are found and
 	//    nothing is buffered, so memory stays flat however bad the data is.
 	sink := Sink {
-		shapes  = &shapes,
-		session = &session,
-		lines   = report,
+		shapes = &shapes,
+		se     = se,
+		lines  = report,
 	}
-	return shacl_kvstore.validate(&shapes, &bindings, &session, on_result, &sink)
+	return shacl.validate(&shapes, &bindings, se, on_result, &sink)
 }
 
 Sink :: struct {
-	shapes:  ^shacl.Shapes,
-	session: ^shacl_kvstore.Session,
-	lines:   ^[dynamic]string,
+	shapes: ^shacl.Shapes,
+	se:     shacl.Session,
+	lines:  ^[dynamic]string,
 }
 
-// A Result borrows and owns nothing: it names nodes by Term_ID and the shape
-// by index, and is valid only for this call. Keep anything you need by copying
+// A Result borrows and owns nothing: it names nodes by id and the shape by
+// index, and is valid only for this call. Keep anything you need by copying
 // it out — or use `validate_report` and let the report do it for you.
 on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
-	focus, _ := kvstore.lookup_term(sink.session.db, result.focus.id, context.temp_allocator)
+	buf: shacl.Term_Buf
+	focus, _ := shacl.session_term(sink.se, result.focus.id, buf[:])
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
-		append(sink.lines, string(iri))
+		append(sink.lines, strings.clone(string(iri), context.temp_allocator))
 	}
 	// Returning false would stop validation here — no further focus nodes
 	// resolved, no further paths walked.
@@ -286,30 +339,36 @@ on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 `ex:bob` has no `ex:name`, so `sh:minCount 1` reports one violation; `ex:alice`
 conforms.
 
-### Scratch datasets
+Two things the example shows in passing. **A write is a changeset and an
+epoch**: `ingest.turtle` turns a document into ops, `apply` commits them, and
+the record refuses rather than ignores a changeset that re-asserts a fact
+already live — so a document is loaded once, not "again to be sure".
+**`session_term` borrows**: the term it returns lives in the record's
+dictionary arena or in the buffer you passed, which is why the visitor clones
+what it keeps.
 
-Every dataset is a filesystem path, because LMDB has no in-memory mode. When the
-data is scratch — a test, a validation of something you are about to throw away,
-a staging graph — `kvstore.open_ephemeral()` gives you a store with no path to
-name, make unique, or clean up, and which does not outlive the process:
+### Scratch stores
+
+A record store is a directory of log segments, and `record.posix_file_ops()`
+is how it reaches one. When the data is scratch — a test, a validation of
+something you are about to throw away, a staging graph — open it over the
+memory seam instead: `Mem_FS` is an in-memory file system with the same
+`File_Ops` contract, and a store over it dies with the value that holds it.
 
 ```odin
-db, err := kvstore.open_ephemeral()   // same contract, same procedure set as open
-defer kvstore.close(db)               // no directory to remove afterwards
+fs: record.Mem_FS
+defer record.mem_fs_destroy(&fs)
+db: record.Store
+_, open_err, _, _ := record.store_open(&db, "scratch", record.mem_file_ops(&fs))
+defer record.store_close(&db)
 ```
 
-On POSIX the file is unlinked as soon as it is open, so it is invisible for the
-store's whole life and reclaimed on close *or on crash*. Windows has no
-unlink-while-open, so an abnormal termination leaks one file in the temp
-directory.
-
-The reason to reach for it is not only tidiness. Its default map is 16 MiB
-rather than `open`'s 1 GiB, and on Windows LMDB has no sparse-file handling, so
-**every `open` there materializes the full map size on disk**. A suite that
-opens a store per test spends minutes writing files it never reads. This
-repository's own suites use it throughout, with two deliberate exceptions: the
-LMDB linkage proof, which is worth running against the durable constructor, and
-the test that reopens a store read-only, which needs a path to reopen.
+Nothing to name, make unique, or clean up, and it is platform-free: there is
+no Windows `File_Ops` in the record, so this is also how the suites run on
+every CI runner. Every snapshot must be released before `store_close`; the
+record asserts it. A `Mem_FS` must stay where it is for the store's lifetime
+(the writer holds a pointer to it), so open the store in the scope that owns
+the `Mem_FS` rather than returning either by value.
 
 ### Three consumers, one traversal
 
@@ -320,14 +379,14 @@ of it, and each is one call:
 // Just the answer. Stops at the first result of any severity rather than
 // finding them all — which at ~200 processes per machine is the difference
 // worth having. A warning breaks conformance exactly as a violation does (§3.1).
-ok, failure := shacl_kvstore.conforms(&shapes, &bindings, &session)
+ok, failure := shacl.conforms(&shapes, &bindings, se)
 
 // The sh:ValidationReport graph, finished and ready to serialise. Emitting it
 // is odin-rdf-parser's job, through any of its four emitters.
 report: shacl.Report
 shacl.report_init(&report)
 defer shacl.report_destroy(&report)
-failure := shacl_kvstore.validate_report(&report, &shapes, &bindings, &session)
+failure := shacl.validate_report(&report, &shapes, &bindings, se)
 ```
 
 **Check the `Failure` before the answer.** It is the spec's *failure* (§3.3),
@@ -336,31 +395,37 @@ and anything else means the processor could not answer — which is not the same
 as "no".
 
 **Reading blank nodes back out of a report.** A report names nodes in three
-graphs at once, so their blank-node labels are kept apart — otherwise the data
-graph's first blank node and the shapes graph's first blank node, both `_:b0` as
-the store labels them, would merge into one node in the report:
+graphs at once, so their blank-node labels are kept apart — otherwise a data
+graph's blank node and a shapes graph's blank node that happen to share a label
+would merge into one node in the report:
 
-| Label   | Comes from                                             |
-| ------- | ------------------------------------------------------ |
-| `_:b…`  | the **data graph**, exactly as the store labelled it — `sh:focusNode`, `sh:value` |
-| `_:s…`  | the **shapes graph**, its store label prefixed with `s` — `sh:sourceShape` |
-| `_:r…`  | the **report itself**: the report node, each result, and blank-node `sh:resultPath` structures |
+| Label        | Comes from                                             |
+| ------------ | ------------------------------------------------------ |
+| *as loaded*  | the **data graph**, exactly as the store holds it — `sh:focusNode`, `sh:value` |
+| `_:s…`       | the **shapes graph**, its store label prefixed with `s` — `sh:sourceShape` |
+| `_:r…`       | the **report itself**: the report node, each result, and blank-node `sh:resultPath` structures |
 
-So `sh:value _:b0` is the data graph's `_:b0` and can be looked up there
-directly, which is the point — it is how a result says *which* unnamed node
-failed. A blank-node `sh:sourceShape _:sb3` is the shapes graph's `_:b3`, with
-the `s` stripped.
+The record interns blank-node labels as `ingest` hands them over — the
+document's own label under the `blank_prefix` you gave it (`data_` and
+`shapes_` in the quick start) — so `sh:value _:data_b0` is the data graph's
+`_:data_b0` and can be looked up there directly, which is the point: it is how
+a result says *which* unnamed node failed. A blank-node `sh:sourceShape
+_:sshapes_b3` is the shapes graph's `_:shapes_b3`, with the `s` stripped. The
+one rule this asks of you: **a `blank_prefix` must be label characters, and must
+not begin with `r`** (nor, for a data graph, `s`), because the prefix is what
+keeps the three namespaces apart. `data_` and `shapes_` are fine; `r1_` is not.
 
 There is a fourth, narrower question: **does one node conform to one shape?**
 
 ```odin
 // A shape is named by its index in the compiled model — the same index a
-// Result carries in `result.shape`. Shapes with an IRI can be found by it.
+// Result carries in `result.shape`. Shapes with an IRI can be found by it; a
+// focus node is named by term, through `node_focus`.
 shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
 
-ok, failure := shacl_kvstore.conforms_node(
-	&shapes, &bindings, &session,
-	rdf.IRI("http://example.org/alice"), shape_index,
+ok, failure := shacl.conforms_node(
+	&shapes, &bindings, se,
+	shape_index, shacl.node_focus(se, rdf.IRI("http://example.org/alice")),
 )
 ```
 
@@ -375,15 +440,15 @@ When you need to say *why not*, `validate_node` is the same question with the
 results:
 
 ```odin
-failure := shacl_kvstore.validate_node(
-	&shapes, &bindings, &session,
-	rdf.IRI("http://example.org/alice"), shape_index,
+failure := shacl.validate_node(
+	&shapes, &bindings, se,
+	shape_index, shacl.node_focus(se, rdf.IRI("http://example.org/alice")),
 	visit, visit_data,
 )
 
 // Or straight to a sh:ValidationReport about that one node:
-failure = shacl_kvstore.validate_node_report(
-	&report, &shapes, &bindings, &session,
+failure = shacl.validate_node_report(
+	&report, &shapes, &bindings, se,
 	rdf.IRI("http://example.org/alice"), shape_index,
 )
 ```
@@ -398,10 +463,11 @@ The two are one walk, not two evaluators: `conforms_node` is `validate_node`
 with a probe that records the first result and stops. A node the data graph
 never mentions is a perfectly good focus node in both — validated as unbound,
 with every path from it reaching nothing, which is emptiness and violates
-`sh:minCount 1`.
-
-`shacl/kvstore` has the same entry points against the persistent backend, taking
-a `Session` where these take a dictionary and a dataset.
+`sh:minCount 1`. (One record detail shows here: a small canonical integer or
+date is *always* resolvable, because the record's inline encoding gives it an
+id without the dictionary, so such a focus node is bound even when the data
+never mentions it. The verdict is the same either way — every path from it
+still reaches nothing.)
 
 ### Deciding whether a write may join the dataset
 
@@ -529,7 +595,7 @@ only by recomputing it over the epoch-pinned dataset.
 
 The family's discipline is borrow-by-default (RDF-A-0001). This project
 deviates in exactly two places, both so that a lifetime rule does not depend on
-which backend you chose:
+the store's arena:
 
 | Object     | Owns                              | Valid until          |
 | ---------- | --------------------------------- | -------------------- |
@@ -539,10 +605,11 @@ which backend you chose:
 | `Bindings` | IDs only, borrowed from neither   | `bindings_destroy`   |
 
 A compiled model owning its terms is what lets **the store a shapes graph was
-compiled from be destroyed immediately afterwards**, and a report owning its
-terms is what lets it outlive the store it describes. On the persistent backend
-that is not a nicety: terms come from mapped database pages that closing the
-store invalidates.
+compiled from be closed immediately afterwards**, and a report owning its
+terms is what lets it outlive the store it describes. That is not a nicety: a
+term the record hands out is decoded from its dictionary arena, which closing
+the store frees, and the W3C runner closes every entry's shapes store before it
+opens the data store.
 
 A `Result` allocating nothing is what keeps memory flat as the violation count
 grows. Copy out what you need, or fold it into a `Report`.
@@ -553,8 +620,9 @@ The first two are decided in SHACL-A-0001, the rest are the spec's, and every
 one of them surprises someone.
 
 **Validation reads one graph.** SHACL is specified against a single RDF graph;
-odin-rdf-store holds a quad dataset. The validator takes the graph to
-read — the default graph, or one named graph — and never a union of them.
+the record holds a quad dataset. The validator takes the graph to read — the
+default graph, or one named graph — and never a union of them; the graph is
+bound into every pattern `shacl/session.odin` issues.
 
 **`sh:class` needs the class hierarchy in the data graph.** It walks
 `rdfs:subClassOf*` in the graph being validated, not in the shapes graph. A

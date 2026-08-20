@@ -17,20 +17,22 @@ import "rdf:rdf"
 // tree was not, so the shape that avoids the hang is adopted from the first
 // line here rather than discovered at `sh:node`.
 //
-// The model holds `rdf.Term` values, never `Term_ID`s: the shapes graph and
-// the data graph may be different stores with different dictionaries, so an
-// ID from the shapes store means nothing against the data store. Binding to
-// the data store's IDs happens once at validation setup.
+// The model holds `rdf.Term` values, never `record.Term_ID`s: the shapes
+// graph and the data graph may be different stores with different
+// dictionaries, so an id from the shapes store means nothing against the data
+// store. Binding to the data snapshot's ids happens once at validation setup.
 //
 // **The model owns every term it holds.** It interns them at compile time and
 // frees them at `shapes_destroy`, so the store a shapes graph was compiled
-// from may be destroyed immediately afterwards. This is a deliberate
-// exception to the family's borrow-by-default discipline (RDF-A-0001), and
-// the reason is that the two backends disagree: memstore's `lookup_term`
-// borrows the dictionary's storage while kvstore's allocates from the
-// database's bytes. Owning removes a lifetime rule that would otherwise be
-// backend-dependent and part of the public contract. Shapes graphs are small
-// and bounded, so the cost is a copy of a handful of terms, once.
+// from may be closed immediately afterwards. This is a deliberate exception
+// to the family's borrow-by-default discipline (RDF-A-0001): a term the
+// record hands out (`session_term`) borrows its dictionary arena, which
+// closing the store frees, so a model that borrowed would tie its lifetime
+// to the store's and make that rule part of the public contract. (The
+// decision predates the record — it was taken when two backends disagreed
+// about borrowing, SHACL-A-0001 — and the record's arena is a stronger reason
+// for it than the one it was taken on.) Shapes graphs are small and bounded,
+// so the cost is a copy of a handful of terms, once.
 
 // Span names a contiguous range in one of the model's flat arrays. Children
 // are ranges rather than pointers for the reason above.

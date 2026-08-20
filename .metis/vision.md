@@ -4,7 +4,7 @@ level: vision
 title: "odin-rdf-shacl"
 short_code: "SHACL-V-0001"
 created_at: 2026-08-04T16:47:41.838764+00:00
-updated_at: 2026-08-06T12:00:00.000000+00:00
+updated_at: 2026-08-20T18:00:00.000000+00:00
 archived: false
 
 tags:
@@ -20,14 +20,14 @@ initiative_id: NULL
 
 ## Purpose
 
-Provide the Odin RDF family with shape-based validation: a SHACL (Shapes Constraint Language) implementation that validates RDF data graphs against shapes graphs. It stands as a peer of odin-rdf-sparql on the same foundation — shapes are themselves RDF (loaded via odin-rdf-parser), and validation reads the data graph through odin-rdf-store's match interface. SHACL Core requires no query engine; the SHACL-SPARQL extension is a later phase that consumes odin-rdf-sparql.
+Provide the Odin RDF family with shape-based validation: a SHACL (Shapes Constraint Language) implementation that validates RDF data graphs against shapes graphs. It stands as a peer of odin-rdf-sparql on the same foundation — shapes are themselves RDF (loaded via odin-rdf-parser), and validation reads the data graph through odin-rdf-store's match interface. SHACL Core requires no query engine; the SHACL-SPARQL extension is a later phase that consumes odin-rdf-sparql. *(Amended 2026-08-20, SHACL-I-0004: the data graph is a snapshot of **odin-rdf-record**, the family's system of record, and odin-rdf-store is no longer a dependency. The rest of the sentence stands.)*
 
 ## Product/Solution Overview
 
 odin-rdf-shacl is a library (not an application) targeting Odin developers who need to validate RDF data. It offers:
 
 - **Shapes graph loading**: shapes are parsed from Turtle (or any supported format) with odin-rdf-parser and compiled into an internal shapes model, with meaningful errors for ill-formed shapes.
-- **SHACL Core validation**: target resolution (`sh:targetClass`, `sh:targetNode`, and friends), the Core constraint components (`sh:minCount`, `sh:datatype`, `sh:pattern`, `sh:node`, logical constraints, property paths, and the rest), reading the data graph exclusively through the store's match interface.
+- **SHACL Core validation**: target resolution (`sh:targetClass`, `sh:targetNode`, and friends), the Core constraint components (`sh:minCount`, `sh:datatype`, `sh:pattern`, `sh:node`, logical constraints, property paths, and the rest), reading the data graph exclusively through the store's match interface. *(Amended 2026-08-20: through an epoch-pinned snapshot of odin-rdf-record, via the session verbs in `shacl/session.odin` — one file, no interface seam.)*
 - **Validation reports**: standard `sh:ValidationReport` result graphs, emittable through odin-rdf-parser, plus a programmatic result API for embedding.
 - **SHACL-SPARQL (later phase)**: `sh:sparql` constraints and SPARQL-based constraint components, delegating query evaluation to odin-rdf-sparql as an optional dependency.
 
@@ -35,12 +35,84 @@ The library is deliberately validation-only: inference/entailment, SHACL rules (
 
 ## Current State
 
+**Amended 2026-08-20 — the engine runs on odin-rdf-record, and odin-rdf-store is
+gone from this repository (SHACL-I-0004).** Everything below this block was
+written against odin-rdf-store and stands as the record; where a sentence names
+what no longer exists, a dated note beside it says what moved. What is true now:
+
+- **The backend is odin-rdf-record** — the family's tamper-evident system of
+  record: an append-only, hash-chained log replayed into a memory-resident
+  projection serving epoch-pinned snapshots. The engine is **one package**,
+  `shacl`, importing `rdf` and `record` and nothing else; the store is touched
+  in one file, `shacl/session.odin` (a `Session` over a `record.Snapshot` and
+  six verbs: `session_term`, `session_resolve`, `session_kind`, `session_scan`,
+  `session_step`, `session_outgoing`), with the graph of SHACL-A-0001 decision 5
+  bound into every pattern there. Ids are `record.Term_ID` natively.
+- **Two owner decisions shape it, recorded here because the next session will
+  look here first (2026-08-20):** there is **no dual-backend goal, at any
+  point** — the port was a replacement, not an addition — and **odin-rdf-record
+  is the one and only store, forever**. Wherever targeting the record directly
+  made the code simpler, faster or smaller, that path was taken: `shacl/kvstore`
+  (807 library lines, ~5,100 test lines), the `Access` struct, the parapoly
+  `$MATCH` seam, the `Term_ID` width matrix, the `purity` target and the
+  `store:` collection were deleted, not retained beside the record. These
+  decisions were made *for this repository*; odin-rdf-sparql's port asks the
+  owner rather than inherits them.
+- **All 98 entries of the W3C SHACL 1.0 `core/` suite pass against the record**,
+  one run, no skip list, no expected-failure file, ignored-parameter record
+  empty throughout. The suites open every store over the record's platform-free
+  memory seam (`Mem_FS` + `mem_file_ops`), which is also why CI's three runners
+  all run the same `make test`: the record has no Windows `File_Ops`.
+- **Validate-before-commit is the record's `Validator` hook**
+  (`shacl/validator.odin`, SHACL-T-0034), which replaces `session_init_txn`:
+  a compiled model wired in at `record.store_open`, handed the dataset a write
+  would produce as an ordinary snapshot at the new epoch, before a byte is
+  written. `.Enforce` refuses; `.Record` commits and reports; the log does not
+  record that a validator objected (RECORD-A-0006 decision 5); a `Failure` is
+  a refusal. The vacuity argument below — an isolated candidate is wrong, not
+  slow — is unchanged and is still the central test.
+- **As-of validation is `record.store_at(&db, epoch)`** in place of
+  `store_latest`, and nothing below the session changes (SHACL-T-0035). The
+  coordinate is the epoch, not a time; terms are not epoch-scoped, facts are, so
+  one compiled model binds at any epoch, and a model compiled from a pinned
+  snapshot's shapes graph validates that snapshot's data under the rules then in
+  force. The "as-of and validate-before-commit do not compose" distinction below
+  holds in a different form: a `Validator`'s candidate is head plus changeset,
+  and a pinned snapshot is read-only by type.
+- **Performance** (SHACL-T-0036, `bench/` rebuilt over the record): on the
+  reference configuration `validate` 1.17 ms (was 4.69 ms on kvstore),
+  2.3 µs per focus node, `compile` 35 µs, `bind` 8 µs, peak 20868 B — and
+  **the read counts are the old store's to the integer** on all eight
+  configurations (7503 on the reference), because the engine asks exactly the
+  questions it asked before. `make bench` is two builds, since read counting is
+  now a build-time switch in the engine (`SHACL_COUNT_READS`) rather than a
+  seam. SHACL-A-0002's trigger stays discharged.
+- **Dependencies:** odin-rdf-parser `v0.1.0` and **odin-rdf-record `v0.3.0` as a
+  floor** (`v0.2.0` for `ingest`'s set semantics, `v0.3.0` for the distinct
+  `Term_ID`/`Fact_ID`/`Epoch` types the engine holds). odin-rdf-sparql is still
+  relevant only to the SHACL-SPARQL phase, which has not started; its handover
+  (`docs/handover-sparql.md`) predates the port and carries a translation note.
+- **Term identity moved with the store, twice** (SHACL-T-0032/-0033): the record
+  lowercases language tags on intern, so the `sh:hasValue`/`sh:in` exposure
+  tracked below is closed *here* and the latent exposure is now report
+  rendering (`rdf.equal_term` is byte-wise on the tag; the corpus's two
+  uppercase-tagged literals both conform, so none reaches an expected report);
+  and inlineable literals are always resolvable, so a small canonical integer
+  named by `sh:targetNode` is bound even when absent from the data — no verdict
+  changed. The family's parser-side fold decision is flagged for family
+  discussion, not rescinded here (`docs/language-tag-status.md`).
+- **Remaining:** SHACL-SPARQL, unchanged in scope. The port's own paper trail is
+  SHACL-T-0037, whose Status carries the handoff for odin-rdf-sparql's port.
+
+---
+
 **SHACL Core is complete, and the vendored W3C corpus is fully green.** Two initiatives
 delivered it: SHACL-I-0001 (the spine, completed 2026-08-06) and SHACL-I-0002 (the
 constraint catalogue, completed 2026-08-07).
 
 - **All 98 entries of the vendored W3C SHACL 1.0 `core/` suite pass**, across all seven
-  directories, against both storage backends, at both `Term_ID` widths. No skip list, no
+  directories, against both storage backends, at both `Term_ID` widths *(2026-08-20:
+  against odin-rdf-record, one run — see the block above)*. No skip list, no
   expected-failure file, and an empty ignored-parameter record throughout — the family's
   rule is unchanged, and every directory now satisfies it.
 - **All twenty-nine constraint components** of §4 that do not require SPARQL: value-type,
@@ -58,7 +130,7 @@ constraint catalogue, completed 2026-08-07).
 
 Packages: `shacl` (backend-independent core) and `shacl/kvstore`. The core
 names no storage backend and imports none, asserted rather than trusted — `make check`
-builds a core-only consumer and fails if the binary carries LMDB symbols. *(Amended 2026-08-07, SHACL-T-0028: it built a core-plus-memstore consumer until odin-rdf-store retired that backend — STORE-A-0006. The check is narrower now and is internal hygiene rather than a promise to users, since every consumer links LMDB.)*
+builds a core-only consumer and fails if the binary carries LMDB symbols. *(Amended 2026-08-07, SHACL-T-0028: it built a core-plus-memstore consumer until odin-rdf-store retired that backend — STORE-A-0006. The check is narrower now and is internal hygiene rather than a promise to users, since every consumer links LMDB.)* *(Amended 2026-08-20, SHACL-I-0004: one package, `shacl`, importing the record directly; `shacl/kvstore` and the `purity` target are deleted — "the core names no backend" was retired at the port's design gate, by decision, and no consumer links LMDB because nothing in the chain has native code.)*
 
 The dependencies are unchanged and all complete: **odin-rdf-parser** and
 **odin-rdf-store** at v0.1.0, and **odin-rdf-sparql** at v0.1.0, relevant here only for
@@ -67,7 +139,8 @@ this repository pins it. v0.2.0 retired the in-memory backend (STORE-A-0006), v0
 shipped transactions (STORE-A-0007) — which SHACL-T-0029 consumed, and which is what makes
 validate-before-commit expressible here — and v0.4.0 fixed a Windows failure in
 `open_ephemeral` that this repository's own suite surfaced (STORE-T-0042). odin-rdf-parser
-and odin-rdf-sparql are unchanged at v0.1.0.)*
+and odin-rdf-sparql are unchanged at v0.1.0.)* *(Amended 2026-08-20: odin-rdf-store is no
+longer a dependency at any version; odin-rdf-record `v0.3.0` is the pin and a floor.)*
 
 *(Amended 2026-08-08, SHACL-T-0030 — filed from odin-rdf-store's STORE-T-0052: **the store
 this validator sits on has gained a time dimension, and it reaches validation with no source
@@ -83,6 +156,11 @@ side: put the time axis on the transaction, and the siblings inherit it without 
 concept exists. It arrives with **format version 2, which does not read version 1 and has no
 migration**, so it is a floor rather than a pin — the store's v0.5.0, unreleased at the time
 of writing, and the CI pin moves with the test rather than before it.
+
+*(Amended 2026-08-20, SHACL-T-0035: the paragraph above describes odin-rdf-store's as-of
+transactions, which this repository no longer reaches. The same scenarios run on the record
+through `store_at` — `shacl/as_of_test.odin`, five tests including shapes-as-of-then — and
+the bet paid off a second time in the same way: nothing below the session changed.)*
 
 **The distinction that will otherwise be mis-derived: as-of and validate-before-commit are
 two features through one entry point, and they do not compose.** Validate-before-commit is a
@@ -121,7 +199,10 @@ that is still the most useful thing it records:**
   *Dataset introspection* (STORE-T-0016) was wanted for target resolution, and all five
   target forms turned out to be ordinary match patterns; `sh:closed`, the last thing
   predicted to want it, did not either. **A validator with all twenty-nine components
-  reaches odin-rdf-store through `match` and `find_term` and nothing else.**
+  reaches odin-rdf-store through `match` and `find_term` and nothing else.** *(2026-08-20:
+  and reaches odin-rdf-record through six session verbs and nothing else, with the read
+  counts identical to the integer — SHACL-T-0036. The odin-rdf-store backlog items named
+  here are moot for this repository; `docs/store-proposal.md` is annotated.)*
 
   The evidence log has produced two findings in eleven tasks and neither is a capability
   gap. The first was a narrowing this project wrote — `Access` had three read verbs and
@@ -143,6 +224,10 @@ that is still the most useful thing it records:**
   **The trigger is now widened** (2026-08-07) from "a suite entry fails" to "a suite entry
   fails **or** a user reports it", because the corpus runs green in full and will not be
   the thing that raises the alarm. `docs/language-tag-status.md` has the evidence.
+  *(Amended 2026-08-20, SHACL-T-0033: the record lowercases tags on intern, so the
+  `sh:hasValue`/`sh:in` residual is closed on this backend; what remains latent is report
+  rendering, and no corpus entry reaches it. The family decision is flagged for discussion,
+  not rescinded here — see the block at the top of this section.)*
 
 **Next**, and neither is about correctness:
 
@@ -171,7 +256,7 @@ that is still the most useful thing it records:**
 A complete, well-tested Odin library where:
 
 - SHACL Core validation conforms to the W3C SHACL specification, measured against the official SHACL test suite.
-- Validation runs against any odin-rdf-store backend through the match interface alone. *(Amended 2026-08-07, SHACL-T-0028: this read "…so the same shapes validate in-memory and LMDB-backed data identically", and it was met — the engine ran verbatim against both backends at both `Term_ID` widths, which is what proved it reached storage through the contract alone. odin-rdf-store has since retired its in-memory backend (STORE-A-0006), so the identical-behaviour half is no longer verifiable and is retracted rather than left standing. The criterion itself survives: the core still names no backend.)*
+- Validation runs against any odin-rdf-store backend through the match interface alone. *(Amended 2026-08-07, SHACL-T-0028: this read "…so the same shapes validate in-memory and LMDB-backed data identically", and it was met — the engine ran verbatim against both backends at both `Term_ID` widths, which is what proved it reached storage through the contract alone. odin-rdf-store has since retired its in-memory backend (STORE-A-0006), so the identical-behaviour half is no longer verifiable and is retracted rather than left standing. The criterion itself survives: the core still names no backend.)* *(Retired 2026-08-20, SHACL-I-0004: the engine names odin-rdf-record and only it, by decision. What replaces the criterion is narrower and verifiable — the store is reached through `shacl/session.odin` alone, and a port that changed the store's cost without changing a single read count is the evidence that the engine's questions were never backend-shaped.)*
 - Validation reports are spec-conformant RDF graphs that round-trip through odin-rdf-parser.
 - The SHACL-SPARQL phase covers SPARQL-based constraints by embedding odin-rdf-sparql, keeping it strictly optional for Core-only users.
 
@@ -187,7 +272,7 @@ A complete, well-tested Odin library where:
 ## Success Criteria
 
 - SHACL Core passes the W3C SHACL test suite's Core tests (vendored, offline-reproducible).
-- Validation reads data exclusively through odin-rdf-store's public match interface — no private hooks into a specific backend.
+- Validation reads data exclusively through odin-rdf-store's public match interface — no private hooks into a specific backend. *(Retired 2026-08-20, SHACL-I-0004: odin-rdf-store is not consumed. The surviving form: validation reads data exclusively through odin-rdf-record's public snapshot read API, in one file.)*
 - Validation reports are spec-conformant: emitted via odin-rdf-parser and verifiable against the suite's expected report graphs (blank-node isomorphism, as in the parser's eval harness).
 - SHACL Core has zero dependency on odin-rdf-sparql; the SHACL-SPARQL phase adds it as a clean optional layer.
 - The public API is documented and idiomatic Odin, to the contract-documentation standard of the sibling projects.
@@ -196,13 +281,13 @@ A complete, well-tested Odin library where:
 
 - **Suite-driven correctness**: the W3C SHACL test suite defines "done", as the format and query suites do for the sibling projects.
 - **Core before SPARQL**: everything achievable without a query engine ships first; the optional dependency stays optional forever.
-- **Consume the interface, don't bypass it**: data access goes through odin-rdf-store's published match contract; capability gaps are proposed upstream as evidence-backed needs.
+- **Consume the interface, don't bypass it**: data access goes through odin-rdf-store's published match contract; capability gaps are proposed upstream as evidence-backed needs. *(Amended 2026-08-20: through odin-rdf-record's published snapshot read API and `Validator` hook; the record changed as little as its own write path required and this repository asks nothing further of it — the siblings adapt to the record, not the reverse. Findings still go to its owner first.)*
 - **Idiomatic Odin**: explicit memory management, allocator awareness, straightforward procedural APIs — the family's conventions.
 - **Primitives over frameworks**: a validation engine as a library; pipelines, servers, and rule systems belong downstream.
 
 ## Constraints
 
 - Written in Odin with no external dependencies; odin-rdf-sparql is an optional dependency confined to the SHACL-SPARQL phase.
-- Depends on odin-rdf-parser (data model, shapes/report parsing and emitting) and odin-rdf-store (match interface); consumed as published.
+- Depends on odin-rdf-parser (data model, shapes/report parsing and emitting) and odin-rdf-store (match interface); consumed as published. *(Amended 2026-08-20: and odin-rdf-record (snapshots, `apply`, the `Validator` hook, `record/ingest`) in place of odin-rdf-store; pinned at `v0.3.0` as a floor. The record is POSIX-only for durable storage; the suites here use its memory seam.)*
 - Scope is SHACL Core validation plus the later SHACL-SPARQL phase. Out of scope: SHACL Advanced Features (rules, functions), inference/entailment regimes, and any server or protocol layer.
-- Validation performance is bounded by the store's match capabilities; correctness must never depend on backend-specific behavior.
+- Validation performance is bounded by the store's match capabilities; correctness must never depend on backend-specific behavior. *(Amended 2026-08-20: there is one backend by decision, so the second clause now means: correctness must not depend on the record's representation — term identity is RDF's (language tags fold on intern; `"01"^^xsd:integer` and `"1"` are distinct terms) and value comparison is the engine's job, in `shacl/value.odin`.)*

@@ -361,3 +361,13 @@ port to the integer (T-0036). What remains is T-0037, the record of the
 port; its Status carries the handoff for the next session and the
 material for the sparql port.
 
+**2026-08-20, later.** T-0037 implemented and awaiting review: the vision, both
+ADRs, the five `docs/` notes, the README (its quick start now mirrors
+`tests/readme` verbatim), the source-comment stragglers and the family
+`CLAUDE.md` are amended under dated notes, and the sparql-port handoff is
+written in T-0037's Status. All seven tasks are done pending the owner's
+transitions. The exit criteria hold locally (`make test`/`make check` green
+with parser + record as the only dependencies; 98/98; the `Validator`
+demonstrated; CI green on all three runners at `a21d751` against
+`odin-rdf-record@v0.3.0`, run 2026-08-20 18:26Z). No release tagged.
+

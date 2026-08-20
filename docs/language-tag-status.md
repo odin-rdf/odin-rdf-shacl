@@ -3,6 +3,43 @@
 **From:** odin-rdf-shacl, SHACL-I-0002 (the SHACL Core constraint catalogue)
 **Status:** for review. **odin-rdf-parser was not touched, and the trigger did not fire.**
 
+> **Amended 2026-08-20 (SHACL-I-0004, the port to odin-rdf-record — SHACL-T-0033's
+> finding, recorded by SHACL-T-0037).** Everything below was written against
+> odin-rdf-store, which this repository no longer reads. The record changes the
+> exposure this document tracks in two opposite directions, and neither moved a
+> corpus entry:
+>
+> - **Term identity is resolved on this backend.** odin-rdf-record lowercases
+>   language tags on intern — its canonical term encoding's rule — so `"x"@EN`
+>   and `"x"@en` are *one term* in every snapshot. The residual exposure named
+>   below, `sh:hasValue` and `sh:in` comparing terms, is therefore closed here
+>   without any change to odin-rdf-parser: a shapes graph writing
+>   `sh:hasValue "x"@EN` against data writing `"x"@en` no longer gets a spurious
+>   violation. The sentence "a user's shapes graph … gets a spurious violation
+>   today" under *Where the exposure passes* is no longer true of this repository.
+> - **Report rendering is the new latent exposure.** `session_term` hands back
+>   the lowercased tag, and `rdf.equal_term` compares a `Literal`'s `language`
+>   byte-wise, so a produced report renders `"Hill"@en-nz` where the document
+>   said `@en-NZ` — and a report compared by isomorphism against an expected
+>   report parsed from such a document would mismatch. It did not, because the
+>   corpus holds exactly two uppercase-tagged literals (`property/languageIn-001`'s
+>   `@en-NZ`, `node/datatype-002`'s `@en-AU`) and both *conform*, so neither reaches
+>   an expected report as `sh:value` or `sh:focusNode`. Nothing was patched in the
+>   harness to make that so. This is the one place where the parser-side fold
+>   would still do work for this repository: with literals arriving pre-folded,
+>   an expected report and a produced one would agree on the tag's case.
+>
+> **The family decision is not rescinded here.** "Fold language tags to lowercase
+> at literal construction, in odin-rdf-parser" was taken for the family, and the
+> record's intern rule makes it moot *for this repository's term identity* while
+> leaving the rendering half and every other consumer as they were —
+> odin-rdf-sparql's corpus is larger and its results formats render tags. It is
+> flagged for family discussion, with the widened trigger below carried unchanged
+> until then. The paragraph "neither store dictionary changes" under *The designed
+> implementation* is also no longer accurate: the record's dictionary already
+> folds, so a parser-side fold would change nothing on disk there and would only
+> align the rest of the family with it.
+
 Refreshed at SHACL-T-0019. The verdict is unchanged from SHACL-I-0001's, and it is now
 unchanged *with the components that were supposed to change it built* — which is the
 only thing this revision adds and the reason it was an acceptance criterion rather

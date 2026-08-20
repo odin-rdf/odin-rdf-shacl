@@ -1,5 +1,43 @@
 # Handover to the SHACL-SPARQL phase
 
+> **Read with 2026-08-20's port in mind (SHACL-I-0004, recorded by
+> SHACL-T-0037).** This handover predates the move from odin-rdf-store to
+> odin-rdf-record, and the phase it hands over to has not started, so it stays
+> the starting point — with these translations, which are the only places the
+> port touches it:
+>
+> - **`COLL` is now `-collection:rdf=../odin-rdf-parser
+>   -collection:record=../odin-rdf-record`**; the `sparql:` collection is still
+>   appended there and mirrored in `ols.json`, and the Makefile still says so at
+>   the line that defines `COLL`. The third place, **`tests/purity`, no longer
+>   exists** — it went with the backend seam it guarded. The property it would
+>   have asserted for this phase (SHACL Core links no query engine) still wants
+>   asserting rather than trusting; the shape that fits the repository now is the
+>   one `make check` already uses for import hygiene — a grep over the core's
+>   imports in the `check` target — with the SPARQL-based components in a package
+>   of their own so that `import "shacl"` never pulls the query engine in.
+> - **The seam's item 6** ("a new read verb on `Access`") is now *a new session
+>   verb in `shacl/session.odin`*: there is no `Access` struct, the engine reads a
+>   `record.Snapshot` through six verbs, and `sh:closed`'s verb is
+>   `session_outgoing`. **Item 5** ("comparing its parameter by `Term_ID`") reads
+>   `record.Term_ID`; the trap is unchanged. The count and the five corpus traps
+>   are still in `shacl/check.odin`'s header.
+> - **"Both backends, both `Term_ID` widths"** throughout means "odin-rdf-record,
+>   one run": the width matrix left with the old store.
+> - **The language-tag bullet** under *What SHACL-I-0002 left open* is superseded
+>   on one side: the record lowercases tags on intern, so the `sh:hasValue`/`sh:in`
+>   residual is closed on this backend and the latent exposure has moved to
+>   report rendering. `docs/language-tag-status.md` carries the amendment; the
+>   family-level decision it defers to is flagged for discussion, not rescinded.
+> - **The store-evidence log is closed**, not open: there is no interface to log
+>   against. `docs/store-evidence.md` and `docs/store-proposal.md` are annotated.
+> - **The progress floor** restores from history exactly as described; nothing in
+>   `floor_test.odin` touched the store.
+> - The SPARQL phase also inherits a backend limit the record has and the old
+>   store did not: **`apply` refuses triple terms** (`.Unsupported_Term`). None of
+>   the SHACL corpus carries one; `data-shapes-test-suite/tests/sparql/` should be
+>   checked when it is vendored.
+
 Written at the close of SHACL-I-0002 (the SHACL Core constraint catalogue), in
 the shape of [`handover-catalogue.md`](handover-catalogue.md), which SHACL-I-0001
 wrote for this initiative and which is still worth reading for the seam and for

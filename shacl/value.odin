@@ -9,8 +9,9 @@ import "rdf:rdf"
 // Lexical-to-value conversion: comparing what literals *mean* rather than what
 // they *are* (SHACL-T-0012).
 //
-// Everything else in this engine compares terms, and by `Term_ID` wherever it
-// can — STORE-A-0001 exists so that a join, a set membership, and a node-kind
+// Everything else in this engine compares terms, and by `record.Term_ID`
+// wherever it can — the record's ids are dense integers with the kind and
+// the small literals inline, so a join, a set membership, and a node-kind
 // test are all integer work. That is why the engine is fast, and it is exactly
 // wrong for four of SHACL Core's components. `sh:minInclusive 4` must be
 // satisfied by `"4.0"^^xsd:decimal`, which is a different term and the same
@@ -73,7 +74,7 @@ import "rdf:rdf"
 // partially-timezoned instants, and the lexical forms `strconv` accepts but XSD
 // does not are all findings taken from there. None of it is imported. SHACL Core
 // keeps zero dependency on the query engine at runtime and at link time, and
-// `tests/purity` and the absent `sparql:` collection both say so.
+// the absent `sparql:` collection says so.
 //
 // The two engines want different things from the same machinery, which is why
 // this is a third of the size. SPARQL needs arithmetic, promotion rules that

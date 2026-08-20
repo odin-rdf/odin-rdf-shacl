@@ -5,7 +5,7 @@ title: "The shapes model: representation, term ownership, and graph scoping"
 number: 1
 short_code: "SHACL-A-0001"
 created_at: 2026-08-06T13:50:14.567908+00:00
-updated_at: 2026-08-06T14:54:42.042733+00:00
+updated_at: 2026-08-20T18:00:00.000000+00:00
 decision_date: 
 decision_maker: Greger Olsson
 parent: 
@@ -271,6 +271,67 @@ entries with separate shapes files would otherwise need a special case for.
   same graph twice deposits a second copy of every blank-node-rooted shape, and a
   later compile sees duplicated shapes. The contract is compile-once, and it relaxes
   when odin-rdf-store's `remove` lands (STORE-T-0023).
+
+- **2026-08-20 (SHACL-I-0004, SHACL-T-0037)** — the engine moved off
+  odin-rdf-store onto **odin-rdf-record**, by the owner's decision the one and
+  only store it will ever read: no dual-backend period, no seam kept for a
+  second backend, `shacl/kvstore` and the `store:` dependency deleted. Every
+  decision above survives; several of their *supports* and some of their
+  wording name things that no longer exist, and this entry says which.
+
+  **Decision 1 — "compiled from a store, through `match`", "generic over the
+  backend".** Compilation still reads a store rather than the parser stream,
+  for the reason the rationale gives (random access), and that is the part of
+  the decision that mattered. The rest of the sentence is retired: `compile`
+  takes a `Session` over a `record.Snapshot` and is generic over nothing —
+  there is no `$MATCH`, no `Reader($D, $It)`, no parapoly seam, because there
+  is no second backend to be generic over. The shapes-from-a-file helper
+  (`shacl/memstore`, then `shacl_kvstore.compile_turtle`, per the 2026-08-07
+  entry) is gone with its package; the caller loads the document with
+  `record/ingest` + `apply` into whichever store it likes and compiles from a
+  snapshot of it, which is what the README's quick start and every suite do.
+  The `As Built` proof that compiling never writes — a read-only LMDB
+  environment — is now a property of the types: a `Snapshot` has no write
+  verb, and `compile` receives nothing else.
+
+  **Decision 2 — "not `Term_ID`s".** Holds unchanged, with `record.Term_ID` in
+  place of the old store's. Binding still happens once at validation setup
+  (`bindings_init`), and since odin-rdf-record `v0.3.0` a fact id or an epoch
+  in a term id's place does not compile.
+
+  **Decision 3 — ownership.** The justification given above and in the
+  rationale — "the two backends disagree: memstore borrows, kvstore
+  allocates" — is gone, because the backends are gone. The decision stands on
+  a stronger reason than it was taken on: the record's `session_term`
+  *borrows*, from the dictionary arena or the caller's `Term_Buf`, and closing
+  the store frees the arena. A model that borrowed would not merely have a
+  backend-dependent lifetime; it would dangle. The property is exercised on
+  every W3C entry (the runner closes the shapes store before opening the data
+  store, as the 2026-08-06 note records) and by every `Validator` test, which
+  compiles its shapes from a store that is closed before the validated store
+  opens.
+
+  **Decision 5 — one caller-named graph.** Unchanged, and enforced in one
+  file instead of through two graph-less procedure pointers: the graph is
+  bound into every `record.Pattern` that `shacl/session.odin` issues, and
+  nothing above that file writes one. The STORE-T-0017 consequence (the
+  named-graph wildcard this project did not need) is moot rather than
+  retired — odin-rdf-store's backlog is no longer this repository's concern.
+
+  **The compile-once caveat (2026-08-07 entry)** changes shape rather than
+  disappearing. On the record, loading a shapes document twice into the same
+  graph under the *same* `blank_prefix` is refused outright by `apply`
+  (`.Already_Live` at the first repeated op — a changeset may not re-assert a
+  live fact), and under a *different* prefix deposits a second copy of every
+  blank-node-rooted shape exactly as before. Compile once, from one load.
+
+  **Positive consequence 3** ("the core `shacl` package depends on no backend,
+  so a Core-only, in-memory consumer never links LMDB") is retired in both
+  halves: the package depends on the record by design, and nothing links LMDB
+  because nothing in the dependency chain has native code. **Positive
+  consequence 5** (STORE-T-0017 not needed) is moot. The review trigger
+  naming STORE-T-0017 reopens only decision 5 now; there is no upstream
+  question attached to it.
 
 ## Review Triggers
 

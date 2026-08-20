@@ -11,7 +11,7 @@ import "rdf:rdf"
 // at the first violation, and validation stops rather than finishing a
 // traversal whose answer is already known.
 //
-// **A Result borrows.** It names nodes by `Term_ID` and shapes and paths by
+// **A Result borrows.** It names nodes by `record.Term_ID` and shapes and paths by
 // index into the compiled model; it owns nothing and allocates nothing. It is
 // valid for the duration of the visitor call, and a caller that wants to keep
 // one must copy what it needs — materialise the terms, or fold it into a

@@ -6,11 +6,10 @@ import "rdf:rdf"
 
 // Lexical-to-value conversion, tested directly (SHACL-T-0012).
 //
-// This is the one part of the engine with no store in it — no generics, no
-// `$MATCH` constants, no backend — so it is tested as what it is: a pure
-// function from a literal to a verdict. Going through a backend would test the
-// same arithmetic through four layers and two Term_ID widths, and would say
-// nothing extra.
+// This is the one part of the engine with no store in it — no session, no
+// snapshot — so it is tested as what it is: a pure function from a literal to
+// a verdict. Going through a store would test the same arithmetic through four
+// layers and would say nothing extra.
 //
 // The cases that are here because a **suite entry** demands them are marked as
 // such. They are the ones that must not be "simplified" later: every one of

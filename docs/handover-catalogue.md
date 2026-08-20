@@ -1,5 +1,14 @@
 # Handover to the catalogue initiative
 
+> **Historical since 2026-08-07, and read with 2026-08-20's port in mind
+> (SHACL-I-0004, recorded by SHACL-T-0037).** The catalogue initiative it hands
+> over to completed (SHACL-I-0002), and its successor, `handover-sparql.md`,
+> carries the seam as it actually is. Since then the engine has also moved from
+> odin-rdf-store to odin-rdf-record: where this document says store, `Access`,
+> `Term_ID`, "both backends" or `docs/store-proposal.md`, see the translations
+> at the top of `handover-sparql.md`. Nothing about the seam's *shape* — the
+> edits, the scope trap, the corpus-reading habit — changed in the port.
+
 Written at the close of SHACL-I-0001 (the Core spine). What the seam looks like,
 what the suite says is left, and what the spine deliberately did not settle.
 

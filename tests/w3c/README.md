@@ -30,8 +30,10 @@ odin-rdf-parser and odin-rdf-sparql share, so it carries its own pin.
 | `core/complex/` | 2 | SHACL-T-0019 |
 | `core/validation-reports/` | 1 | SHACL-T-0008 |
 
-**All 98 entries are enabled and green**, against both storage backends at both
-`Term_ID` widths. The family's rule holds unchanged — enabled means fully green,
+**All 98 entries are enabled and green**, against odin-rdf-record over its
+memory seam *(it read "against both storage backends at both `Term_ID`
+widths" until SHACL-I-0004 moved the engine onto the record, 2026-08-20 — one
+store, fixed widths, one run)*. The family's rule holds unchanged — enabled means fully green,
 no skip list, no expected-failure file — and `ENABLED_ENTRIES` is pinned against
 both the table and the number the runner actually ran, so an entry that stopped
 being executed fails rather than disappears.

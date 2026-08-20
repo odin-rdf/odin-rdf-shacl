@@ -17,10 +17,10 @@ import "record:record"
 //
 // This is what makes a Shapes independent of the store it was compiled from
 // (SHACL-A-0001 decision 3). The alternative — borrowing from the shapes
-// store's dictionary — would have made the lifetime rule backend-dependent
-// and part of the public contract, because memstore's `lookup_term` borrows
-// while kvstore's allocates. Owning states one rule instead: the model is
-// valid until `shapes_destroy`, whatever it was compiled from.
+// store's dictionary arena, which is what `session_term` hands out and what
+// closing the store frees — would have made the store's lifetime part of the
+// model's public contract. Owning states one rule instead: the model is valid
+// until `shapes_destroy`, whatever it was compiled from.
 //
 // Identical terms are interned to one copy. Shapes graphs repeat a small
 // vocabulary heavily — every property shape names `sh:path`, every constraint

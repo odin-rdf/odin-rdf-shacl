@@ -1,5 +1,16 @@
 # Store-interface evidence log
 
+> **Closed 2026-08-20 (SHACL-I-0004, recorded by SHACL-T-0037).** This log was
+> kept against odin-rdf-store's match interface, which this repository no
+> longer reads; the engine is on odin-rdf-record and there is no interface seam
+> left to log evidence about — the store is reached through `shacl/session.odin`
+> directly, by decision. Its closing verdict below (no capability gap in
+> twenty-nine components) stands as the record, and it is part of why the port
+> cost what it did and no more: an engine that asked the old store only `match`
+> and `find_term` questions asks the record the same six session-verb questions,
+> and SHACL-T-0036 measured the read counts identical to the integer. Findings
+> about the record go to its owner first (family convention), not into a log here.
+
 Every point where validation wants something odin-rdf-store's match interface
 cannot answer, recorded with the concrete shape or target that wants it and
 what it would buy. Consolidated into a written proposal at SHACL-T-0008.
