@@ -3,12 +3,13 @@
 # only real job is arranging the checkout the way the Makefile's collections
 # expect.
 #
-# Two checkouts, not one. This repo reaches its dependencies through
-# -collection:rdf=../odin-rdf-parser and -collection:store=../odin-rdf-store,
-# both relative to this repo, so all three go into sibling directories under
-# the workspace rather than the default layout. Both collections are needed
-# even though SHACL Core only names the store: the store's own sources import
-# `rdf:`, and a collection resolves in the importing compilation.
+# Three checkouts, not one. This repo reaches its dependencies through
+# -collection:rdf=../odin-rdf-parser, -collection:store=../odin-rdf-store and
+# -collection:record=../odin-rdf-record, all relative to this repo, so all
+# four go into sibling directories under the workspace rather than the default
+# layout. The `rdf:` collection is needed even where this project only names a
+# store: both stores' own sources import `rdf:`, and a collection resolves in
+# the importing compilation.
 #
 # The platform matrix is odin-rdf-store's, and it is load-bearing here rather
 # than inherited decoration. `shacl/kvstore` links the LMDB archives vendored
@@ -169,6 +170,34 @@ jobs:
           repository: odin-rdf/odin-rdf-store
           ref: v0.6.0
           path: odin-rdf-store
+
+      # **odin-rdf-record `v0.1.0` is the pin and the first floor at once**
+      # (SHACL-T-0031, the SHACL-I-0004 port): it is the record's first tag,
+      # so nothing below it exists to fall back to, and everything this
+      # repository consumes — `store_open`/`apply`, the snapshot read API,
+      # `record/ingest`, `Mem_FS`/`mem_file_ops`, the `Validator` hook — is in
+      # it. The port replaces odin-rdf-store with odin-rdf-record
+      # (SHACL-I-0004); the store checkout above leaves this file when
+      # SHACL-T-0032/T-0033 delete the last `store:` import. Two things worth
+      # knowing at this seam:
+      #
+      #   - **Windows**: the record has no Windows `File_Ops` — its posix file
+      #     is `#+build linux, darwin`, so the package compiles on Windows
+      #     without it, and the suites open stores over `mem_file_ops`
+      #     (`Mem_FS`), which is platform-free. Nothing here touches a real
+      #     record directory.
+      #   - **python3**: the record's *own* `make test` needs it (the
+      #     cross-implementation verifier); a consumer compiling the library
+      #     does not, so this job installs nothing.
+      #
+      # To bump: change the ref, run `make test` and `make check` locally
+      # against the new checkout, and commit together — the same
+      # collections-resolve-in-the-importer rule as the two above.
+      - uses: actions/checkout@v5
+        with:
+          repository: odin-rdf/odin-rdf-record
+          ref: v0.1.0
+          path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2
         with:

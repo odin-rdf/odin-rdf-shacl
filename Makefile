@@ -29,7 +29,13 @@ PURITY := build/purity$(EXE)
 # the importing compilation, not the imported checkout. The SHACL-SPARQL phase
 # adds `-collection:sparql=../odin-rdf-sparql` here and in ols.json; Core needs
 # no query engine, so it stays out until there is something importing it.
-COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store
+#
+# `record:` is odin-rdf-record, the store this repository is porting onto
+# (SHACL-I-0004): `import "record:record"` for the store and `record:record/ingest`
+# for the document loaders. `rdf:` stays required for the same
+# resolved-in-the-importer reason -- record's own sources import it. `store:`
+# leaves this line when SHACL-T-0032/T-0033 delete the last import of it.
+COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store -collection:record=../odin-rdf-record
 
 # Every package with tests, listed rather than discovered (SHACL-T-0001).
 # `shacl` is the backend-independent core; the two instantiation packages bind
@@ -41,6 +47,7 @@ PKGS := shacl \
 				shacl/kvstore \
 				tests/guards \
 				tests/readme \
+				tests/smoke \
 				tests/w3c/harness
 
 # Packages that are built rather than tested, and so are vetted separately.
