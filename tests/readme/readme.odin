@@ -471,7 +471,7 @@ test_readme_validator_example :: proc(t: ^testing.T) {
 
 // Validating the past: the README's sixth example. The data gains a second
 // name at epoch 2, so the verdict at epoch 1 and at epoch 2 differ.
-as_of_example :: proc(epoch: u32) -> (conforms: bool, failure: shacl.Failure, actor_set: bool) {
+as_of_example :: proc(epoch: record.Epoch) -> (conforms: bool, failure: shacl.Failure, actor_set: bool) {
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
 	compile_shapes(&shapes, MAX_ONE_NAME)

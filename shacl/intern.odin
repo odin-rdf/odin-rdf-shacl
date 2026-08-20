@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:strings"
 
 import "rdf:rdf"
+import "record:record"
 
 // Term_Table is the model's term storage: it owns a cloned copy of every term
 // the compiled shapes model holds, and frees them all at destroy.
@@ -86,7 +87,7 @@ intern :: proc(tt: ^Term_Table, term: rdf.Term) -> rdf.Term {
 // of the store it came from — the decoded term is borrowed (see
 // `session_term`) and the intern is the copy that outlives it.
 @(private)
-materialize_term :: proc(s: ^Shapes, se: Session, id: u32) -> rdf.Term {
+materialize_term :: proc(s: ^Shapes, se: Session, id: record.Term_ID) -> rdf.Term {
 	buf: Term_Buf
 	term, ok := session_term(se, id, buf[:])
 	if !ok {

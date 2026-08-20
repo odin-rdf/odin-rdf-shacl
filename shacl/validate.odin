@@ -3,6 +3,7 @@ package shacl
 import "base:runtime"
 
 import "rdf:rdf"
+import "record:record"
 
 // Validation: the join point where the compiled model, the targets, the paths,
 // the constraints, and the result stream become one engine (SHACL §3.4).
@@ -48,12 +49,12 @@ Bindings :: struct {
 
 	// Indexed by Shapes.constraints: the single-term parameter of
 	// Class/Datatype/Has_Value. Meaningless for the other kinds.
-	constraint:       []u32,
+	constraint:       []record.Term_ID,
 	constraint_bound: []bool,
 
 	// Indexed by Shapes.values: the members of every list-valued parameter —
 	// `sh:in`, `sh:languageIn`, and `sh:closed`'s allowed predicates.
-	value:            []u32,
+	value:            []record.Term_ID,
 	value_bound:      []bool,
 	allocator:        runtime.Allocator,
 }
@@ -67,7 +68,7 @@ bindings_init :: proc(b: ^Bindings, s: ^Shapes, se: Session, allocator := contex
 	target_bindings_init(&b.targets, s, se, allocator)
 	path_bindings_init(&b.paths, s, se, allocator)
 
-	b.constraint = make([]u32, len(s.constraints), allocator)
+	b.constraint = make([]record.Term_ID, len(s.constraints), allocator)
 	b.constraint_bound = make([]bool, len(s.constraints), allocator)
 	// Only the components that compare their parameter **by ID** need it bound.
 	// The value-range components hold a term too and never look here: they
@@ -100,7 +101,7 @@ bindings_init :: proc(b: ^Bindings, s: ^Shapes, se: Session, allocator := contex
 		}
 	}
 
-	b.value = make([]u32, len(s.values), allocator)
+	b.value = make([]record.Term_ID, len(s.values), allocator)
 	b.value_bound = make([]bool, len(s.values), allocator)
 	for term, i in s.values {
 		id, found := session_resolve(se, term)
@@ -342,8 +343,8 @@ validation_init :: proc(v: ^Validation, allocator := context.allocator) {
 	v.allocator = allocator
 	v.on_stack = make([]bool, len(v.s.shapes), allocator)
 	v.classes.allocator = allocator
-	v.classes.class = make([dynamic]u32, allocator)
-	v.classes.member = make([dynamic]map[u32]bool, allocator)
+	v.classes.class = make([dynamic]record.Term_ID, allocator)
+	v.classes.member = make([dynamic]map[record.Term_ID]bool, allocator)
 }
 
 @(private)
@@ -403,7 +404,7 @@ visit_focus :: proc(data: rawptr, focus: Focus_Node) -> bool {
 Frame :: struct {
 	shape:   int,
 	focus:   Focus_Node,
-	values:  [dynamic]u32,
+	values:  [dynamic]record.Term_ID,
 	unbound: bool,
 	cursor:  int,
 }
@@ -414,7 +415,7 @@ Frame :: struct {
 @(private)
 Value_Set :: struct {
 	focus:   Focus_Node,
-	ids:     []u32,
+	ids:     []record.Term_ID,
 	unbound: bool,
 }
 
@@ -509,7 +510,7 @@ push_frame :: proc(v: ^Validation, stack: ^[dynamic]Frame, shape_index: int, foc
 	}
 	if shape.path < 0 {
 		// A node shape's value node is its focus node.
-		f.values = make([dynamic]u32, v.allocator)
+		f.values = make([dynamic]record.Term_ID, v.allocator)
 		if focus.bound {
 			append(&f.values, focus.id)
 		} else {
@@ -521,7 +522,7 @@ push_frame :: proc(v: ^Validation, stack: ^[dynamic]Frame, shape_index: int, foc
 		// No triple can mention a term the dictionary does not hold, so a path
 		// from an unbound focus node reaches nothing. That is emptiness, and it
 		// is meaningful: `sh:minCount 1` on such a node is a violation.
-		f.values = make([dynamic]u32, v.allocator)
+		f.values = make([dynamic]record.Term_ID, v.allocator)
 	}
 
 	v.on_stack[shape_index] = true
@@ -581,15 +582,15 @@ emit_result :: proc(
 
 @(private)
 Class_Closures :: struct {
-	class:     [dynamic]u32,
-	member:    [dynamic]map[u32]bool,
+	class:     [dynamic]record.Term_ID,
+	member:    [dynamic]map[record.Term_ID]bool,
 	allocator: runtime.Allocator,
 }
 
 // class_closure returns the members of `class`'s closure, computing it on first
 // ask. The map borrows the cache and is valid until the validation ends.
 @(private)
-class_closure :: proc(v: ^Validation, class: u32) -> ^map[u32]bool {
+class_closure :: proc(v: ^Validation, class: record.Term_ID) -> ^map[record.Term_ID]bool {
 	for known, i in v.classes.class {
 		if known == class {
 			return &v.classes.member[i]
@@ -598,7 +599,7 @@ class_closure :: proc(v: ^Validation, class: u32) -> ^map[u32]bool {
 	ids := subclass_closure(&v.b.targets, v.se, class, v.allocator)
 	defer delete(ids)
 
-	set := make(map[u32]bool, v.classes.allocator)
+	set := make(map[record.Term_ID]bool, v.classes.allocator)
 	for id in ids {
 		set[id] = true
 	}

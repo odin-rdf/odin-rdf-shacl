@@ -44,7 +44,7 @@ record_round_trip :: proc(t: ^testing.T) {
 	}
 	epoch, _, apply_err := record.apply(&s, {ops = ops})
 	testing.expect_value(t, apply_err, record.Apply_Error{})
-	testing.expect_value(t, epoch, u32(1))
+	testing.expect_value(t, epoch, record.Epoch(1))
 
 	snap, snap_err := record.store_latest(&s)
 	testing.expect_value(t, snap_err, record.Snapshot_Error.None)
@@ -70,7 +70,7 @@ record_round_trip :: proc(t: ^testing.T) {
 		f := record.snapshot_fact(snap, id)
 		testing.expect_value(t, f.p, pid)
 		testing.expect_value(t, f.o, oid)
-		testing.expect_value(t, f.g, u32(0)) // the default graph is stored as G = 0
+		testing.expect_value(t, f.g, record.Term_ID(0)) // the default graph is stored as G = 0
 		count += 1
 	}
 	testing.expect_value(t, count, 1)

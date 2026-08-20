@@ -6,6 +6,7 @@ import regex_common "core:text/regex/common"
 import "core:unicode/utf8"
 
 import "rdf:rdf"
+import "record:record"
 
 // Constraint dispatch: the seam the catalogue initiative filled.
 //
@@ -343,7 +344,7 @@ check_property_pair :: proc(
 		}
 	}
 
-	others := make([dynamic]u32, v.allocator)
+	others := make([dynamic]record.Term_ID, v.allocator)
 	defer delete(others)
 	if values.focus.bound && v.b.constraint_bound[constraint_index] {
 		session_step(v.se, values.focus.id, v.b.constraint[constraint_index], false, &others)
@@ -421,7 +422,7 @@ check_property_pair :: proc(
 // holds. `property/lessThan-002` is the entry that measures it — integers
 // against strings, where every pair is incomparable and every pair is a result.
 @(private = "file")
-pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: u32) -> bool {
+pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: record.Term_ID) -> bool {
 	left_buf: Term_Buf
 	left := materialize(v, value, left_buf[:])
 	right_buf: Term_Buf
@@ -445,7 +446,7 @@ pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, oth
 // seen cannot be the object of any triple, so it cannot be among the values of
 // the other predicate.
 @(private = "file")
-node_among :: proc(value: Node_Ref, ids: []u32) -> bool {
+node_among :: proc(value: Node_Ref, ids: []record.Term_ID) -> bool {
 	if !value.bound {
 		return false
 	}
@@ -458,7 +459,7 @@ node_among :: proc(value: Node_Ref, ids: []u32) -> bool {
 }
 
 @(private = "file")
-id_among :: proc(values: Value_Set, id: u32) -> bool {
+id_among :: proc(values: Value_Set, id: record.Term_ID) -> bool {
 	for n in 0 ..< value_set_count(values) {
 		ref := value_set_at(values, n)
 		if ref.bound && ref.id == id {
@@ -753,7 +754,7 @@ Closed_Check :: struct {
 // appears in a triple is in the dictionary by definition, so an unbound entry
 // cannot be the one being judged.
 @(private = "file")
-closed_visit :: proc(data: rawptr, predicate, object: u32) -> bool {
+closed_visit :: proc(data: rawptr, predicate, object: record.Term_ID) -> bool {
 	state := cast(^Closed_Check)data
 	v := state.v
 	c := state.constraint
@@ -800,14 +801,14 @@ check_class :: proc(v: ^Validation, c: Constraint, constraint_index: int, value:
 
 @(private = "file")
 Class_Check :: struct {
-	members: ^map[u32]bool,
+	members: ^map[record.Term_ID]bool,
 	found:   bool,
 }
 
 // class_check_visit returns false once it has an answer, which stops the scan
 // inside the store rather than reading the rest of the node's types.
 @(private = "file")
-class_check_visit :: proc(data: rawptr, id: u32) -> bool {
+class_check_visit :: proc(data: rawptr, id: record.Term_ID) -> bool {
 	state := cast(^Class_Check)data
 	if state.members[id] {
 		state.found = true

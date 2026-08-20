@@ -3,6 +3,7 @@ package shacl
 import "base:runtime"
 
 import "rdf:rdf"
+import "record:record"
 
 // Target resolution: a shape's target declarations turned into the focus
 // nodes it applies to (SHACL §2.1.3).
@@ -30,7 +31,7 @@ import "rdf:rdf"
 // materialises through the dictionary if it needs one; for an unbound node
 // `term` borrows the compiled model's storage, which outlives the validation.
 Node_Ref :: struct {
-	id:    u32,
+	id:    record.Term_ID,
 	bound: bool,
 	term:  rdf.Term,
 }
@@ -46,11 +47,11 @@ Focus_Visitor :: #type proc(data: rawptr, focus: Focus_Node) -> bool
 // model's target terms, and the two RDF/RDFS predicates class targeting
 // needs, resolved to the *data* store's IDs once before resolution.
 Target_Bindings :: struct {
-	term:         []u32, // indexed by s.targets
+	term:         []record.Term_ID, // indexed by s.targets
 	bound:        []bool,
-	rdf_type:     u32,
+	rdf_type:     record.Term_ID,
 	has_type:     bool,
-	subclass_of:  u32,
+	subclass_of:  record.Term_ID,
 	has_subclass: bool,
 	allocator:    runtime.Allocator,
 }
@@ -69,7 +70,7 @@ target_bindings_init :: proc(
 	allocator := context.allocator,
 ) {
 	b.allocator = allocator
-	b.term = make([]u32, len(s.targets), allocator)
+	b.term = make([]record.Term_ID, len(s.targets), allocator)
 	b.bound = make([]bool, len(s.targets), allocator)
 	for target, i in s.targets {
 		id, found := session_resolve(se, target.term)
@@ -111,7 +112,7 @@ resolve_targets :: proc(
 	state := Resolve_State {
 		visit      = visit,
 		visit_data = visit_data,
-		seen       = make(map[u32]bool, allocator),
+		seen       = make(map[record.Term_ID]bool, allocator),
 		unbound    = make([dynamic]rdf.Term, allocator),
 	}
 	defer delete(state.seen)
@@ -173,7 +174,7 @@ resolve_targets :: proc(
 Resolve_State :: struct {
 	visit:      Focus_Visitor,
 	visit_data: rawptr,
-	seen:       map[u32]bool,
+	seen:       map[record.Term_ID]bool,
 	unbound:    [dynamic]rdf.Term,
 }
 
@@ -198,7 +199,7 @@ emit_unbound :: proc(state: ^Resolve_State, term: rdf.Term) -> bool {
 }
 
 @(private = "file")
-visit_id :: proc(data: rawptr, id: u32) -> bool {
+visit_id :: proc(data: rawptr, id: record.Term_ID) -> bool {
 	state := cast(^Resolve_State)data
 	return emit(state, Focus_Node{id = id, bound = true})
 }
@@ -220,26 +221,26 @@ visit_id :: proc(data: rawptr, id: u32) -> bool {
 subclass_closure :: proc(
 	b: ^Target_Bindings,
 	se: Session,
-	class: u32,
+	class: record.Term_ID,
 	allocator: runtime.Allocator,
-) -> [dynamic]u32 {
-	out := make([dynamic]u32, allocator)
+) -> [dynamic]record.Term_ID {
+	out := make([dynamic]record.Term_ID, allocator)
 	append(&out, class)
 	if !b.has_subclass {
 		return out
 	}
 
-	seen := make(map[u32]bool, allocator)
+	seen := make(map[record.Term_ID]bool, allocator)
 	defer delete(seen)
 	seen[class] = true
 
 	collector := Closure_State {
 		seen  = &seen,
-		fresh = make([dynamic]u32, allocator),
+		fresh = make([dynamic]record.Term_ID, allocator),
 	}
 	defer delete(collector.fresh)
 
-	frontier := make([dynamic]u32, allocator)
+	frontier := make([dynamic]record.Term_ID, allocator)
 	defer delete(frontier)
 	append(&frontier, class)
 
@@ -259,12 +260,12 @@ subclass_closure :: proc(
 
 @(private = "file")
 Closure_State :: struct {
-	seen:  ^map[u32]bool,
-	fresh: [dynamic]u32,
+	seen:  ^map[record.Term_ID]bool,
+	fresh: [dynamic]record.Term_ID,
 }
 
 @(private = "file")
-collect_id :: proc(data: rawptr, id: u32) -> bool {
+collect_id :: proc(data: rawptr, id: record.Term_ID) -> bool {
 	state := cast(^Closure_State)data
 	if state.seen[id] {
 		return true

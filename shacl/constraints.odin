@@ -4,6 +4,7 @@ import "core:strings"
 import "core:text/regex"
 
 import "rdf:rdf"
+import "record:record"
 
 // Constraint-parameter compilation.
 //
@@ -14,7 +15,7 @@ import "rdf:rdf"
 compile_constraints :: proc(
 	s: ^Shapes,
 	r: Reader,
-	shape_id: u32,
+	shape_id: record.Term_ID,
 	shape_node: rdf.Term,
 	v: ^Vocab,
 ) -> Error {
@@ -383,8 +384,8 @@ SHAPE_VALUED_PARAMETERS := [5]struct {
 compile_shape_operands :: proc(
 	s: ^Shapes,
 	r: Reader,
-	shape_ids: []u32,
-	compiled: ^map[u32]int,
+	shape_ids: []record.Term_ID,
+	compiled: ^map[record.Term_ID]int,
 	v: ^Vocab,
 ) -> Error {
 	for shape_index in 0 ..< len(s.shapes) {
@@ -504,7 +505,7 @@ compile_shape_operands :: proc(
 // the evaluator. Runs after the qualified shapes are resolved, since that is what
 // a sibling contributes.
 @(private)
-compile_qualified_siblings :: proc(s: ^Shapes, r: Reader, shape_ids: []u32, v: ^Vocab) -> Error {
+compile_qualified_siblings :: proc(s: ^Shapes, r: Reader, shape_ids: []record.Term_ID, v: ^Vocab) -> Error {
 	if !v.found[QUALIFIED_VALUE_SHAPES_DISJOINT] {
 		return Error{}
 	}
@@ -577,7 +578,7 @@ compile_qualified_siblings :: proc(s: ^Shapes, r: Reader, shape_ids: []u32, v: ^
 qualified_is_disjoint :: proc(
 	s: ^Shapes,
 	r: Reader,
-	shape_id: u32,
+	shape_id: record.Term_ID,
 	shape_node: rdf.Term,
 	v: ^Vocab,
 ) -> (
@@ -627,7 +628,7 @@ qualified_is_disjoint :: proc(
 // shape index — `compile`'s worklist, which already holds them in that order, so
 // the graph is not re-queried to find them.
 @(private)
-compile_closed_sets :: proc(s: ^Shapes, r: Reader, shape_ids: []u32, v: ^Vocab) -> Error {
+compile_closed_sets :: proc(s: ^Shapes, r: Reader, shape_ids: []record.Term_ID, v: ^Vocab) -> Error {
 	for shape_index in 0 ..< len(s.shapes) {
 		shape := s.shapes[shape_index]
 		for offset in 0 ..< shape.constraints.count {
@@ -804,7 +805,7 @@ INERT_PARAMETERS := []string{NAME, DESCRIPTION, ORDER, GROUP, DEFAULT_VALUE}
 // carries `rdf:type`, `rdfs:label`, and whatever else the document says about
 // it, and none of that is evidence of a missing component.
 @(private)
-record_ignored_parameters :: proc(s: ^Shapes, r: Reader, shape_id: u32) {
+record_ignored_parameters :: proc(s: ^Shapes, r: Reader, shape_id: record.Term_ID) {
 	preds := predicates_of(r, shape_id)
 	defer delete(preds)
 

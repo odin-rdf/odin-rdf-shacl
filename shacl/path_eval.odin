@@ -2,6 +2,8 @@ package shacl
 
 import "base:runtime"
 
+import "record:record"
+
 // Value-node evaluation: given a focus node and a compiled path, the set of
 // nodes a property shape's constraints apply to (SHACL §2.3).
 //
@@ -27,7 +29,7 @@ import "base:runtime"
 // means to a constraint — `sh:class ex:Missing` makes every value node
 // violate. Absence is emptiness on a path and failure in a constraint.
 Path_Bindings :: struct {
-	predicate: []u32,
+	predicate: []record.Term_ID,
 	bound:     []bool,
 	allocator: runtime.Allocator,
 }
@@ -42,7 +44,7 @@ path_bindings_init :: proc(
 	allocator := context.allocator,
 ) {
 	b.allocator = allocator
-	b.predicate = make([]u32, len(s.paths), allocator)
+	b.predicate = make([]record.Term_ID, len(s.paths), allocator)
 	b.bound = make([]bool, len(s.paths), allocator)
 	for node, i in s.paths {
 		if node.kind != .Predicate {
@@ -72,14 +74,14 @@ value_nodes :: proc(
 	s: ^Shapes,
 	b: ^Path_Bindings,
 	path: int,
-	focus: u32,
+	focus: record.Term_ID,
 	se: Session,
 	allocator := context.allocator,
-) -> [dynamic]u32 {
+) -> [dynamic]record.Term_ID {
 	if path < 0 || path >= len(s.paths) {
-		return make([dynamic]u32, allocator)
+		return make([dynamic]record.Term_ID, allocator)
 	}
-	inputs := [1]u32{focus}
+	inputs := [1]record.Term_ID{focus}
 	return eval_path(s, b, path, inputs[:], false, se, allocator)
 }
 
@@ -96,24 +98,24 @@ eval_path :: proc(
 	s: ^Shapes,
 	b: ^Path_Bindings,
 	node_index: int,
-	inputs: []u32,
+	inputs: []record.Term_ID,
 	inverted: bool,
 	se: Session,
 	allocator: runtime.Allocator,
-) -> [dynamic]u32 {
+) -> [dynamic]record.Term_ID {
 	node := s.paths[node_index]
 
 	switch node.kind {
 	case .Predicate:
-		out := make([dynamic]u32, allocator)
+		out := make([dynamic]record.Term_ID, allocator)
 		if !b.bound[node_index] {
 			return out
 		}
-		seen := make(map[u32]bool, allocator)
+		seen := make(map[record.Term_ID]bool, allocator)
 		defer delete(seen)
 		// One buffer for the whole frontier rather than one per node: a step
 		// is the innermost thing this evaluator does.
-		buf := make([dynamic]u32, allocator)
+		buf := make([dynamic]record.Term_ID, allocator)
 		defer delete(buf)
 		for from in inputs {
 			clear(&buf)
@@ -150,8 +152,8 @@ eval_path :: proc(
 		return current
 
 	case .Alternative:
-		out := make([dynamic]u32, allocator)
-		seen := make(map[u32]bool, allocator)
+		out := make([dynamic]record.Term_ID, allocator)
+		seen := make(map[record.Term_ID]bool, allocator)
 		defer delete(seen)
 		for op in path_operands(s, node) {
 			branch := eval_path(s, b, op, inputs, inverted, se, allocator)
@@ -168,7 +170,7 @@ eval_path :: proc(
 	case .Zero_Or_One:
 		// The focus node itself is a value node of a zero-or-one path.
 		out := dedupe_ids(inputs, allocator)
-		seen := make(map[u32]bool, allocator)
+		seen := make(map[record.Term_ID]bool, allocator)
 		defer delete(seen)
 		for id in out {
 			seen[id] = true
@@ -191,7 +193,7 @@ eval_path :: proc(
 		return closure(s, b, node, inputs, inverted, true, se, allocator)
 	}
 
-	return make([dynamic]u32, allocator)
+	return make([dynamic]record.Term_ID, allocator)
 }
 
 // closure is the shared reachability walk behind zeroOrMorePath and
@@ -209,15 +211,15 @@ closure :: proc(
 	s: ^Shapes,
 	b: ^Path_Bindings,
 	node: Path_Node,
-	inputs: []u32,
+	inputs: []record.Term_ID,
 	inverted: bool,
 	reflexive: bool,
 	se: Session,
 	allocator: runtime.Allocator,
-) -> [dynamic]u32 {
+) -> [dynamic]record.Term_ID {
 	operands := path_operands(s, node)
-	out := make([dynamic]u32, allocator)
-	seen := make(map[u32]bool, allocator)
+	out := make([dynamic]record.Term_ID, allocator)
+	seen := make(map[record.Term_ID]bool, allocator)
 	defer delete(seen)
 
 	if reflexive {
@@ -231,7 +233,7 @@ closure :: proc(
 
 	current := eval_path(s, b, operands[0], inputs, inverted, se, allocator)
 	for {
-		fresh := make([dynamic]u32, allocator)
+		fresh := make([dynamic]record.Term_ID, allocator)
 		for id in current {
 			if !seen[id] {
 				seen[id] = true
@@ -252,9 +254,9 @@ closure :: proc(
 
 // dedupe_ids copies ids into a fresh set-valued array.
 @(private)
-dedupe_ids :: proc(ids: []u32, allocator: runtime.Allocator) -> [dynamic]u32 {
-	out := make([dynamic]u32, allocator)
-	seen := make(map[u32]bool, allocator)
+dedupe_ids :: proc(ids: []record.Term_ID, allocator: runtime.Allocator) -> [dynamic]record.Term_ID {
+	out := make([dynamic]record.Term_ID, allocator)
+	seen := make(map[record.Term_ID]bool, allocator)
 	defer delete(seen)
 	for id in ids {
 		if !seen[id] {

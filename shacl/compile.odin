@@ -3,6 +3,7 @@ package shacl
 import "base:runtime"
 
 import "rdf:rdf"
+import "record:record"
 
 // Shapes-graph compilation.
 //
@@ -29,7 +30,7 @@ import "rdf:rdf"
 // skipped rather than run.
 @(private)
 Vocab :: struct {
-	ids:   map[string]u32,
+	ids:   map[string]record.Term_ID,
 	found: map[string]bool,
 }
 
@@ -148,7 +149,7 @@ compile :: proc(s: ^Shapes, se: Session, allocator := context.allocator) -> Erro
 	context.allocator = allocator
 
 	v: Vocab
-	v.ids = make(map[string]u32, allocator)
+	v.ids = make(map[string]record.Term_ID, allocator)
 	v.found = make(map[string]bool, allocator)
 	defer delete(v.ids)
 	defer delete(v.found)
@@ -198,20 +199,20 @@ compile :: proc(s: ^Shapes, se: Session, allocator := context.allocator) -> Erro
 	// it would make every node carrying sh:minCount a root-less shape, and
 	// nothing needs it.
 
-	pending: [dynamic]u32
+	pending: [dynamic]record.Term_ID
 	pending_kind: [dynamic]Shape_Kind
-	queued: map[u32]bool
-	compiled: map[u32]int
+	queued: map[record.Term_ID]bool
+	compiled: map[record.Term_ID]int
 	defer delete(pending)
 	defer delete(pending_kind)
 	defer delete(queued)
 	defer delete(compiled)
 
 	enqueue :: proc(
-		pending: ^[dynamic]u32,
+		pending: ^[dynamic]record.Term_ID,
 		pending_kind: ^[dynamic]Shape_Kind,
-		queued: ^map[u32]bool,
-		id: u32,
+		queued: ^map[record.Term_ID]bool,
+		id: record.Term_ID,
 		kind: Shape_Kind,
 	) {
 		if queued[id] {

@@ -106,7 +106,7 @@ tdb_close :: proc(db: ^Test_DB) {
 // a blank node named for the failure rather than a panic, so one broken read
 // shows up as a mismatched expectation rather than as a lost test run.
 @(private)
-test_term :: proc(se: Session, id: u32) -> rdf.Term {
+test_term :: proc(se: Session, id: record.Term_ID) -> rdf.Term {
 	buf: Term_Buf
 	term, ok := session_term(se, id, buf[:])
 	if !ok {

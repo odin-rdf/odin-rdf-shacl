@@ -148,3 +148,16 @@ ported.
 `ODIN_TEST_FAIL_ON_BAD_MEMORY`; `odin check -target:windows_amd64` clean
 over the merged package; no `store:store` import remains in any compiled
 package.
+
+**2026-08-20, later — amended by odin-rdf-record `v0.3.0` (RECORD-T-0020).**
+"Ids are `u32` native" above became "ids are `record.Term_ID` native": the
+record's three id spaces are distinct types since `v0.3.0`, and every `u32`
+that meant a term id in this engine — `Session.graph`, `Focus_Node.id`, the
+`Bindings` arrays, path frontiers, shape ids, the session verbs — is now
+`record.Term_ID`; the as-of tests and the `Validator` tests hold
+`record.Epoch`. Same width, same sentinels; what changed is that a fact id
+or an epoch where a term id goes no longer compiles. The CI pin moved to
+`v0.3.0` as a floor. The question that led to it was asked of
+`Session.graph: u32` — "what is this `u32`, really?" — and the field now
+carries the answer in its type and a comment.
+

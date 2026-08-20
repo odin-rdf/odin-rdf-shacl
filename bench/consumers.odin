@@ -32,7 +32,7 @@ import "../shacl"
 // `session_term` borrows again (the dictionary arena, or a stack buffer for an
 // inlined id) and the engine interns what it keeps — so these are once more
 // the engine's own allocation, with one systematic shift against the memstore
-// numbers: ids are u32 natively, so every id-holding structure is smaller
+// numbers: ids are 32-bit natively, so every id-holding structure is smaller
 // (the 64-bit peak of 27076 B became 20868 B, the 32-bit build's old figure).
 // Allocation *counts* came through the port unchanged.
 

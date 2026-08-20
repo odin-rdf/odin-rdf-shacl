@@ -88,7 +88,7 @@ wired_apply :: proc(
 	kind := record.Op_Kind.Assert,
 	blank_prefix := "j_",
 ) -> (
-	epoch: u32,
+	epoch: record.Epoch,
 	conforms: bool,
 	err: record.Apply_Error,
 ) {
@@ -101,10 +101,10 @@ wired_apply :: proc(
 }
 
 @(private = "file")
-head_epoch :: proc(ws: ^Wired_Store) -> u32 {
+head_epoch :: proc(ws: ^Wired_Store) -> record.Epoch {
 	snap, err := record.store_latest(&ws.st)
 	if err != .None {
-		return max(u32)
+		return max(record.Epoch)
 	}
 	defer record.snapshot_release(&snap)
 	return snap.epoch
@@ -305,7 +305,7 @@ test_conforming_commits_under_both_modes :: proc(t: ^testing.T) {
 		epoch, ok, err := wired_apply(t, &ws, docs[i], mode)
 		testing.expect_value(t, err, record.Apply_Error{})
 		testing.expect(t, ok)
-		testing.expect_value(t, epoch, u32(i + 1))
+		testing.expect_value(t, epoch, record.Epoch(i + 1))
 		testing.expect(t, report_conforms(validator_report(&v)))
 	}
 	testing.expect_value(t, v.checks, 2)

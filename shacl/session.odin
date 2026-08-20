@@ -28,7 +28,10 @@ import "record:record"
 // what makes the same engine usable inside one.)
 Session :: struct {
 	snap:  record.Snapshot,
-	graph: u32,
+	graph: record.Term_ID, // the graph's resident id, resolved once from the caller's
+	//                        rdf.Graph_Label at session_init: MATCH_DEFAULT_GRAPH for
+	//                        nil, GRAPH_ABSENT for a label the store has never seen.
+	//                        Never 0 — that is "every graph" in a record Pattern.
 }
 
 // GRAPH_ABSENT is the graph binding of a session whose graph label the store
@@ -84,7 +87,7 @@ Term_Buf :: [record.INLINE_LEXICAL_MAX]u8
 // in one allocation, which this contract would leak. No store written through
 // `record.apply` contains one (its encoder emits full IRIs only), and this
 // engine reads apply-written stores.
-session_term :: proc(se: Session, id: u32, buf: []byte) -> (term: rdf.Term, ok: bool) {
+session_term :: proc(se: Session, id: record.Term_ID, buf: []byte) -> (term: rdf.Term, ok: bool) {
 	when SHACL_COUNT_READS {
 		read_counts.term += 1
 	}
@@ -94,13 +97,13 @@ session_term :: proc(se: Session, id: u32, buf: []byte) -> (term: rdf.Term, ok: 
 // session_resolve is the non-interning term lookup: the id a term has in this
 // snapshot's dictionary, or found = false for a term the store has never
 // seen. Resolving never writes — record's read side has no way to.
-session_resolve :: proc(se: Session, term: rdf.Term) -> (id: u32, found: bool) {
+session_resolve :: proc(se: Session, term: rdf.Term) -> (id: record.Term_ID, found: bool) {
 	return record.snapshot_resolve(se.snap, term)
 }
 
 // session_kind is a bound node's kind — IRI, blank node, or literal — read
 // without decoding the term.
-session_kind :: proc(se: Session, id: u32) -> record.Term_Kind {
+session_kind :: proc(se: Session, id: record.Term_ID) -> record.Term_Kind {
 	return record.snapshot_kind(se.snap, id)
 }
 
@@ -119,9 +122,9 @@ Pos :: enum u8 {
 @(private)
 session_scan :: proc(
 	se: Session,
-	subject, predicate, object: u32,
+	subject, predicate, object: record.Term_ID,
 	position: Pos,
-	visit: proc(data: rawptr, id: u32) -> bool,
+	visit: proc(data: rawptr, id: record.Term_ID) -> bool,
 	visit_data: rawptr,
 ) -> bool {
 	when SHACL_COUNT_READS {
@@ -145,7 +148,7 @@ session_scan :: proc(
 // reachable from `from` by `predicate` — or reaching `from` by it, when
 // `inverted`. The path evaluator's one read.
 @(private)
-session_step :: proc(se: Session, from, predicate: u32, inverted: bool, out: ^[dynamic]u32) {
+session_step :: proc(se: Session, from, predicate: record.Term_ID, inverted: bool, out: ^[dynamic]record.Term_ID) {
 	when SHACL_COUNT_READS {
 		read_counts.step += 1
 	}
@@ -171,8 +174,8 @@ session_step :: proc(se: Session, from, predicate: u32, inverted: bool, out: ^[d
 @(private)
 session_outgoing :: proc(
 	se: Session,
-	subject: u32,
-	visit: proc(data: rawptr, predicate, object: u32) -> bool,
+	subject: record.Term_ID,
+	visit: proc(data: rawptr, predicate, object: record.Term_ID) -> bool,
 	visit_data: rawptr,
 ) -> bool {
 	when SHACL_COUNT_READS {

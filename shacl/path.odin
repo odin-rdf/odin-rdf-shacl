@@ -1,6 +1,7 @@
 package shacl
 
 import "rdf:rdf"
+import "record:record"
 
 // Property-path compilation (SHACL §2.3.1).
 //
@@ -18,7 +19,7 @@ import "rdf:rdf"
 @(private = "file")
 Path_Frame :: struct {
 	kind:     Path_Kind,
-	operands: [dynamic]u32,
+	operands: [dynamic]record.Term_ID,
 	next:     int,
 	children: [dynamic]int,
 }
@@ -29,7 +30,7 @@ Path_Frame :: struct {
 compile_path :: proc(
 	s: ^Shapes,
 	r: Reader,
-	root_id: u32,
+	root_id: record.Term_ID,
 	shape_node: rdf.Term,
 	v: ^Vocab,
 ) -> (
@@ -125,11 +126,11 @@ compile_path :: proc(
 @(private = "file")
 classify_path :: proc(
 	r: Reader,
-	node: u32,
+	node: record.Term_ID,
 	v: ^Vocab,
 ) -> (
 	kind: Path_Kind,
-	operands: [dynamic]u32,
+	operands: [dynamic]record.Term_ID,
 	ok: bool,
 ) {
 	// A sequence path is a bare RDF list, recognised by rdf:first.

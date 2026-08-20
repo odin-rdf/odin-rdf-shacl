@@ -129,7 +129,7 @@ does — 2 triples for a conforming graph, 9450 for the reference configuration,
 48002 when everything violates.
 
 There is no id width to choose any more. The old store made `Term_ID` a
-build-time choice and this table used to carry both; record's ids are `u32` by
+build-time choice and this table used to carry both; record's ids are 32-bit by
 design, which is why the peak above is the figure the old **32-bit** build
 reported (27076 → 20868 bytes) and not the 64-bit one.
 

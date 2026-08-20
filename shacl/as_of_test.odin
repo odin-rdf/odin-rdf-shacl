@@ -104,7 +104,7 @@ epoch :: proc(
 	actor: rdf.Term = nil,
 	reason: rdf.Term = nil,
 	loc := #caller_location,
-) -> u32 {
+) -> record.Epoch {
 	ops, ierr := ingest.turtle(transmute([]byte)source, graph, context.allocator, kind = kind, blank_prefix = "h_")
 	if !testing.expectf(t, ierr.kind == .None, "ingest: %v", ierr, loc = loc) {
 		return 0
@@ -135,7 +135,7 @@ verdict_at :: proc(
 	t: ^testing.T,
 	shapes: ^Shapes,
 	h: ^History,
-	at: u32,
+	at: record.Epoch,
 	graph: rdf.Graph_Label = nil,
 	loc := #caller_location,
 ) -> (
@@ -162,7 +162,7 @@ verdict_at :: proc(
 // result_count_at is the report path at a pinned epoch: how many results the
 // `sh:ValidationReport` over that moment holds.
 @(private = "file")
-result_count_at :: proc(t: ^testing.T, shapes: ^Shapes, h: ^History, at: u32, loc := #caller_location) -> int {
+result_count_at :: proc(t: ^testing.T, shapes: ^Shapes, h: ^History, at: record.Epoch, loc := #caller_location) -> int {
 	snap, serr := record.store_at(&h.st, at)
 	if !testing.expectf(t, serr == .None, "store_at(%d): %v", at, serr, loc = loc) {
 		return -1
@@ -390,8 +390,8 @@ test_as_of_verdict_with_epoch_metadata :: proc(t: ^testing.T) {
 	testing.expect_value(t, epoch(t, &h, OWNER_RETRACT_3, kind = .Retract, actor = ops_team, reason = handover), 3)
 
 	// Bisect by hand: the first epoch that violates is 2.
-	first_bad: u32
-	for e in u32(1) ..= 3 {
+	first_bad: record.Epoch
+	for e in record.Epoch(1) ..= 3 {
 		ok, _ := verdict_at(t, &shapes, &h, e)
 		if !ok {
 			first_bad = e
@@ -455,7 +455,7 @@ test_as_of_validation_under_the_shapes_of_the_time :: proc(t: ^testing.T) {
 	// ex:disk conforms to ex:AssetShape in the data graph of `data_at`. The
 	// model owns its terms, so the shapes snapshot is released the moment
 	// compile returns, whichever epoch it was.
-	node_conforms_at :: proc(t: ^testing.T, h: ^History, shapes_at, data_at: u32) -> bool {
+	node_conforms_at :: proc(t: ^testing.T, h: ^History, shapes_at, data_at: record.Epoch) -> bool {
 		shapes: Shapes
 		defer shapes_destroy(&shapes)
 		{

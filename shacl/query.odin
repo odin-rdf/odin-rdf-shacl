@@ -21,16 +21,16 @@ import "record:record"
 @(private)
 Reader :: struct {
 	se:        Session,
-	first_id:  u32,
+	first_id:  record.Term_ID,
 	has_first: bool,
-	rest_id:   u32,
+	rest_id:   record.Term_ID,
 	has_rest:  bool,
-	nil_id:    u32,
+	nil_id:    record.Term_ID,
 	has_nil:   bool,
 }
 
 @(private)
-reader_match :: proc(r: Reader, subject, predicate, object: u32) -> record.Scan {
+reader_match :: proc(r: Reader, subject, predicate, object: record.Term_ID) -> record.Scan {
 	rng := record.snapshot_match(
 		r.se.snap,
 		record.Pattern{s = subject, p = predicate, o = object, g = r.se.graph},
@@ -40,8 +40,8 @@ reader_match :: proc(r: Reader, subject, predicate, object: u32) -> record.Scan 
 
 // objects_of returns the objects of (subject, predicate, *) in the graph.
 @(private)
-objects_of :: proc(r: Reader, subject, predicate: u32) -> [dynamic]u32 {
-	out: [dynamic]u32
+objects_of :: proc(r: Reader, subject, predicate: record.Term_ID) -> [dynamic]record.Term_ID {
+	out: [dynamic]record.Term_ID
 	sc := reader_match(r, subject, predicate, 0)
 	for {
 		id, ok := record.scan_next(&sc)
@@ -56,7 +56,7 @@ objects_of :: proc(r: Reader, subject, predicate: u32) -> [dynamic]u32 {
 // first_object returns the single object of (subject, predicate, *), which is
 // what every read of a functional parameter wants.
 @(private)
-first_object :: proc(r: Reader, subject, predicate: u32) -> (object: u32, found: bool) {
+first_object :: proc(r: Reader, subject, predicate: record.Term_ID) -> (object: record.Term_ID, found: bool) {
 	sc := reader_match(r, subject, predicate, 0)
 	id, ok := record.scan_next(&sc)
 	if !ok {
@@ -71,8 +71,8 @@ first_object :: proc(r: Reader, subject, predicate: u32) -> (object: u32, found:
 // filtering here would cost a set to save a handful of comparisons on a graph
 // this small.
 @(private)
-predicates_of :: proc(r: Reader, subject: u32) -> [dynamic]u32 {
-	out: [dynamic]u32
+predicates_of :: proc(r: Reader, subject: record.Term_ID) -> [dynamic]record.Term_ID {
+	out: [dynamic]record.Term_ID
 	sc := reader_match(r, subject, 0, 0)
 	for {
 		id, ok := record.scan_next(&sc)
@@ -86,8 +86,8 @@ predicates_of :: proc(r: Reader, subject: u32) -> [dynamic]u32 {
 
 // subjects_matching returns the subjects of (*, predicate, object).
 @(private)
-subjects_matching :: proc(r: Reader, predicate, object: u32) -> [dynamic]u32 {
-	out: [dynamic]u32
+subjects_matching :: proc(r: Reader, predicate, object: record.Term_ID) -> [dynamic]record.Term_ID {
+	out: [dynamic]record.Term_ID
 	sc := reader_match(r, 0, predicate, object)
 	for {
 		id, ok := record.scan_next(&sc)
@@ -101,8 +101,8 @@ subjects_matching :: proc(r: Reader, predicate, object: u32) -> [dynamic]u32 {
 
 // subjects_with_predicate returns the subjects of (*, predicate, *).
 @(private)
-subjects_with_predicate :: proc(r: Reader, predicate: u32) -> [dynamic]u32 {
-	out: [dynamic]u32
+subjects_with_predicate :: proc(r: Reader, predicate: record.Term_ID) -> [dynamic]record.Term_ID {
+	out: [dynamic]record.Term_ID
 	sc := reader_match(r, 0, predicate, 0)
 	for {
 		id, ok := record.scan_next(&sc)
@@ -122,11 +122,11 @@ subjects_with_predicate :: proc(r: Reader, predicate: u32) -> [dynamic]u32 {
 // blank nodes, and nothing stops a shapes graph from asserting a cycle, which
 // would otherwise be an infinite loop inside compilation.
 @(private)
-list_items :: proc(r: Reader, head: u32) -> (items: [dynamic]u32, ok: bool) {
+list_items :: proc(r: Reader, head: record.Term_ID) -> (items: [dynamic]record.Term_ID, ok: bool) {
 	if !r.has_first || !r.has_rest {
 		return items, false
 	}
-	visited: map[u32]bool
+	visited: map[record.Term_ID]bool
 	defer delete(visited)
 
 	cell := head
