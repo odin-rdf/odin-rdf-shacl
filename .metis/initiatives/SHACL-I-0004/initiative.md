@@ -4,14 +4,14 @@ level: initiative
 title: "Port to odin-rdf-record: the validator moves off odin-rdf-store"
 short_code: "SHACL-I-0004"
 created_at: 2026-08-20T15:03:02.463825+00:00
-updated_at: 2026-08-20T15:37:32.912099+00:00
+updated_at: 2026-08-20T19:51:40.764993+00:00
 parent: SHACL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -370,4 +370,3 @@ transitions. The exit criteria hold locally (`make test`/`make check` green
 with parser + record as the only dependencies; 98/98; the `Validator`
 demonstrated; CI green on all three runners at `a21d751` against
 `odin-rdf-record@v0.3.0`, run 2026-08-20 18:26Z). No release tagged.
-
