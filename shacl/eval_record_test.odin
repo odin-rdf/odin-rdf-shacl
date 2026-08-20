@@ -4,7 +4,7 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Path evaluation, target resolution, and report ownership against the
 // record store — the assertions that exercised backend-facing behaviour when

@@ -4,7 +4,7 @@ import "base:runtime"
 
 import "core:text/regex"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // The compiled shapes model (SHACL-A-0001).
 //

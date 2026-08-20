@@ -21,11 +21,11 @@ import "core:log"
 import "core:mem"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 import "record:record/ingest"
 
-import shacl "../../shacl"
+import "../../shacl"
 
 // A cyclic graph with every path form over it, for the evaluation guard.
 PATHS :: `

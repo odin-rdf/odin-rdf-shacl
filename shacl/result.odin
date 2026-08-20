@@ -1,6 +1,6 @@
 package shacl
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Validation results.
 //

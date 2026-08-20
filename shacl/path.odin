@@ -1,6 +1,6 @@
 package shacl
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Property-path compilation (SHACL §2.3.1).
 //

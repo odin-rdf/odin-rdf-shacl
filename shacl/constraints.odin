@@ -3,7 +3,7 @@ package shacl
 import "core:strings"
 import "core:text/regex"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Constraint-parameter compilation.
 //

@@ -3,7 +3,7 @@ package shacl
 import "base:runtime"
 import "core:fmt"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // The validation report graph (SHACL §3).
 //

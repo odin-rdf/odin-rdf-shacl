@@ -2,8 +2,8 @@ package w3c
 
 import "core:testing"
 
-import rdf "rdf:rdf"
-import turtle "rdf:rdf/turtle"
+import "rdf:rdf"
+import "rdf:rdf/turtle"
 
 // The comparison tests are written as pairs of Turtle documents rather than
 // hand-built triple arrays: it keeps them readable, it exercises the real

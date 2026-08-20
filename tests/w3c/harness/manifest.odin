@@ -22,8 +22,8 @@ package w3c
 
 import "core:strings"
 
-import rdf "rdf:rdf"
-import turtle "rdf:rdf/turtle"
+import "rdf:rdf"
+import "rdf:rdf/turtle"
 
 // MANIFEST_BASE anchors the manifests' relative IRIs; file names are
 // recovered by stripping it again. A test file is parsed with

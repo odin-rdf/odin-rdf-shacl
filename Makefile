@@ -80,11 +80,23 @@ test: ## Run the full suite
 #
 # bench/ is temporarily out of the vet loop while SHACL-T-0036 rebuilds it
 # against the record store; the guard below comes back with it.
+#
+# The last step is a style rule the vet cannot express: Odin binds an import to
+# the last component of its path, so `import rdf "rdf:rdf"` says nothing that
+# `import "rdf:rdf"` does not, and a reader wonders what the alias is for. The
+# family inherited the habit from its first repositories; it was swept out of
+# this one after SHACL-T-0034 and the grep keeps it out. An alias that differs
+# from the last component (`import rec "record:record"`) is not flagged -- that
+# one is doing something.
 check: ## Vet every package
 	@for pkg in $(PKGS); do \
 		echo "-- $$pkg --"; \
 		odin check $$pkg -no-entry-point -vet -strict-style $(COLL) || exit 1; \
 	done
+	@echo "-- import aliases --"
+	@if grep -rnE '^import ([A-Za-z_]+) "([^"]*[:/])?\1"' --include='*.odin' shacl tests; then \
+		echo "error: redundant import alias -- Odin already binds the last path component"; exit 1; \
+	fi
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.

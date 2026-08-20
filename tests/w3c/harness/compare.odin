@@ -24,7 +24,7 @@ package w3c
 
 import "core:strings"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // report_isomorphic reports whether the two triple lists denote the same
 // graph up to a blank-node bijection. RDF graphs are SETS: exact duplicate

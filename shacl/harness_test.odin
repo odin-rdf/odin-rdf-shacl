@@ -11,7 +11,7 @@ package shacl
 
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 import "record:record/ingest"
 

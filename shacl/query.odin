@@ -2,7 +2,7 @@ package shacl
 
 import "core:strconv"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 
 // The compiler's reads of the shapes graph, and the pure value decoders that

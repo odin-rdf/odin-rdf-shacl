@@ -3,7 +3,7 @@ package shacl
 import "base:runtime"
 import "core:strings"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Term_Table is the model's term storage: it owns a cloned copy of every term
 // the compiled shapes model holds, and frees them all at destroy.

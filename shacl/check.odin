@@ -5,7 +5,7 @@ import "core:text/regex"
 import regex_common "core:text/regex/common"
 import "core:unicode/utf8"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Constraint dispatch: the seam the catalogue initiative filled.
 //

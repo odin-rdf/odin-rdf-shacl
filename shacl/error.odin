@@ -1,6 +1,6 @@
 package shacl
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Errors for ill-formed shapes.
 //

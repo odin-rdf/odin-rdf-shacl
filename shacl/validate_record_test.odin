@@ -4,7 +4,7 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Validation end to end against the record store.
 //

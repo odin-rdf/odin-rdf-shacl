@@ -2,7 +2,7 @@ package shacl
 
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 
 // Suppressed validation, tested where it lives.

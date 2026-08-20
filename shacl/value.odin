@@ -4,7 +4,7 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Lexical-to-value conversion: comparing what literals *mean* rather than what
 // they *are* (SHACL-T-0012).

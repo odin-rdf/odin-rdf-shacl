@@ -2,7 +2,7 @@ package shacl
 
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Lexical-to-value conversion, tested directly (SHACL-T-0012).
 //

@@ -5,7 +5,7 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Validation, end to end but in the small: the behaviours the W3C suite either
 // cannot reach or would report as one opaque report mismatch.

@@ -5,9 +5,9 @@ import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
-import shacl "../../../shacl"
+import "../../../shacl"
 
 // The corpus is vendored but nothing validates it yet, so what this file
 // asserts is that the harness can *read* the suite completely and correctly:

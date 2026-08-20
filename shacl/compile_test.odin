@@ -2,7 +2,7 @@ package shacl
 
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 
 // Compilation against the record store — the structural assertions, plus the

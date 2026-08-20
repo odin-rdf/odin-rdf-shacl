@@ -5,7 +5,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 
-import shacl "../../../shacl"
+import "../../../shacl"
 
 // The conformance run itself: every entry of every enabled directory, against
 // the record store.

@@ -3,7 +3,7 @@ package shacl
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Compilation semantics: the fuller structural suite, ported from the old
 // instantiation package onto the record store (SHACL-T-0032). Each test

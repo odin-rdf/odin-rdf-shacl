@@ -24,11 +24,11 @@ package readme
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 import "record:record/ingest"
 
-import shacl "../../shacl"
+import "../../shacl"
 
 SHAPES :: `
 @prefix sh:  <http://www.w3.org/ns/shacl#> .

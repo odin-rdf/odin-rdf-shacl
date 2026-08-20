@@ -1,6 +1,6 @@
 package shacl
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 
 // The store binding: how the engine reads a data or shapes graph.

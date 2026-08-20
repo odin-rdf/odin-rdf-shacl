@@ -2,7 +2,7 @@ package shacl
 
 import "base:runtime"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Target resolution: a shape's target declarations turned into the focus
 // nodes it applies to (SHACL §2.1.3).

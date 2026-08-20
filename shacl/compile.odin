@@ -2,7 +2,7 @@ package shacl
 
 import "base:runtime"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Shapes-graph compilation.
 //

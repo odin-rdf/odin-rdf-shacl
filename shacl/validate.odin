@@ -2,7 +2,7 @@ package shacl
 
 import "base:runtime"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 
 // Validation: the join point where the compiled model, the targets, the paths,
 // the constraints, and the result stream become one engine (SHACL §3.4).
