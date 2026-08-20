@@ -42,8 +42,7 @@ import rdf "rdf:rdf"
 //	       structure of a non-predicate `sh:resultPath`. Meaningless outside
 //	       the report
 //
-// See `fresh_blank` and `shape_term` for why, and for what a caller supplying
-// its own `Term_Loader` owes.
+// See `fresh_blank` and `shape_term` for why.
 Report :: struct {
 	triples:   [dynamic]rdf.Triple,
 	node:      rdf.Term, // the sh:ValidationReport node
@@ -112,10 +111,10 @@ report_finish :: proc(r: ^Report) {
 
 // report_add folds one result into the graph.
 //
-// `load` materialises the bound node IDs; an unbound node — a `sh:targetNode`
-// the data graph never mentions — carries its term already and needs no
-// lookup, which is the whole reason Node_Ref has that shape.
-report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, load_data: rawptr) {
+// The session materialises the bound node IDs; an unbound node — a
+// `sh:targetNode` the data graph never mentions — carries its term already
+// and needs no lookup, which is the whole reason Node_Ref has that shape.
+report_add :: proc(r: ^Report, s: ^Shapes, result: Result, se: Session) {
 	// Any result at all makes the graph non-conforming (§3.1); severity is
 	// carried into the report but has no say in `sh:conforms`.
 	r.conforms = false
@@ -123,10 +122,10 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 	node := fresh_blank(r)
 	append(&r.triples, triple(r, r.node, rdf.IRI(RESULT), node))
 	append(&r.triples, triple(r, node, rdf.IRI(rdf.RDF_TYPE), rdf.IRI(VALIDATION_RESULT)))
-	append(&r.triples, triple(r, node, rdf.IRI(FOCUS_NODE), node_term(r, result.focus, load, load_data)))
+	append(&r.triples, triple(r, node, rdf.IRI(FOCUS_NODE), node_term(r, result.focus, se)))
 
 	if result.has_value {
-		append(&r.triples, triple(r, node, rdf.IRI(VALUE), node_term(r, result.value, load, load_data)))
+		append(&r.triples, triple(r, node, rdf.IRI(VALUE), node_term(r, result.value, se)))
 	}
 
 	// `sh:resultPath` comes from the shape's compiled path, except for the one
@@ -136,7 +135,7 @@ report_add :: proc(r: ^Report, s: ^Shapes, result: Result, load: Term_Loader, lo
 	if result.has_path_predicate {
 		append(
 			&r.triples,
-			triple(r, node, rdf.IRI(RESULT_PATH), node_term(r, result.path_predicate, load, load_data)),
+			triple(r, node, rdf.IRI(RESULT_PATH), node_term(r, result.path_predicate, se)),
 		)
 	} else if result.path >= 0 {
 		append(&r.triples, triple(r, node, rdf.IRI(RESULT_PATH), write_path(r, s, result.path)))
@@ -241,18 +240,38 @@ write_list :: proc(r: ^Report, s: ^Shapes, operands: []int) -> rdf.Term {
 	return head
 }
 
-// node_term resolves a Node_Ref into a term the report owns.
+// node_term resolves a Node_Ref into a term the report owns. The decoded
+// term is borrowed (see `session_term`) and the intern is the copy that
+// outlives it.
 @(private = "file")
-node_term :: proc(r: ^Report, ref: Node_Ref, load: Term_Loader, load_data: rawptr) -> rdf.Term {
+node_term :: proc(r: ^Report, ref: Node_Ref, se: Session) -> rdf.Term {
 	if !ref.bound {
 		return intern(&r.terms, ref.term)
 	}
-	term, owned := load(load_data, ref.id, r.allocator)
-	result := intern(&r.terms, term)
-	if owned {
-		rdf.destroy_term(term, r.allocator)
+	buf: Term_Buf
+	term, ok := session_term(se, ref.id, buf[:])
+	if !ok {
+		return nil
 	}
-	return result
+	return intern(&r.terms, term)
+}
+
+// Report_Sink is `report_add` as a Result_Visitor. It never stops the
+// stream: a report wants every result, and a short report is a wrong one.
+// `Conformance` is the consumer that stops.
+Report_Sink :: struct {
+	report: ^Report,
+	shapes: ^Shapes,
+	se:     Session,
+}
+
+// report_sink_visitor is the Result_Visitor to pass with a `^Report_Sink` as
+// its data. `validate_report` wires it up for you; use it directly only to
+// fold results into a report while doing something else with them too.
+report_sink_visitor :: proc(data: rawptr, result: Result) -> bool {
+	sink := cast(^Report_Sink)data
+	report_add(sink.report, sink.shapes, result, sink.se)
+	return true
 }
 
 // shape_term resolves a **shapes-graph** term into the report's own storage.
@@ -315,10 +334,9 @@ shape_term :: proc(r: ^Report, term: rdf.Term) -> rdf.Term {
 // invisible to any comparison that only counts triples.
 //
 // The residual contract, since a prefix is a convention and not a proof:
-// borrowed blank-node labels must not begin with `r` or `s`. Both shipped
-// backends generate `b` followed by decimal digits and nothing else, so it holds
-// by construction there; a caller writing its own `Term_Loader` is the one case
-// that has to know.
+// data- and shapes-graph blank-node labels must not begin with `r` (nor, on
+// the data side, `s`). The record store interns labels as given, so the
+// caller's ingest `blank_prefix` is where that is guaranteed.
 //
 // Beyond that the labels carry no meaning — report comparison is by
 // isomorphism — and they are sequential only because a counter is the cheapest

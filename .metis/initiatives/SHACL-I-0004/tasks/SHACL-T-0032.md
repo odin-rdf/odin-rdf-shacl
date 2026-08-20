@@ -1,18 +1,17 @@
 ---
-id: the-core-ports-u32-ids-records
+id: the-core-ports-u32-ids-record-s
 level: task
 title: "The core ports: u32 ids, record's read API bound directly, the seams collapsed, shacl/kvstore and store: deleted"
 short_code: "SHACL-T-0032"
-created_at: 2026-08-20T15:19:52.000000+00:00
-updated_at: 2026-08-20T15:19:52.000000+00:00
+created_at: 2026-08-20T15:19:52+00:00
+updated_at: 2026-08-20T16:29:59.722360+00:00
 parent: SHACL-I-0004
-blocked_by:
-  - SHACL-T-0031
+blocked_by: [SHACL-T-0031]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -95,4 +94,57 @@ not weaken it (it is what T-0034 stands on).
 
 ## Status Updates
 
-*To be added during implementation*
+**2026-08-20 — implemented, all criteria met; awaiting review.**
+
+**One package.** Everything lives in `shacl`, importing `rdf` and `record`
+only. The parapoly compile seam, the `Access` struct, `Term_Loader`/
+`Term_Finder`, and `shacl/kvstore` (807 library lines, ~5,100 test lines)
+are gone; the new `shacl/session.odin` is the one place the store is
+touched — `Session{snap, graph}` plus the session verbs (`session_term`,
+`session_resolve`, `session_kind`, `session_scan`, `session_step`,
+`session_outgoing`) with the graph bound into every pattern. The error
+plumbing the kvstore instantiation existed for (session error slots,
+`session_error` checks at every entry point) is deleted rather than ported:
+record reads cannot fail.
+
+**Ids are `u32` native.** Sentinels are record's (`0` unbound,
+`MATCH_DEFAULT_GRAPH`); `id_kind`'s call sites became `session_kind` over
+`record.snapshot_kind`. **Consumer-range answer** (AC): shacl computes no
+term ids of its own; it uses exactly one consumer-range value —
+`GRAPH_ABSENT :: record.CONSUMER_ID_FIRST`, the graph binding of a session
+whose graph label the store has never seen, so such a session reads nothing
+without a special case (and without the `0`-means-everything hazard).
+
+**Decisions taken in flight, recorded:** `session_term` follows record's
+borrow contract (arena or caller buffer, `Term_Buf`); the split-IRI
+join-allocation caveat is documented at the wrapper — apply-written stores
+never contain one. `session_init_txn` is deleted; its role returns as the
+`Validator` in T-0034, and the README's validate-before-commit example went
+with it (a note in tests/readme points at T-0034). The suppress tests' fake
+`Access` backend (its triple list was empty) is now a real one-quad `Mem_FS`
+store. `as_of_test`/`txn_test`/`link_test` deleted with kvstore — as-of
+re-expressed at T-0035, the txn scenarios at T-0034, linkage moot.
+
+**A third term-identity shift, found by the suite** (beyond the two the
+handoff listed): **inlineable literals are always resolvable** — a small
+canonical integer or canonical date named by `sh:targetNode` but absent
+from the data graph is *bound* on record (the inline encoding gives it an
+id without the dictionary), where the old store answered unbound. Four
+validate-semantics tests' expectations carried the old representation in
+their `?` markers and were updated; **no verdict changed** (value
+comparisons decide, and they are representation-blind). Feeds T-0033's
+corpus check and T-0037's docs pass.
+
+**Build:** `purity` retired (target and `tests/purity` deleted — nothing
+left to guard, by decision); `tests/w3c/harness` and `bench/` temporarily
+out of `PKGS`/`check` with Makefile notes naming T-0033 and T-0036;
+`store:` stays in `COLL`/`ols.json`/CI until T-0033 deletes those two
+directories' last store imports. `tests/guards` (now also covering the
+record store lifecycle under the tracker — net zero) and `tests/readme`
+ported.
+
+**Verified:** `make check` green; `make test` green at both widths — shacl
+109 tests, guards 12, readme 5, smoke 1 — under
+`ODIN_TEST_FAIL_ON_BAD_MEMORY`; `odin check -target:windows_amd64` clean
+over the merged package; no `store:store` import remains in any compiled
+package.

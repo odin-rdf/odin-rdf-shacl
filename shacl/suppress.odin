@@ -39,7 +39,7 @@ package shacl
 //     says in five lines.
 //
 // What is shared is therefore everything except the result stream: the model,
-// the bindings, the access, the allocator, the subclass-closure cache, the
+// the bindings, the session, the allocator, the subclass-closure cache, the
 // recursion set, and `failure`. What is saved and restored is `visit`,
 // `visit_data`, and `stopped`.
 //
@@ -144,10 +144,10 @@ node_conforms :: proc(v: ^Validation, shape_index: int, focus: Focus_Node) -> bo
 // tasks later, and a capability with no reachable surface would go that long
 // with no backend-level test at all.
 //
-// `focus` names the node. A caller with an `rdf.Term` should use the
-// instantiation package's wrapper, which resolves it through the store's
-// non-interning lookup — a term the data graph never mentions is still a
-// perfectly good focus node, and still conforms or does not.
+// `focus` names the node. A caller with an `rdf.Term` builds one with
+// `node_focus`, which resolves it against the session's snapshot — a term the
+// data graph never mentions is still a perfectly good focus node, and still
+// conforms or does not.
 //
 // **The boolean is meaningless when the Failure is not `.None`**, exactly as it
 // is for `conforms`: a failure means the processor could not answer, which is
@@ -155,7 +155,7 @@ node_conforms :: proc(v: ^Validation, shape_index: int, focus: Focus_Node) -> bo
 conforms_node :: proc(
 	s: ^Shapes,
 	b: ^Bindings,
-	access: Access,
+	se: Session,
 	shape_index: int,
 	focus: Focus_Node,
 	allocator := context.allocator,
@@ -167,9 +167,9 @@ conforms_node :: proc(
 		return false, .None
 	}
 	v := Validation {
-		s      = s,
-		b      = b,
-		access = access,
+		s  = s,
+		b  = b,
+		se = se,
 	}
 	validation_init(&v, allocator)
 	defer validation_destroy(&v)

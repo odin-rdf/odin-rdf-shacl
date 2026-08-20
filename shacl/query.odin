@@ -3,59 +3,52 @@ package shacl
 import "core:strconv"
 
 import rdf "rdf:rdf"
-import store "store:store"
+import "record:record"
 
 // The compiler's reads of the shapes graph, and the pure value decoders that
 // go with them.
 //
-// **Why a Reader struct rather than loose parameters.** A generic procedure
-// can infer `$It` from a `$MATCH` constant it is passed directly, but it
-// cannot then *forward* that constant to another generic procedure: the
-// callee would be introducing `$It` in the return type of a procedure-typed
-// parameter, and the compiler reports it cannot determine the complete type.
-// Binding both `$D` and `$It` on an earlier value parameter fixes it, which is
-// exactly why odin-rdf-sparql's helpers take `e: ^Exec($D, $It)` first. Reader
-// is this repo's equivalent, and it carries the dataset, the graph, and the
-// RDF-list vocabulary that nearly every read needs anyway.
-//
-// Every procedure here is **flat**: none calls another generic procedure and
-// none calls itself, which is the discipline SPARQL-T-0011's compiler hang
-// imposes. All the recursion lives in explicit worklists in `compile` and
-// `compile_path`.
+// Reader carries the session and the RDF-list vocabulary that nearly every
+// read needs. It was a parametric struct threading compile-time `$MATCH`
+// procedure constants when the backend was a seam; with odin-rdf-record bound
+// directly (SHACL-I-0004) every helper is an ordinary procedure and the
+// generic plumbing — and the compiler-hang discipline it required
+// (SPARQL-T-0011) — is gone with it.
 //
 // Each read returns a fresh dynamic array the caller deletes. Materializing
 // IDs into terms is the caller's job, because only the caller knows whether a
 // result is being kept in the model or inspected and dropped.
 @(private)
-Reader :: struct($D: typeid, $It: typeid) {
-	dataset:   ^D,
-	graph:     store.Term_ID,
-	first_id:  store.Term_ID,
+Reader :: struct {
+	se:        Session,
+	first_id:  u32,
 	has_first: bool,
-	rest_id:   store.Term_ID,
+	rest_id:   u32,
 	has_rest:  bool,
-	nil_id:    store.Term_ID,
+	nil_id:    u32,
 	has_nil:   bool,
+}
+
+@(private)
+reader_match :: proc(r: Reader, subject, predicate, object: u32) -> record.Scan {
+	rng := record.snapshot_match(
+		r.se.snap,
+		record.Pattern{s = subject, p = predicate, o = object, g = r.se.graph},
+	)
+	return record.range_iter(rng, record.Filter{origin = .Any})
 }
 
 // objects_of returns the objects of (subject, predicate, *) in the graph.
 @(private)
-objects_of :: proc(
-	r: Reader($D, $It),
-	subject, predicate: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> [dynamic]store.Term_ID {
-	out: [dynamic]store.Term_ID
-	it := MATCH(r.dataset, store.Match_Pattern{subject, predicate, store.WILDCARD, r.graph})
-	defer DESTROY(&it)
+objects_of :: proc(r: Reader, subject, predicate: u32) -> [dynamic]u32 {
+	out: [dynamic]u32
+	sc := reader_match(r, subject, predicate, 0)
 	for {
-		q, ok := NEXT(&it)
+		id, ok := record.scan_next(&sc)
 		if !ok {
 			break
 		}
-		append(&out, q[store.QUAD_O])
+		append(&out, record.snapshot_fact(r.se.snap, id).o)
 	}
 	return out
 }
@@ -63,23 +56,13 @@ objects_of :: proc(
 // first_object returns the single object of (subject, predicate, *), which is
 // what every read of a functional parameter wants.
 @(private)
-first_object :: proc(
-	r: Reader($D, $It),
-	subject, predicate: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> (
-	object: store.Term_ID,
-	found: bool,
-) {
-	it := MATCH(r.dataset, store.Match_Pattern{subject, predicate, store.WILDCARD, r.graph})
-	defer DESTROY(&it)
-	q, ok := NEXT(&it)
+first_object :: proc(r: Reader, subject, predicate: u32) -> (object: u32, found: bool) {
+	sc := reader_match(r, subject, predicate, 0)
+	id, ok := record.scan_next(&sc)
 	if !ok {
-		return store.WILDCARD, false
+		return 0, false
 	}
-	return q[store.QUAD_O], true
+	return record.snapshot_fact(r.se.snap, id).o, true
 }
 
 // predicates_of returns the predicates of (subject, *, *) in the graph, with
@@ -88,66 +71,45 @@ first_object :: proc(
 // filtering here would cost a set to save a handful of comparisons on a graph
 // this small.
 @(private)
-predicates_of :: proc(
-	r: Reader($D, $It),
-	subject: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> [dynamic]store.Term_ID {
-	out: [dynamic]store.Term_ID
-	it := MATCH(r.dataset, store.Match_Pattern{subject, store.WILDCARD, store.WILDCARD, r.graph})
-	defer DESTROY(&it)
+predicates_of :: proc(r: Reader, subject: u32) -> [dynamic]u32 {
+	out: [dynamic]u32
+	sc := reader_match(r, subject, 0, 0)
 	for {
-		q, ok := NEXT(&it)
+		id, ok := record.scan_next(&sc)
 		if !ok {
 			break
 		}
-		append(&out, q[store.QUAD_P])
+		append(&out, record.snapshot_fact(r.se.snap, id).p)
 	}
 	return out
 }
 
 // subjects_matching returns the subjects of (*, predicate, object).
 @(private)
-subjects_matching :: proc(
-	r: Reader($D, $It),
-	predicate, object: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> [dynamic]store.Term_ID {
-	out: [dynamic]store.Term_ID
-	it := MATCH(r.dataset, store.Match_Pattern{store.WILDCARD, predicate, object, r.graph})
-	defer DESTROY(&it)
+subjects_matching :: proc(r: Reader, predicate, object: u32) -> [dynamic]u32 {
+	out: [dynamic]u32
+	sc := reader_match(r, 0, predicate, object)
 	for {
-		q, ok := NEXT(&it)
+		id, ok := record.scan_next(&sc)
 		if !ok {
 			break
 		}
-		append(&out, q[store.QUAD_S])
+		append(&out, record.snapshot_fact(r.se.snap, id).s)
 	}
 	return out
 }
 
 // subjects_with_predicate returns the subjects of (*, predicate, *).
 @(private)
-subjects_with_predicate :: proc(
-	r: Reader($D, $It),
-	predicate: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> [dynamic]store.Term_ID {
-	out: [dynamic]store.Term_ID
-	it := MATCH(r.dataset, store.Match_Pattern{store.WILDCARD, predicate, store.WILDCARD, r.graph})
-	defer DESTROY(&it)
+subjects_with_predicate :: proc(r: Reader, predicate: u32) -> [dynamic]u32 {
+	out: [dynamic]u32
+	sc := reader_match(r, 0, predicate, 0)
 	for {
-		q, ok := NEXT(&it)
+		id, ok := record.scan_next(&sc)
 		if !ok {
 			break
 		}
-		append(&out, q[store.QUAD_S])
+		append(&out, record.snapshot_fact(r.se.snap, id).s)
 	}
 	return out
 }
@@ -160,20 +122,11 @@ subjects_with_predicate :: proc(
 // blank nodes, and nothing stops a shapes graph from asserting a cycle, which
 // would otherwise be an infinite loop inside compilation.
 @(private)
-list_items :: proc(
-	r: Reader($D, $It),
-	head: store.Term_ID,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> (
-	items: [dynamic]store.Term_ID,
-	ok: bool,
-) {
+list_items :: proc(r: Reader, head: u32) -> (items: [dynamic]u32, ok: bool) {
 	if !r.has_first || !r.has_rest {
 		return items, false
 	}
-	visited: map[store.Term_ID]bool
+	visited: map[u32]bool
 	defer delete(visited)
 
 	cell := head
@@ -186,31 +139,13 @@ list_items :: proc(
 		}
 		visited[cell] = true
 
-		member: store.Term_ID
-		found_first := false
-		{
-			it := MATCH(r.dataset, store.Match_Pattern{cell, r.first_id, store.WILDCARD, r.graph})
-			defer DESTROY(&it)
-			if q, more := NEXT(&it); more {
-				member = q[store.QUAD_O]
-				found_first = true
-			}
-		}
+		member, found_first := first_object(r, cell, r.first_id)
 		if !found_first {
 			return items, false
 		}
 		append(&items, member)
 
-		next_cell: store.Term_ID
-		found_rest := false
-		{
-			it := MATCH(r.dataset, store.Match_Pattern{cell, r.rest_id, store.WILDCARD, r.graph})
-			defer DESTROY(&it)
-			if q, more := NEXT(&it); more {
-				next_cell = q[store.QUAD_O]
-				found_rest = true
-			}
-		}
+		next_cell, found_rest := first_object(r, cell, r.rest_id)
 		if !found_rest {
 			return items, false
 		}
@@ -218,7 +153,7 @@ list_items :: proc(
 	}
 }
 
-// ---- Pure value decoders. No store, no allocation, no generics. ----------
+// ---- Pure value decoders. No store, no allocation. -----------------------
 
 // boolean_value reads an xsd:boolean literal. `sh:deactivated` takes
 // "true"/"false"; "1"/"0" are accepted too, since xsd:boolean's lexical space

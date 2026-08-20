@@ -1,4 +1,4 @@
-package shacl_kvstore
+package shacl
 
 import "core:fmt"
 import "core:slice"
@@ -6,9 +6,6 @@ import "core:strings"
 import "core:testing"
 
 import rdf "rdf:rdf"
-import kvstore "store:store/kvstore"
-
-import shacl ".."
 
 // Validation, end to end but in the small: the behaviours the W3C suite either
 // cannot reach or would report as one opaque report mismatch.
@@ -25,10 +22,10 @@ import shacl ".."
 
 @(private = "file")
 Fixture :: struct {
-	db:       ^kvstore.Store,
-	session:  Session,
-	shapes:   shacl.Shapes,
-	bindings: shacl.Bindings,
+	db:       Test_DB,
+	se:       Session,
+	shapes:   Shapes,
+	bindings: Bindings,
 }
 
 @(private = "file")
@@ -36,48 +33,36 @@ fixture_init :: proc(t: ^testing.T, f: ^Fixture, shapes_src, data_src: string) -
 	// The shapes store is built, read, and destroyed before the data store
 	// exists, so nothing the model hands out can be borrowing from it.
 	{
-		db, open_err := kvstore.open_ephemeral()
-		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
+		sdb: Test_DB
+		defer tdb_close(&sdb)
+		if !tdb_open(t, &sdb) {
 			return false
 		}
-		defer kvstore.close(db)
-
-		_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)shapes_src)
-		if !testing.expectf(t, parse_err.message == "" && load_err == nil, "shapes graph: %s", parse_err.message) {
+		if !tdb_load(t, &sdb, shapes_src) {
 			return false
 		}
-		session: Session
-		session_init(&session, db)
-		err := compile(&f.shapes, &session)
-		if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
-			return false
-		}
-		if !testing.expectf(t, session_error(&session) == nil, "store read failed while compiling") {
+		err := compile(&f.shapes, tdb_session(&sdb))
+		if !testing.expectf(t, err.kind == .None, "compile: %s", error_message(err.kind)) {
 			return false
 		}
 	}
 
-	db, open_err := kvstore.open_ephemeral()
-	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
+	if !tdb_open(t, &f.db) {
 		return false
 	}
-	f.db = db
-	_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)data_src)
-	if !testing.expectf(t, parse_err.message == "" && load_err == nil, "data graph: %s", parse_err.message) {
+	if !tdb_load(t, &f.db, data_src) {
 		return false
 	}
-	session_init(&f.session, db)
-	bind(&f.bindings, &f.shapes, &f.session)
+	f.se = tdb_session(&f.db)
+	bindings_init(&f.bindings, &f.shapes, f.se)
 	return true
 }
 
 @(private = "file")
 fixture_destroy :: proc(f: ^Fixture) {
-	shacl.bindings_destroy(&f.bindings)
-	shacl.shapes_destroy(&f.shapes)
-	if f.db != nil {
-		kvstore.close(f.db)
-	}
+	bindings_destroy(&f.bindings)
+	shapes_destroy(&f.shapes)
+	tdb_close(&f.db)
 }
 
 // Seen records what the visitor was handed, materialised into strings so an
@@ -101,13 +86,13 @@ seen_destroy :: proc(s: ^Seen) {
 // to pin every decision the dispatcher makes and short enough to write by hand
 // in an expectation.
 @(private = "file")
-record :: proc(data: rawptr, result: shacl.Result) -> bool {
+record :: proc(data: rawptr, result: Result) -> bool {
 	s := cast(^Seen)data
 	sb := strings.builder_make()
 
-	write_term(&sb, shacl.result_source_shape(&s.fixture.shapes, result))
+	write_term(&sb, result_source_shape(&s.fixture.shapes, result))
 	strings.write_byte(&sb, '|')
-	strings.write_string(&sb, local_name(shacl.component_iri(result.component)))
+	strings.write_string(&sb, local_name(component_iri(result.component)))
 	strings.write_byte(&sb, '|')
 	write_node(s, &sb, result.focus)
 	strings.write_byte(&sb, '|')
@@ -133,13 +118,13 @@ record :: proc(data: rawptr, result: shacl.Result) -> bool {
 }
 
 @(private = "file")
-write_node :: proc(s: ^Seen, sb: ^strings.Builder, ref: shacl.Node_Ref) {
+write_node :: proc(s: ^Seen, sb: ^strings.Builder, ref: Node_Ref) {
 	if !ref.bound {
 		strings.write_string(sb, "?")
 		write_term(sb, ref.term)
 		return
 	}
-	write_term(sb, session_term(&s.fixture.session, ref.id))
+	write_term(sb, test_term(s.fixture.se, ref.id))
 }
 
 @(private = "file")
@@ -187,13 +172,14 @@ expect_results :: proc(t: ^testing.T, seen: ^Seen, want: []string, what: string,
 }
 
 @(private = "file")
-validate_into :: proc(f: ^Fixture, seen: ^Seen) -> shacl.Failure {
+validate_into :: proc(f: ^Fixture, seen: ^Seen) -> Failure {
 	seen.fixture = f
-	return validate(&f.shapes, &f.bindings, &f.session, record, seen)
+	return validate(&f.shapes, &f.bindings, f.se, record, seen)
 }
 
 // ---- The dispatch seam ---------------------------------------------------
 
+@(private = "file")
 DISPATCH_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
@@ -212,6 +198,7 @@ ex:ValuesP a sh:PropertyShape ; sh:path ex:p ;
 	sh:hasValue ex:z .
 `
 
+@(private = "file")
 DISPATCH_DATA :: `
 @prefix ex: <http://example.org/> .
 
@@ -233,7 +220,7 @@ test_constraint_dispatch :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -253,6 +240,7 @@ test_constraint_dispatch :: proc(t: ^testing.T) {
 
 // ---- Absence: emptiness on a path, failure in a constraint ---------------
 
+@(private = "file")
 ABSENCE_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -262,6 +250,7 @@ ex:S a sh:NodeShape ; sh:targetNode ex:n ;
 	sh:property [ sh:path ex:never_mentioned ; sh:minCount 1 ] .
 `
 
+@(private = "file")
 ABSENCE_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:n ex:p ex:v .
@@ -279,7 +268,7 @@ test_absent_terms_mean_opposite_things :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -297,6 +286,7 @@ test_absent_terms_mean_opposite_things :: proc(t: ^testing.T) {
 
 // ---- A focus node the data graph never mentions --------------------------
 
+@(private = "file")
 UNBOUND_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -309,6 +299,7 @@ ex:S_prop a sh:NodeShape ; sh:targetNode ex:absent ;
 	sh:property [ sh:path ex:p ; sh:minCount 1 ] .
 `
 
+@(private = "file")
 UNBOUND_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:something ex:p ex:other .
@@ -328,7 +319,7 @@ test_unbound_focus_node_is_validated :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -347,6 +338,7 @@ test_unbound_focus_node_is_validated :: proc(t: ^testing.T) {
 
 // ---- sh:deactivated ------------------------------------------------------
 
+@(private = "file")
 DEACTIVATED_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -363,6 +355,7 @@ ex:On a sh:NodeShape ; sh:targetNode ex:n ; sh:deactivated false ;
 	sh:class ex:NeverMentioned .
 `
 
+@(private = "file")
 DEACTIVATED_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:n ex:p ex:v .
@@ -380,7 +373,7 @@ test_deactivated_shapes_are_silent :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	// ex:On is a node shape, so its value node is its focus node.
 	expect_results(t, &seen, []string{"On|ClassConstraintComponent|n|n"}, "deactivated")
@@ -388,6 +381,7 @@ test_deactivated_shapes_are_silent :: proc(t: ^testing.T) {
 
 // ---- sh:severity ---------------------------------------------------------
 
+@(private = "file")
 SEVERITY_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -400,6 +394,7 @@ ex:Custom a sh:NodeShape ; sh:targetNode ex:n ; sh:severity ex:Catastrophe ;
 	sh:class ex:NeverMentioned .
 `
 
+@(private = "file")
 SEVERITY_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:n ex:p ex:v .
@@ -427,14 +422,14 @@ test_severity_is_any_iri_and_always_breaks_conformance :: proc(t: ^testing.T) {
 	Severities :: struct {
 		warning, info, custom, other: int,
 	}
-	count :: proc(data: rawptr, result: shacl.Result) -> bool {
+	count :: proc(data: rawptr, result: Result) -> bool {
 		c := cast(^Severities)data
 		switch {
-		case shacl.severity_is(result.severity, shacl.WARNING):
+		case severity_is(result.severity, WARNING):
 			c.warning += 1
-		case shacl.severity_is(result.severity, shacl.INFO):
+		case severity_is(result.severity, INFO):
 			c.info += 1
-		case shacl.severity_is(result.severity, "http://example.org/Catastrophe"):
+		case severity_is(result.severity, "http://example.org/Catastrophe"):
 			c.custom += 1
 		case:
 			c.other += 1
@@ -445,21 +440,22 @@ test_severity_is_any_iri_and_always_breaks_conformance :: proc(t: ^testing.T) {
 	counts: Severities
 	testing.expect_value(
 		t,
-		validate(&f.shapes, &f.bindings, &f.session, count, &counts),
-		shacl.Failure.None,
+		validate(&f.shapes, &f.bindings, f.se, count, &counts),
+		Failure.None,
 	)
 	testing.expect_value(t, counts.warning, 1)
 	testing.expect_value(t, counts.info, 1)
 	testing.expect_value(t, counts.custom, 1)
 	testing.expect_value(t, counts.other, 0)
 
-	got, failure := conforms(&f.shapes, &f.bindings, &f.session)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	got, failure := conforms(&f.shapes, &f.bindings, f.se)
+	testing.expect_value(t, failure, Failure.None)
 	testing.expectf(t, !got, "any result at all makes a graph non-conforming (§3.1)")
 }
 
 // ---- Early exit ----------------------------------------------------------
 
+@(private = "file")
 EARLY_EXIT_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -468,6 +464,7 @@ ex:S a sh:NodeShape ; sh:targetSubjectsOf ex:p ;
 	sh:class ex:NeverMentioned .
 `
 
+@(private = "file")
 EARLY_EXIT_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:n1 ex:p ex:v . ex:n2 ex:p ex:v . ex:n3 ex:p ex:v .
@@ -491,23 +488,24 @@ test_early_exit_stops_the_traversal :: proc(t: ^testing.T) {
 
 	all: Seen
 	defer seen_destroy(&all)
-	testing.expect_value(t, validate_into(&f, &all), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &all), Failure.None)
 	testing.expect_value(t, len(all.lines), 6)
 
 	stopped := Seen {
 		stop_at = 1,
 	}
 	defer seen_destroy(&stopped)
-	testing.expect_value(t, validate_into(&f, &stopped), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &stopped), Failure.None)
 	testing.expect_value(t, len(stopped.lines), 1)
 
-	got, failure := conforms(&f.shapes, &f.bindings, &f.session)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	got, failure := conforms(&f.shapes, &f.bindings, f.se)
+	testing.expect_value(t, failure, Failure.None)
 	testing.expectf(t, !got, "a violating graph must not conform")
 }
 
 // ---- Recursion -----------------------------------------------------------
 
+@(private = "file")
 RECURSIVE_SHAPES :: `
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <http://example.org/> .
@@ -517,6 +515,7 @@ ex:S a sh:PropertyShape ; sh:targetNode ex:a ;
 	sh:property ex:S .
 `
 
+@(private = "file")
 RECURSIVE_DATA :: `
 @prefix ex: <http://example.org/> .
 ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:a .
@@ -541,12 +540,12 @@ test_recursive_shape_is_a_reported_failure :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.Recursive_Shape)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.Recursive_Shape)
 
 	// A failure is not a conformance answer, so nothing may be read from the
 	// boolean — but the call must still return rather than run forever.
-	_, failure := conforms(&f.shapes, &f.bindings, &f.session)
-	testing.expect_value(t, failure, shacl.Failure.Recursive_Shape)
+	_, failure := conforms(&f.shapes, &f.bindings, f.se)
+	testing.expect_value(t, failure, Failure.Recursive_Shape)
 }
 
 // A shape reached twice as a *sibling* is not recursion: the on-stack set is
@@ -572,7 +571,7 @@ test_a_reused_shape_is_not_recursion :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 	expect_results(t, &seen, []string{"Shared|MinCountConstraintComponent|n|-", "Shared|MinCountConstraintComponent|n|-"}, "shared shape")
 }
 
@@ -599,18 +598,18 @@ test_conforming_graph_reports_only_its_head :: proc(t: ^testing.T) {
 		return
 	}
 
-	report: shacl.Report
-	shacl.report_init(&report)
-	defer shacl.report_destroy(&report)
+	report: Report
+	report_init(&report)
+	defer report_destroy(&report)
 
 	testing.expect_value(
 		t,
-		validate_report(&report, &f.shapes, &f.bindings, &f.session),
-		shacl.Failure.None,
+		validate_report(&report, &f.shapes, &f.bindings, f.se),
+		Failure.None,
 	)
-	testing.expect(t, shacl.report_conforms(&report))
+	testing.expect(t, report_conforms(&report))
 	// rdf:type sh:ValidationReport, and sh:conforms true. Nothing else.
-	testing.expect_value(t, len(shacl.report_triples(&report)), 2)
+	testing.expect_value(t, len(report_triples(&report)), 2)
 }
 
 // ---- conforms_node: §3.4's question about one node and one shape ----------
@@ -620,8 +619,8 @@ test_conforming_graph_reports_only_its_head :: proc(t: ^testing.T) {
 // does not stop an outer traversal — are asserted in `shacl/suppress_test.odin`
 // against a hand-built model, because they are about an in-flight `Validation`
 // that no public entry point exposes. What is asserted here is that the entry
-// point answers correctly over a real store, at both `Term_ID` widths, and that
-// asking does not disturb an ordinary validation of the same model.
+// point answers correctly over a real store, and that asking does not disturb
+// an ordinary validation of the same model.
 
 @(private = "file")
 SUPPRESS_SHAPES :: PREFIX + `
@@ -641,8 +640,8 @@ ex:b ex:q "y" .
 `
 
 @(private = "file")
-shape_index :: proc(s: ^shacl.Shapes, iri: string) -> int {
-	i, _ := shacl.shape_index_of(s, rdf.IRI(iri))
+shape_index :: proc(s: ^Shapes, iri: string) -> int {
+	i, _ := shape_index_of(s, rdf.IRI(iri))
 	return i
 }
 
@@ -663,32 +662,32 @@ test_conforms_node_answers_for_a_named_shape :: proc(t: ^testing.T) {
 	a := rdf.Term(rdf.IRI("http://example.org/a"))
 	b := rdf.Term(rdf.IRI("http://example.org/b"))
 
-	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.session, a, kind)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, f.se, kind, node_focus(f.se, a))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, conforms, "ex:a is an IRI and satisfies sh:nodeKind sh:IRI")
 
 	// The nested case: conformance counts the sh:property shapes below the
 	// named shape, not only its own constraints. ex:a has an ex:p, ex:b does
 	// not.
-	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, a, nested)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, f.se, nested, node_focus(f.se, a))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, conforms, "ex:a has one ex:p string value")
 
-	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, b, nested)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, f.se, nested, node_focus(f.se, b))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, !conforms, "ex:b has no ex:p at all, so sh:minCount 1 violates")
 
 	// A node the data graph never mentions is still a focus node: unbound, and
 	// its path reaches nothing, which is emptiness and violates the cardinality.
 	absent := rdf.Term(rdf.IRI("http://example.org/never_mentioned"))
-	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, absent, nested)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, f.se, nested, node_focus(f.se, absent))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, !conforms, "an absent node reaches nothing through ex:p")
 
 	// An out-of-range index answers "does not conform" rather than reading
 	// memory it has no business reading.
-	conforms, failure = conforms_node(&f.shapes, &f.bindings, &f.session, a, len(f.shapes.shapes))
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure = conforms_node(&f.shapes, &f.bindings, f.se, len(f.shapes.shapes), node_focus(f.se, a))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, !conforms, "an out-of-range shape index is not a conformance")
 }
 
@@ -711,14 +710,14 @@ test_conforms_node_does_not_disturb_a_validation :: proc(t: ^testing.T) {
 	defer seen_destroy(&before)
 	testing.expect_value(
 		t,
-		validate(&f.shapes, &f.bindings, &f.session, record, &before),
-		shacl.Failure.None,
+		validate(&f.shapes, &f.bindings, f.se, record, &before),
+		Failure.None,
 	)
 
 	// This produces results internally — ex:b fails the nested shape — and none
 	// of them may show up anywhere.
-	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.session, b, nested)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, f.se, nested, node_focus(f.se, b))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, !conforms, "fixture: ex:b must fail the nested shape")
 
 	after: Seen
@@ -726,8 +725,8 @@ test_conforms_node_does_not_disturb_a_validation :: proc(t: ^testing.T) {
 	defer seen_destroy(&after)
 	testing.expect_value(
 		t,
-		validate(&f.shapes, &f.bindings, &f.session, record, &after),
-		shacl.Failure.None,
+		validate(&f.shapes, &f.bindings, f.se, record, &after),
+		Failure.None,
 	)
 
 	if !testing.expect_value(t, len(after.lines), len(before.lines)) {
@@ -796,7 +795,7 @@ test_validate_node_agrees_with_a_whole_validation :: proc(t: ^testing.T) {
 
 	whole: Seen
 	defer seen_destroy(&whole)
-	testing.expect_value(t, validate_into(&f, &whole), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &whole), Failure.None)
 	// The fixture is only useful if it produces results for more than one node.
 	testing.expect(t, len(whole.lines) >= 2, "fixture: the model must violate for several nodes")
 
@@ -813,9 +812,8 @@ test_validate_node_agrees_with_a_whole_validation :: proc(t: ^testing.T) {
 		got: Seen
 		got.fixture = &f
 		defer seen_destroy(&got)
-		failure := validate_node(&f.shapes, &f.bindings, &f.session, node, root, record, &got)
-		testing.expect_value(t, failure, shacl.Failure.None)
-		testing.expect(t, session_error(&f.session) == nil)
+		failure := validate_node(&f.shapes, &f.bindings, f.se, root, node_focus(f.se, node), record, &got)
+		testing.expect_value(t, failure, Failure.None)
 
 		if !testing.expectf(
 			t,
@@ -852,8 +850,8 @@ test_validate_node_stops_and_bounds_check :: proc(t: ^testing.T) {
 	defer seen_destroy(&all)
 	testing.expect_value(
 		t,
-		validate_node(&f.shapes, &f.bindings, &f.session, b, root, record, &all),
-		shacl.Failure.None,
+		validate_node(&f.shapes, &f.bindings, f.se, root, node_focus(f.se, b), record, &all),
+		Failure.None,
 	)
 	if !testing.expect(t, len(all.lines) >= 2, "fixture: ex:b must break more than one constraint") {
 		return
@@ -867,8 +865,8 @@ test_validate_node_stops_and_bounds_check :: proc(t: ^testing.T) {
 	// ended it, and both are ordinary.
 	testing.expect_value(
 		t,
-		validate_node(&f.shapes, &f.bindings, &f.session, b, root, record, &stopped),
-		shacl.Failure.None,
+		validate_node(&f.shapes, &f.bindings, f.se, root, node_focus(f.se, b), record, &stopped),
+		Failure.None,
 	)
 	testing.expect_value(t, len(stopped.lines), 1)
 
@@ -880,13 +878,13 @@ test_validate_node_stops_and_bounds_check :: proc(t: ^testing.T) {
 		validate_node(
 			&f.shapes,
 			&f.bindings,
-			&f.session,
-			b,
+			f.se,
 			len(f.shapes.shapes),
+			node_focus(f.se, b),
 			record,
 			&out_of_range,
 		),
-		shacl.Failure.None,
+		Failure.None,
 	)
 	testing.expect_value(t, len(out_of_range.lines), 0)
 }
@@ -910,8 +908,8 @@ test_validate_node_reports_for_an_unbound_node :: proc(t: ^testing.T) {
 	defer seen_destroy(&seen)
 	testing.expect_value(
 		t,
-		validate_node(&f.shapes, &f.bindings, &f.session, absent, root, record, &seen),
-		shacl.Failure.None,
+		validate_node(&f.shapes, &f.bindings, f.se, root, node_focus(f.se, absent), record, &seen),
+		Failure.None,
 	)
 
 	// Unbound, so the focus renders with the `?` prefix write_node gives a node
@@ -928,8 +926,8 @@ test_validate_node_reports_for_an_unbound_node :: proc(t: ^testing.T) {
 
 	// And the boolean form agrees, which is the whole point of the two being
 	// one walk.
-	conforms, failure := conforms_node(&f.shapes, &f.bindings, &f.session, absent, root)
-	testing.expect_value(t, failure, shacl.Failure.None)
+	conforms, failure := conforms_node(&f.shapes, &f.bindings, f.se, root, node_focus(f.se, absent))
+	testing.expect_value(t, failure, Failure.None)
 	testing.expect(t, !conforms)
 }
 
@@ -946,37 +944,37 @@ test_validate_node_report_is_about_one_node :: proc(t: ^testing.T) {
 
 	// ex:a satisfies every constraint; the graph as a whole does not.
 	{
-		report: shacl.Report
-		shacl.report_init(&report)
-		defer shacl.report_destroy(&report)
+		report: Report
+		report_init(&report)
+		defer report_destroy(&report)
 		a := rdf.Term(rdf.IRI("http://example.org/a"))
 		testing.expect_value(
 			t,
-			validate_node_report(&report, &f.shapes, &f.bindings, &f.session, a, root),
-			shacl.Failure.None,
+			validate_node_report(&report, &f.shapes, &f.bindings, f.se, a, root),
+			Failure.None,
 		)
-		testing.expect(t, shacl.report_conforms(&report), "ex:a conforms even though the graph does not")
+		testing.expect(t, report_conforms(&report), "ex:a conforms even though the graph does not")
 		// rdf:type sh:ValidationReport and sh:conforms true, and nothing else.
-		testing.expect_value(t, len(shacl.report_triples(&report)), 2)
+		testing.expect_value(t, len(report_triples(&report)), 2)
 	}
 
 	{
-		report: shacl.Report
-		shacl.report_init(&report)
-		defer shacl.report_destroy(&report)
+		report: Report
+		report_init(&report)
+		defer report_destroy(&report)
 		c := rdf.Term(rdf.IRI("http://example.org/c"))
 		testing.expect_value(
 			t,
-			validate_node_report(&report, &f.shapes, &f.bindings, &f.session, c, root),
-			shacl.Failure.None,
+			validate_node_report(&report, &f.shapes, &f.bindings, f.se, c, root),
+			Failure.None,
 		)
-		testing.expect(t, !shacl.report_conforms(&report), "ex:c has no ex:p and breaks sh:minCount 2")
-		testing.expect(t, len(shacl.report_triples(&report)) > 2)
+		testing.expect(t, !report_conforms(&report), "ex:c has no ex:p and breaks sh:minCount 2")
+		testing.expect(t, len(report_triples(&report)) > 2)
 	}
 }
 
 @(private = "file")
-RECURSIVE_SHAPES :: PREFIX + `
+RECURSIVE_P_SHAPES :: PREFIX + `
 ex:P a sh:PropertyShape ; sh:targetNode ex:a ; sh:path ex:p ; sh:property ex:P .
 `
 
@@ -988,7 +986,7 @@ ex:P a sh:PropertyShape ; sh:targetNode ex:a ; sh:path ex:p ; sh:property ex:P .
 test_conforms_node_reports_recursion_as_a_failure :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, RECURSIVE_SHAPES, SUPPRESS_DATA) {
+	if !fixture_init(t, &f, RECURSIVE_P_SHAPES, SUPPRESS_DATA) {
 		return
 	}
 
@@ -998,8 +996,8 @@ test_conforms_node_reports_recursion_as_a_failure :: proc(t: ^testing.T) {
 	}
 	a := rdf.Term(rdf.IRI("http://example.org/a"))
 
-	_, failure := conforms_node(&f.shapes, &f.bindings, &f.session, a, p)
-	testing.expect_value(t, failure, shacl.Failure.Recursive_Shape)
+	_, failure := conforms_node(&f.shapes, &f.bindings, f.se, p, node_focus(f.se, a))
+	testing.expect_value(t, failure, Failure.Recursive_Shape)
 }
 
 // ---- The value-range components (SHACL-T-0013) ---------------------------
@@ -1026,12 +1024,15 @@ ex:unused ex:p ex:q .
 // rather than assumed — a set-scoped component would report once per shape with
 // no `sh:value`, and the last column would read `-`.
 //
-// The `?` prefix is not noise: these focus nodes are named by `sh:targetNode`
-// and appear nowhere in the data graph, so they are **unbound** and reach the
-// comparison as terms rather than through the store's dictionary. That is the
-// half of the path the suite cannot reach — an entry's shapes and data are the
-// same document, so everything in it is bound — and it is the half where a
-// value has to be decoded from a term the store has never interned.
+// These focus nodes are named by `sh:targetNode` and appear nowhere in the
+// data graph — on the old store that made them unbound, which is what these
+// expectations' `?` markers used to record. On the record store a small
+// canonical integer is **inlined**: `session_resolve` answers for it without
+// the dictionary, so `3`, `4` and `5` are bound here despite never being
+// interned (SHACL-T-0032; the same shift moves `"9"` and the canonical date
+// in the pattern and length tests, and only them — strings and absent IRIs
+// stay unbound). The verdicts are identical either way, because the range
+// comparison is by value; what moved is representation, not semantics.
 @(test)
 test_value_range_boundaries :: proc(t: ^testing.T) {
 	f: Fixture
@@ -1041,19 +1042,19 @@ test_value_range_boundaries :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
 		&seen,
 		[]string {
-			"MinIncl|MinInclusiveConstraintComponent|?\"3\"|?\"3\"",
-			"MaxIncl|MaxInclusiveConstraintComponent|?\"5\"|?\"5\"",
+			"MinIncl|MinInclusiveConstraintComponent|\"3\"|\"3\"",
+			"MaxIncl|MaxInclusiveConstraintComponent|\"5\"|\"5\"",
 			// The exclusive pair adds the bound itself, and only that.
-			"MinExcl|MinExclusiveConstraintComponent|?\"3\"|?\"3\"",
-			"MinExcl|MinExclusiveConstraintComponent|?\"4\"|?\"4\"",
-			"MaxExcl|MaxExclusiveConstraintComponent|?\"4\"|?\"4\"",
-			"MaxExcl|MaxExclusiveConstraintComponent|?\"5\"|?\"5\"",
+			"MinExcl|MinExclusiveConstraintComponent|\"3\"|\"3\"",
+			"MinExcl|MinExclusiveConstraintComponent|\"4\"|\"4\"",
+			"MaxExcl|MaxExclusiveConstraintComponent|\"4\"|\"4\"",
+			"MaxExcl|MaxExclusiveConstraintComponent|\"5\"|\"5\"",
 		},
 		"value ranges at the boundary",
 	)
@@ -1092,7 +1093,7 @@ test_value_range_incomparable_violates :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1101,7 +1102,7 @@ test_value_range_incomparable_violates :: proc(t: ^testing.T) {
 			"Compare|MinInclusiveConstraintComponent|?John|?John",
 			"Compare|MinInclusiveConstraintComponent|?\"Hello\"|?\"Hello\"",
 			"Compare|MinInclusiveConstraintComponent|?\"abc\"|?\"abc\"",
-			"NoBound|MinInclusiveConstraintComponent|?\"4\"|?\"4\"",
+			"NoBound|MinInclusiveConstraintComponent|\"4\"|\"4\"",
 		},
 		"incomparable violates",
 	)
@@ -1151,7 +1152,7 @@ test_string_length_over_nodes_that_are_not_literals :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1165,7 +1166,7 @@ test_string_length_over_nodes_that_are_not_literals :: proc(t: ^testing.T) {
 			"Length|MaxLengthConstraintComponent|?\"Hello!\"|?\"Hello!\"",
 			// A date's lexical form is ten characters; the tag on "Hell"@en is
 			// not part of its string, so it passes at four.
-			"Length|MaxLengthConstraintComponent|?\"2017-03-29\"|?\"2017-03-29\"",
+			"Length|MaxLengthConstraintComponent|\"2017-03-29\"|\"2017-03-29\"",
 			// The blank node reached by ex:p, against a bound of zero.
 			"_:|MinLengthConstraintComponent|hasBlank|_:",
 		},
@@ -1199,13 +1200,13 @@ test_pattern_searches_and_honours_flags :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
 		&seen,
 		[]string {
-			"Anchored|PatternConstraintComponent|?\"9\"|?\"9\"",
+			"Anchored|PatternConstraintComponent|\"9\"|\"9\"",
 			// An IRI is matched on the IRI, which no anchored numeric pattern fits.
 			"Anchored|PatternConstraintComponent|?Test|?Test",
 			"Contains|PatternConstraintComponent|?\"john doe\"|?\"john doe\"",
@@ -1224,24 +1225,21 @@ test_pattern_searches_and_honours_flags :: proc(t: ^testing.T) {
 // than the one that was written and then report conformance.
 @(test)
 test_an_unsupported_flag_is_an_error :: proc(t: ^testing.T) {
-	f: Fixture
-	defer shacl.shapes_destroy(&f.shapes)
 	source := PREFIX + `ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:pattern "a.b" ; sh:flags "s" .`
 
-	db, open_err := kvstore.open_ephemeral()
-	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+	db: Test_DB
+	defer tdb_close(&db)
+	if !tdb_open(t, &db) {
 		return
 	}
-	defer kvstore.close(db)
-	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)source)
-	if !testing.expectf(t, load_err.message == "" && db_err == nil, "fixture did not parse: %s %v", load_err.message, db_err) {
+	if !tdb_load(t, &db, source) {
 		return
 	}
 
-	session: Session
-	session_init(&session, db)
-	err := compile(&f.shapes, &session)
-	testing.expect_value(t, err.kind, shacl.Error_Kind.Flags_Unsupported)
+	s: Shapes
+	defer shapes_destroy(&s)
+	err := compile(&s, tdb_session(&db))
+	testing.expect_value(t, err.kind, Error_Kind.Flags_Unsupported)
 }
 
 @(private = "file")
@@ -1277,7 +1275,9 @@ ex:three ex:p "Me"@en , "Moi"@fr , "untagged" , "also untagged" .
 // both sides — matched against the range `en`, and counted as a duplicate of
 // `@en` — and both comparisons are case-insensitive by specification (RFC 4647
 // for the range, RDF Concepts for tag identity). There is no comparison here
-// whose answer depends on whether the parser folded the tag's case.
+// whose answer depends on whether the parser folded the tag's case. (On the
+// record store the question is moot twice over: the dictionary lowercases
+// tags on intern, so `@EN` reaches the engine as `@en` to begin with.)
 @(test)
 test_language_in_and_unique_lang :: proc(t: ^testing.T) {
 	f: Fixture
@@ -1287,7 +1287,7 @@ test_language_in_and_unique_lang :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1330,7 +1330,7 @@ test_unique_lang_is_switched_on_by_the_term_true :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 	expect_results(t, &seen, []string{}, "uniqueLang \"1\" is not true")
 }
 
@@ -1381,7 +1381,7 @@ test_property_pair_equality :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1438,7 +1438,7 @@ test_property_pair_ordering :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1533,7 +1533,7 @@ test_closed :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1555,8 +1555,7 @@ test_closed :: proc(t: ^testing.T) {
 // this section tests two things at once: that §4.6 is implemented, and that the
 // mechanism SHACL-T-0011 built holds up when something real drives it.
 // `shacl/suppress_test.odin` asserts the same properties against a hand-built
-// model and a fake store; what these add is a shapes graph that `compile`
-// actually produced.
+// model; what these add is a shapes graph that `compile` actually produced.
 
 @(private = "file")
 LOGICAL_SHAPES :: PREFIX + `
@@ -1605,7 +1604,7 @@ test_logical_combinators :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1667,7 +1666,7 @@ test_xone_is_exactly_one :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1719,7 +1718,7 @@ test_combinators_nest :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1778,7 +1777,7 @@ test_inner_results_do_not_reach_the_caller :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1820,7 +1819,7 @@ test_an_inner_stop_does_not_truncate_the_outer_traversal :: proc(t: ^testing.T) 
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1862,7 +1861,7 @@ test_recursion_through_a_combinator_is_a_failure :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.Recursive_Shape)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.Recursive_Shape)
 
 	// A failure is not a conformance answer, and it must not have left a result
 	// behind that a caller could mistake for one.
@@ -1872,7 +1871,7 @@ test_recursion_through_a_combinator_is_a_failure :: proc(t: ^testing.T) {
 // ---- The shape-based constraints ------------------------------------------
 
 @(private = "file")
-NODE_SHAPES :: PREFIX + `
+NODE_CONSTRAINT_SHAPES :: PREFIX + `
 ex:NodeAtNode a sh:NodeShape ; sh:targetNode ex:good, ex:bad ;
 	sh:node ex:MustHaveName .
 
@@ -1883,7 +1882,7 @@ ex:MustHaveName sh:property [ sh:path ex:name ; sh:minCount 1 ] .
 `
 
 @(private = "file")
-NODE_DATA :: PREFIX + `
+NODE_CONSTRAINT_DATA :: PREFIX + `
 ex:good  ex:name "g" .
 ex:bad   ex:other 1 .
 ex:owner ex:child ex:good ; ex:child ex:bad .
@@ -1901,12 +1900,12 @@ ex:owner ex:child ex:good ; ex:child ex:bad .
 test_node_constraint :: proc(t: ^testing.T) {
 	f: Fixture
 	defer fixture_destroy(&f)
-	if !fixture_init(t, &f, NODE_SHAPES, NODE_DATA) {
+	if !fixture_init(t, &f, NODE_CONSTRAINT_SHAPES, NODE_CONSTRAINT_DATA) {
 		return
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -1959,7 +1958,7 @@ test_qualified_value_shape :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -2030,7 +2029,7 @@ test_qualified_both_bounds_violate :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -2116,7 +2115,7 @@ test_qualified_value_shapes_disjoint :: proc(t: ^testing.T) {
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -2181,7 +2180,7 @@ test_qualified_parameters_without_a_value_shape_are_inert :: proc(t: ^testing.T)
 	}
 	seen: Seen
 	defer seen_destroy(&seen)
-	testing.expect_value(t, validate_into(&f, &seen), shacl.Failure.None)
+	testing.expect_value(t, validate_into(&f, &seen), Failure.None)
 
 	expect_results(
 		t,
@@ -2189,7 +2188,7 @@ test_qualified_parameters_without_a_value_shape_are_inert :: proc(t: ^testing.T)
 		[]string{"Inert|ClassConstraintComponent|i|i"},
 		"qualified parameters with no qualified value shape",
 	)
-	testing.expect_value(t, len(shacl.shapes_ignored(&f.shapes)), 0)
+	testing.expect_value(t, len(shapes_ignored(&f.shapes)), 0)
 }
 
 @(private = "file")

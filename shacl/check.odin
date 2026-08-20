@@ -6,9 +6,8 @@ import regex_common "core:text/regex/common"
 import "core:unicode/utf8"
 
 import rdf "rdf:rdf"
-import store "store:store"
 
-// Constraint dispatch: the seam the catalogue initiative fills.
+// Constraint dispatch: the seam the catalogue initiative filled.
 //
 // Adding a constraint component is four edits: a `Constraint_Kind`, its
 // parameter in `compile_constraints`, its scope below — which says *how often*
@@ -16,7 +15,7 @@ import store "store:store"
 //
 // **There is a fifth, for components that compare their parameter by ID**, and
 // SHACL-T-0015 found it the hard way: `bindings_init` in `validate.odin` resolves
-// a constraint's term to a data-store `Term_ID`, and it does so from a
+// a constraint's term to a data-store id, and it does so from a
 // kind-switch. A component left out of that switch does not fail — it reads its
 // parameter as unbound, concludes the data store has never seen it, and reports
 // nothing at all. The four property-pair components compiled, dispatched, ran,
@@ -47,13 +46,6 @@ import store "store:store"
 // Five families, five traps. The entries are a few minutes to read and the
 // alternative is a component that looks right.
 //
-// **A sixth edit, for a component that asks a new question of the data.**
-// `sh:closed` needed the predicate and object of one triple together, which none
-// of `Access`'s three read verbs could express, so it added a fourth
-// (`Outgoing`, below) and an adapter per backend. That is not a seam edit at all
-// — it is the seam admitting the engine had only ever asked for one quad
-// position at a time.
-//
 // **Scope is the thing worth naming**, and it answers exactly one question:
 // how often is the component asked? A value-scoped one is asked once per value
 // node; a set-scoped one is asked once about the whole value-node set. Getting
@@ -61,50 +53,15 @@ import store "store:store"
 // immediately.
 //
 // **What a result blames is a separate question, and the two are not the same
-// question.** The spine's seven made them look identical — every value-scoped
-// component named its node in `sh:value` and every set-scoped one named none,
-// which is why `path-complex-001` expects an `sh:hasValue` violation with no
-// `sh:value` while `targetClassImplicit-001` expects an `sh:in` violation that
-// names one. That correlation was a property of those seven, not a rule, and
-// SHACL-T-0015 is where it breaks: `sh:equals` is asked once about the set and
-// reports **one result per member of the symmetric difference**, each naming
-// that member — including members that are not value nodes at all, because they
-// came from the other predicate. `node/equals-001` expects exactly that.
-//
-// So scope decides the call, and `emit_result`'s `has_value` decides the blame.
-// A component reaching for a third scope is probably reaching for this
-// distinction instead.
+// question.** Scope decides the call, and `emit_result`'s `has_value` decides
+// the blame. A component reaching for a third scope is probably reaching for
+// this distinction instead.
 //
 // Dispatch is a switch rather than a table of procedure pointers. That is
 // SPARQL-T-0011's finding applied unchanged: the family's no-dynamic-dispatch
 // default is free here, and its counterweight — that procedure pointers
 // measured as noise once a call does real work — is the escape hatch if the
 // catalogue ever wants one.
-
-// Outgoing streams the predicate and object of every triple with `subject` as
-// its subject — the properties a node actually uses, and their values.
-//
-// The fourth way this engine reads the data graph, and the first added since the
-// spine. `Scan` and `Step` both yield one position of a matched quad, which
-// answers every question the engine had until `sh:closed`: that component needs
-// the predicate and the object of the *same* triple, and no sequence of
-// single-position reads gives a pair without matching twice.
-//
-// **The gap is in `Access`, not in odin-rdf-store.** The published match
-// interface returns whole `Encoded_Quad`s, so every backend already had the
-// answer; what was too narrow was this package's own adapter. Recorded in
-// `docs/store-evidence.md`, because a narrowing that has to be widened is worth
-// as much to the log as a capability that was missing.
-//
-// `visit` returning false stops the read, and Outgoing then returns false, so
-// early exit reaches the store rather than being simulated above it — the same
-// contract `Scan` has. The graph is the adapter's, for the same reason.
-Outgoing :: #type proc(
-	data: rawptr,
-	subject: store.Term_ID,
-	visit: proc(data: rawptr, predicate, object: store.Term_ID) -> bool,
-	visit_data: rawptr,
-) -> bool
 
 // Constraint_Scope says whether a component is checked once per value node or
 // once over the whole value-node set.
@@ -361,10 +318,8 @@ check_qualified :: proc(v: ^Validation, shape_index: int, c: Constraint, values:
 // node**.
 //
 // This is the first place the engine reads the data graph a second time from
-// the focus node, and it does so through `Access.step` — the same procedure a
-// predicate path uses, with the graph bound by the instantiation package. No new
-// store capability was wanted and none is used, so `docs/store-evidence.md` gains
-// nothing from this task.
+// the focus node, and it does so through `session_step` — the same read a
+// predicate path uses, with the graph bound by the session.
 //
 // **Absence is emptiness here, not failure.** A predicate the data store has
 // never seen, or an unbound focus node, can appear in no triple, so the second
@@ -388,10 +343,10 @@ check_property_pair :: proc(
 		}
 	}
 
-	others := make([dynamic]store.Term_ID, v.allocator)
+	others := make([dynamic]u32, v.allocator)
 	defer delete(others)
 	if values.focus.bound && v.b.constraint_bound[constraint_index] {
-		v.access.step(v.access.data, values.focus.id, v.b.constraint[constraint_index], false, &others)
+		session_step(v.se, values.focus.id, v.b.constraint[constraint_index], false, &others)
 	}
 
 	count := value_set_count(values)
@@ -466,15 +421,11 @@ check_property_pair :: proc(
 // holds. `property/lessThan-002` is the entry that measures it — integers
 // against strings, where every pair is incomparable and every pair is a result.
 @(private = "file")
-pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: store.Term_ID) -> bool {
-	left, left_owned := materialize(v, value)
-	defer if left_owned {
-		rdf.destroy_term(left, v.allocator)
-	}
-	right, right_owned := v.access.load(v.access.load_data, other, v.allocator)
-	defer if right_owned {
-		rdf.destroy_term(right, v.allocator)
-	}
+pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: u32) -> bool {
+	left_buf: Term_Buf
+	left := materialize(v, value, left_buf[:])
+	right_buf: Term_Buf
+	right, _ := session_term(v.se, other, right_buf[:])
 
 	order := compare_values(value_of(left), value_of(right))
 	#partial switch kind {
@@ -487,14 +438,14 @@ pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, oth
 }
 
 // node_among and id_among are the set membership the equality pair needs, both
-// by `Term_ID` — which is the whole point of STORE-A-0001 on a comparison that
-// runs once per value node per focus node.
+// by id — which is the whole point of dense ids on a comparison that runs once
+// per value node per focus node.
 //
-// An unbound value node is in no set of IDs: a term the data store has never
+// An unbound value node is in no set of ids: a term the data store has never
 // seen cannot be the object of any triple, so it cannot be among the values of
 // the other predicate.
 @(private = "file")
-node_among :: proc(value: Node_Ref, ids: []store.Term_ID) -> bool {
+node_among :: proc(value: Node_Ref, ids: []u32) -> bool {
 	if !value.bound {
 		return false
 	}
@@ -507,7 +458,7 @@ node_among :: proc(value: Node_Ref, ids: []store.Term_ID) -> bool {
 }
 
 @(private = "file")
-id_among :: proc(values: Value_Set, id: store.Term_ID) -> bool {
+id_among :: proc(values: Value_Set, id: u32) -> bool {
 	for n in 0 ..< value_set_count(values) {
 		ref := value_set_at(values, n)
 		if ref.bound && ref.id == id {
@@ -529,12 +480,13 @@ id_among :: proc(values: Value_Set, id: store.Term_ID) -> bool {
 // Like the cardinality components, it applies to property shapes only. A node
 // shape has exactly one value node, so no two of them could share anything.
 //
-// The tags are cloned because they are read from materialised terms, and on the
-// persistent backend a materialised term's strings die with it — a `map` keyed
-// on the borrowed tag would be reading freed database bytes by the second
-// iteration. The comparison is `equal_fold` because RDF language tags are
-// case-insensitive; see `language_matches` for the same rule stated where it
-// matters more.
+// The tags are cloned because they are read from materialised terms, which
+// borrow a stack buffer or the store's arena — a `map` keyed on the borrowed
+// tag would be reading a dead buffer by the second iteration. The comparison
+// is `equal_fold` because RDF language tags are case-insensitive; see
+// `language_matches` for the same rule stated where it matters more. (On this
+// store the tags arrive lowercased — the dictionary folds them on intern —
+// so the fold here is defence in depth rather than load-bearing.)
 @(private = "file")
 check_unique_lang :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
 	if v.s.shapes[shape_index].path < 0 {
@@ -549,12 +501,10 @@ check_unique_lang :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
 	}
 
 	for n in 0 ..< value_set_count(values) {
-		term, owned := materialize(v, value_set_at(values, n))
+		buf: Term_Buf
+		term := materialize(v, value_set_at(values, n), buf[:])
 		if literal, is_literal := term.(rdf.Literal); is_literal && literal.language != "" {
 			append(&tags, strings.clone(literal.language, v.allocator))
-		}
-		if owned {
-			rdf.destroy_term(term, v.allocator)
 		}
 	}
 
@@ -752,14 +702,6 @@ check_logical :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 // node may use no predicate beyond those the shape's property shapes declare and
 // those the shapes graph explicitly ignores.
 //
-// **This is the component that asks the store a question the spine never
-// asked** — which predicates a node actually uses — and it is why SHACL-I-0002
-// singled it out as the likeliest source of store evidence. The answer is one
-// match with the subject and the graph bound and the other two positions
-// wildcard, which the published interface has always served; what was too narrow
-// was `Access`, whose three existing verbs each yield a single quad position. See
-// `Outgoing` above and `docs/store-evidence.md`.
-//
 // **A result per offending triple, not per offending predicate**, and each names
 // that triple: `sh:resultPath` is the predicate and `sh:value` is the object.
 // `node/closed-001` measures it — `ex:InvalidInstance1` carries `rdf:type` and
@@ -790,7 +732,7 @@ check_closed :: proc(
 		constraint  = c,
 		focus       = focus,
 	}
-	v.access.outgoing(v.access.data, value.id, closed_visit, &state)
+	session_outgoing(v.se, value.id, closed_visit, &state)
 }
 
 @(private = "file")
@@ -803,15 +745,15 @@ Closed_Check :: struct {
 
 // closed_visit judges one of the value node's triples.
 //
-// The allowed set is compared by `Term_ID`, which is what the compile-time work
-// in `compile_closed_sets` bought: the predicates are resolved to data-store IDs
+// The allowed set is compared by id, which is what the compile-time work in
+// `compile_closed_sets` bought: the predicates are resolved to data-store ids
 // once per validation, so this is an integer scan over a handful of entries per
 // triple rather than a term comparison. An allowed predicate the data store has
 // never seen is unbound and matches nothing, which is correct — a predicate that
 // appears in a triple is in the dictionary by definition, so an unbound entry
 // cannot be the one being judged.
 @(private = "file")
-closed_visit :: proc(data: rawptr, predicate, object: store.Term_ID) -> bool {
+closed_visit :: proc(data: rawptr, predicate, object: u32) -> bool {
 	state := cast(^Closed_Check)data
 	v := state.v
 	c := state.constraint
@@ -840,10 +782,10 @@ closed_visit :: proc(data: rawptr, predicate, object: store.Term_ID) -> bool {
 // of the class — it must carry an `rdf:type` that is the class or a subclass of
 // it, transitively, **in the data graph**.
 //
-// The two absences below are the initiative's asymmetry made concrete. A data
-// store that has never seen the class term, or has never seen `rdf:type` at
-// all, cannot hold such a triple, so every value node violates. That is the
-// opposite of what the same absence means on a path, where it is emptiness.
+// The two absences below are the asymmetry made concrete. A data store that
+// has never seen the class term, or has never seen `rdf:type` at all, cannot
+// hold such a triple, so every value node violates. That is the opposite of
+// what the same absence means on a path, where it is emptiness.
 @(private = "file")
 check_class :: proc(v: ^Validation, c: Constraint, constraint_index: int, value: Node_Ref) -> bool {
 	if !v.b.constraint_bound[constraint_index] || !v.b.targets.has_type || !value.bound {
@@ -852,28 +794,20 @@ check_class :: proc(v: ^Validation, c: Constraint, constraint_index: int, value:
 	state := Class_Check {
 		members = class_closure(v, v.b.constraint[constraint_index]),
 	}
-	v.access.scan(
-		v.access.data,
-		value.id,
-		v.b.targets.rdf_type,
-		store.WILDCARD,
-		store.QUAD_O,
-		class_check_visit,
-		&state,
-	)
+	session_scan(v.se, value.id, v.b.targets.rdf_type, 0, .Object, class_check_visit, &state)
 	return state.found
 }
 
 @(private = "file")
 Class_Check :: struct {
-	members: ^map[store.Term_ID]bool,
+	members: ^map[u32]bool,
 	found:   bool,
 }
 
 // class_check_visit returns false once it has an answer, which stops the scan
 // inside the store rather than reading the rest of the node's types.
 @(private = "file")
-class_check_visit :: proc(data: rawptr, id: store.Term_ID) -> bool {
+class_check_visit :: proc(data: rawptr, id: u32) -> bool {
 	state := cast(^Class_Check)data
 	if state.members[id] {
 		state.found = true
@@ -892,14 +826,6 @@ class_check_visit :: proc(data: rawptr, id: store.Term_ID) -> bool {
 // therefore never satisfies `sh:datatype xsd:string`, which falls out of the
 // comparison rather than needing a case.
 //
-// **The second half was the spine's recorded debt**, discharged in
-// SHACL-T-0012 along with the lexical-to-value machinery it shares. It is not a
-// refinement: `"300"^^xsd:byte` and `"c"^^xsd:byte` both name xsd:byte exactly
-// and neither is one, and `core/property`'s `datatype-ill-formed` is the entry
-// that says so. The spine's enabled directories used `sh:datatype` only with
-// `xsd:string`, whose lexical space is every string, which is why they could go
-// green without it.
-//
 // **An unmodelled datatype satisfies.** `lexical_status` answers `.Unchecked`
 // for a datatype this engine does not model — rdf:HTML is the one in the corpus
 // — and only `.Ill_Formed` violates. Violating on `.Unchecked` would fail
@@ -911,10 +837,8 @@ check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	if !is_iri {
 		return false
 	}
-	term, owned := materialize(v, value)
-	defer if owned {
-		rdf.destroy_term(term, v.allocator)
-	}
+	buf: Term_Buf
+	term := materialize(v, value, buf[:])
 	literal, is_literal := term.(rdf.Literal)
 	if !is_literal || literal.datatype != want {
 		return false
@@ -946,7 +870,7 @@ check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 // **These compare values, not terms**, and that is the whole reason
 // SHACL-T-0012 exists: `sh:minInclusive 4` is satisfied by `"4.0"^^xsd:decimal`,
 // which is a different term and the same number. Everything else in this file
-// answers from a `Term_ID` and never materialises a bound.
+// answers from an id and never materialises a bound.
 //
 // **Incomparable violates, and it does so structurally.** The spec's condition
 // is that the comparison *holds*, and a comparison that could not be made does
@@ -958,10 +882,8 @@ check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 // a place for a later component to get the polarity backwards.
 @(private = "file")
 check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
-	term, owned := materialize(v, value)
-	defer if owned {
-		rdf.destroy_term(term, v.allocator)
-	}
+	buf: Term_Buf
+	term := materialize(v, value, buf[:])
 	// Ordered value-against-bound, so the component names read as they do in the
 	// shapes graph: `.Greater` is the value node above the minimum.
 	order := compare_values(value_of(term), value_of(c.term))
@@ -999,10 +921,8 @@ check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 // non-ASCII, so this is the spec being followed rather than a test passing.
 @(private = "file")
 check_string :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
-	term, owned := materialize(v, value)
-	defer if owned {
-		rdf.destroy_term(term, v.allocator)
-	}
+	buf: Term_Buf
+	term := materialize(v, value, buf[:])
 	text, has_text := node_string(term)
 	if !has_text {
 		return false
@@ -1051,17 +971,12 @@ node_string :: proc(term: rdf.Term) -> (text: string, ok: bool) {
 // A range matches a tag that equals it or extends it at a subtag boundary, so
 // `en` matches `en-NZ` and not `english`.
 //
-// It is also why this component **cannot fire the family's language-tag
-// trigger**, which is worth saying because this is the one task that could have.
-// Basic filtering is case-insensitive by definition, so a comparison here can
-// never depend on whether the parser folded a tag's case — the question the
-// trigger exists to force is not asked.
+// Basic filtering is case-insensitive by definition, so this comparison never
+// depends on tag case — which the record store lowercases on intern anyway.
 @(private = "file")
 check_language_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
-	term, owned := materialize(v, value)
-	defer if owned {
-		rdf.destroy_term(term, v.allocator)
-	}
+	buf: Term_Buf
+	term := materialize(v, value, buf[:])
 	literal, is_literal := term.(rdf.Literal)
 	if !is_literal || literal.language == "" {
 		return false
@@ -1098,18 +1013,19 @@ language_matches :: proc(tag, range: string) -> bool {
 // node_kind_of is the value node's node kind, as the one-element set the
 // `sh:nodeKind` bit set compares against.
 //
-// A bound node answers from its `Term_ID` alone, with no dictionary lookup:
-// STORE-A-0001 puts the kind tag in the ID's high bits precisely so this kind
-// of question is free. An RDF-star triple term is a fourth kind SHACL 1.0's six
-// node kinds do not name, so it satisfies none of them — an empty set, which
-// the caller's intersection turns into a violation.
+// A bound node answers from `session_kind` — one arena byte, no decode. An
+// RDF-star triple term is a fourth kind SHACL 1.0's six node kinds do not
+// name; the record store cannot hold one at all (its encoder refuses them),
+// so only the unbound arm can ever see one, and it satisfies none of the
+// kinds — an empty set, which the caller's intersection turns into a
+// violation.
 @(private = "file")
 node_kind_of :: proc(v: ^Validation, value: Node_Ref) -> Node_Kind {
 	if value.bound {
-		#partial switch store.id_kind(value.id) {
+		switch session_kind(v.se, value.id) {
 		case .IRI:
 			return NODE_KIND_IRI
-		case .Blank_Node:
+		case .Blank:
 			return NODE_KIND_BLANK_NODE
 		case .Literal:
 			return NODE_KIND_LITERAL
@@ -1143,13 +1059,19 @@ node_is_term :: proc(v: ^Validation, value: Node_Ref, constraint_index: int, ter
 	return rdf.equal_term(value.term, term)
 }
 
-// materialize turns a value node into a term. `owned` says whether the caller
-// must destroy it: kvstore builds terms from the database's bytes, memstore
-// borrows its dictionary's, and an unbound node already carries its own.
+// materialize turns a value node into a term: an unbound node already carries
+// its own (borrowing the model), and a bound one decodes through the session
+// into `buf` (borrowing the buffer or the store's arena — see `session_term`).
+// Either way the term is borrowed: use it within the buffer's scope and never
+// destroy it.
 @(private = "file")
-materialize :: proc(v: ^Validation, value: Node_Ref) -> (term: rdf.Term, owned: bool) {
+materialize :: proc(v: ^Validation, value: Node_Ref, buf: []byte) -> rdf.Term {
 	if !value.bound {
-		return value.term, false
+		return value.term
 	}
-	return v.access.load(v.access.load_data, value.id, v.allocator)
+	term, ok := session_term(v.se, value.id, buf)
+	if !ok {
+		return nil
+	}
+	return term
 }

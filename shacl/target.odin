@@ -3,16 +3,12 @@ package shacl
 import "base:runtime"
 
 import rdf "rdf:rdf"
-import store "store:store"
 
 // Target resolution: a shape's target declarations turned into the focus
 // nodes it applies to (SHACL §2.1.3).
 //
-// Every read is a `match` with the graph position bound. That is not a
-// stylistic note — it is the property that retired the vision's prediction
-// that this project would need STORE-T-0017, the named-graph wildcard. The
-// wildcard was only ever wanted for validating a union of graphs, and
-// SHACL-A-0001 decision 5 chose one caller-named graph instead.
+// Every read is a match with the graph position bound — the session's
+// discipline, stated once in session.odin.
 //
 // Resolution **streams**: focus nodes are handed to a visitor as they are
 // found, never collected into a list. What it does keep is a set of the nodes
@@ -20,24 +16,6 @@ import store "store:store"
 // makes the focus nodes of a shape the *union* of its targets, so a node
 // reached by two declarations must be validated once. `multipleTargets-001`
 // in the suite is exactly that case.
-
-// Scan streams one match. `subject`, `predicate` and `object` are bound IDs or
-// `store.WILDCARD`; `position` says which of QUAD_S / QUAD_O to yield.
-//
-// The graph is deliberately **not** a parameter: the adapter owns it and binds
-// it in every pattern, so the core cannot accidentally leave it wildcard and
-// widen a validation to the whole dataset.
-//
-// `visit` returning false stops the scan, and Scan then returns false, which
-// is how early exit reaches the store layer rather than being simulated above
-// it.
-Scan :: #type proc(
-	data: rawptr,
-	subject, predicate, object: store.Term_ID,
-	position: int,
-	visit: proc(data: rawptr, id: store.Term_ID) -> bool,
-	visit_data: rawptr,
-) -> bool
 
 // Node_Ref names a node of the data graph: its ID when the store holds one,
 // and otherwise the term itself.
@@ -52,7 +30,7 @@ Scan :: #type proc(
 // materialises through the dictionary if it needs one; for an unbound node
 // `term` borrows the compiled model's storage, which outlives the validation.
 Node_Ref :: struct {
-	id:    store.Term_ID,
+	id:    u32,
 	bound: bool,
 	term:  rdf.Term,
 }
@@ -68,11 +46,11 @@ Focus_Visitor :: #type proc(data: rawptr, focus: Focus_Node) -> bool
 // model's target terms, and the two RDF/RDFS predicates class targeting
 // needs, resolved to the *data* store's IDs once before resolution.
 Target_Bindings :: struct {
-	term:         []store.Term_ID, // indexed by s.targets
+	term:         []u32, // indexed by s.targets
 	bound:        []bool,
-	rdf_type:     store.Term_ID,
+	rdf_type:     u32,
 	has_type:     bool,
-	subclass_of:  store.Term_ID,
+	subclass_of:  u32,
 	has_subclass: bool,
 	allocator:    runtime.Allocator,
 }
@@ -82,25 +60,24 @@ Target_Bindings :: struct {
 RDFS_SUBCLASS_OF :: "http://www.w3.org/2000/01/rdf-schema#subClassOf"
 
 // target_bindings_init resolves every target term in the model, plus rdf:type
-// and rdfs:subClassOf, against a data store. `find` must be the non-interning
-// lookup. Freed by `target_bindings_destroy`.
+// and rdfs:subClassOf, against the data session's snapshot. Resolving never
+// writes. Freed by `target_bindings_destroy`.
 target_bindings_init :: proc(
 	b: ^Target_Bindings,
 	s: ^Shapes,
-	find: Term_Finder,
-	find_data: rawptr,
+	se: Session,
 	allocator := context.allocator,
 ) {
 	b.allocator = allocator
-	b.term = make([]store.Term_ID, len(s.targets), allocator)
+	b.term = make([]u32, len(s.targets), allocator)
 	b.bound = make([]bool, len(s.targets), allocator)
 	for target, i in s.targets {
-		id, found := find(find_data, target.term)
+		id, found := session_resolve(se, target.term)
 		b.term[i] = id
 		b.bound[i] = found
 	}
-	b.rdf_type, b.has_type = find(find_data, rdf.RDF_TYPE)
-	b.subclass_of, b.has_subclass = find(find_data, rdf.IRI(RDFS_SUBCLASS_OF))
+	b.rdf_type, b.has_type = session_resolve(se, rdf.RDF_TYPE)
+	b.subclass_of, b.has_subclass = session_resolve(se, rdf.IRI(RDFS_SUBCLASS_OF))
 }
 
 // target_bindings_destroy frees the bindings, leaving the model and the store
@@ -121,8 +98,7 @@ resolve_targets :: proc(
 	s: ^Shapes,
 	b: ^Target_Bindings,
 	shape_index: int,
-	scan: Scan,
-	scan_data: rawptr,
+	se: Session,
 	visit: Focus_Visitor,
 	visit_data: rawptr,
 	allocator := context.allocator,
@@ -135,7 +111,7 @@ resolve_targets :: proc(
 	state := Resolve_State {
 		visit      = visit,
 		visit_data = visit_data,
-		seen       = make(map[store.Term_ID]bool, allocator),
+		seen       = make(map[u32]bool, allocator),
 		unbound    = make([dynamic]rdf.Term, allocator),
 	}
 	defer delete(state.seen)
@@ -161,15 +137,14 @@ resolve_targets :: proc(
 		case .Class, .Implicit_Class:
 			if !b.has_type || !b.bound[index] {
 				// A class the data store has never seen has no instances, so
-				// the shape applies to nothing. This is the case the task
-				// singled out, and it is emptiness rather than failure — the
-				// opposite of what an absent `sh:class` will mean.
+				// the shape applies to nothing. That is emptiness rather than
+				// failure — the opposite of what an absent `sh:class` will mean.
 				continue
 			}
-			classes := subclass_closure(b, scan, scan_data, b.term[index], allocator)
+			classes := subclass_closure(b, se, b.term[index], allocator)
 			defer delete(classes)
 			for class in classes {
-				if !scan(scan_data, store.WILDCARD, b.rdf_type, class, store.QUAD_S, visit_id, &state) {
+				if !session_scan(se, 0, b.rdf_type, class, .Subject, visit_id, &state) {
 					return false
 				}
 			}
@@ -178,7 +153,7 @@ resolve_targets :: proc(
 			if !b.bound[index] {
 				continue
 			}
-			if !scan(scan_data, store.WILDCARD, b.term[index], store.WILDCARD, store.QUAD_S, visit_id, &state) {
+			if !session_scan(se, 0, b.term[index], 0, .Subject, visit_id, &state) {
 				return false
 			}
 
@@ -186,7 +161,7 @@ resolve_targets :: proc(
 			if !b.bound[index] {
 				continue
 			}
-			if !scan(scan_data, store.WILDCARD, b.term[index], store.WILDCARD, store.QUAD_O, visit_id, &state) {
+			if !session_scan(se, 0, b.term[index], 0, .Object, visit_id, &state) {
 				return false
 			}
 		}
@@ -198,7 +173,7 @@ resolve_targets :: proc(
 Resolve_State :: struct {
 	visit:      Focus_Visitor,
 	visit_data: rawptr,
-	seen:       map[store.Term_ID]bool,
+	seen:       map[u32]bool,
 	unbound:    [dynamic]rdf.Term,
 }
 
@@ -223,7 +198,7 @@ emit_unbound :: proc(state: ^Resolve_State, term: rdf.Term) -> bool {
 }
 
 @(private = "file")
-visit_id :: proc(data: rawptr, id: store.Term_ID) -> bool {
+visit_id :: proc(data: rawptr, id: u32) -> bool {
 	state := cast(^Resolve_State)data
 	return emit(state, Focus_Node{id = id, bound = true})
 }
@@ -244,35 +219,34 @@ visit_id :: proc(data: rawptr, id: store.Term_ID) -> bool {
 @(private)
 subclass_closure :: proc(
 	b: ^Target_Bindings,
-	scan: Scan,
-	scan_data: rawptr,
-	class: store.Term_ID,
+	se: Session,
+	class: u32,
 	allocator: runtime.Allocator,
-) -> [dynamic]store.Term_ID {
-	out := make([dynamic]store.Term_ID, allocator)
+) -> [dynamic]u32 {
+	out := make([dynamic]u32, allocator)
 	append(&out, class)
 	if !b.has_subclass {
 		return out
 	}
 
-	seen := make(map[store.Term_ID]bool, allocator)
+	seen := make(map[u32]bool, allocator)
 	defer delete(seen)
 	seen[class] = true
 
 	collector := Closure_State {
 		seen  = &seen,
-		fresh = make([dynamic]store.Term_ID, allocator),
+		fresh = make([dynamic]u32, allocator),
 	}
 	defer delete(collector.fresh)
 
-	frontier := make([dynamic]store.Term_ID, allocator)
+	frontier := make([dynamic]u32, allocator)
 	defer delete(frontier)
 	append(&frontier, class)
 
 	for len(frontier) > 0 {
 		clear(&collector.fresh)
 		for super in frontier {
-			scan(scan_data, store.WILDCARD, b.subclass_of, super, store.QUAD_S, collect_id, &collector)
+			session_scan(se, 0, b.subclass_of, super, .Subject, collect_id, &collector)
 		}
 		clear(&frontier)
 		for id in collector.fresh {
@@ -285,12 +259,12 @@ subclass_closure :: proc(
 
 @(private = "file")
 Closure_State :: struct {
-	seen:  ^map[store.Term_ID]bool,
-	fresh: [dynamic]store.Term_ID,
+	seen:  ^map[u32]bool,
+	fresh: [dynamic]u32,
 }
 
 @(private = "file")
-collect_id :: proc(data: rawptr, id: store.Term_ID) -> bool {
+collect_id :: proc(data: rawptr, id: u32) -> bool {
 	state := cast(^Closure_State)data
 	if state.seen[id] {
 		return true

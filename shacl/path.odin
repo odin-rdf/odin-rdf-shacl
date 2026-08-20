@@ -1,15 +1,14 @@
 package shacl
 
 import rdf "rdf:rdf"
-import store "store:store"
 
 // Property-path compilation (SHACL §2.3.1).
 //
 // Paths are recursive structures — a sequence of alternatives of inverses —
-// and the compiler may not recurse, so the descent is an explicit stack of
-// frames. Each frame holds the operands still to visit and the child indices
-// gathered so far; a frame is emitted as a Path_Node when its operands run
-// out, and its index is appended to its parent's children.
+// and the descent is an explicit stack of frames. Each frame holds the
+// operands still to visit and the child indices gathered so far; a frame is
+// emitted as a Path_Node when its operands run out, and its index is appended
+// to its parent's children.
 //
 // The same constraint the model's flat representation answers to
 // (SHACL-A-0001 decision 4), applied to the compiler rather than the
@@ -19,7 +18,7 @@ import store "store:store"
 @(private = "file")
 Path_Frame :: struct {
 	kind:     Path_Kind,
-	operands: [dynamic]store.Term_ID,
+	operands: [dynamic]u32,
 	next:     int,
 	children: [dynamic]int,
 }
@@ -29,15 +28,10 @@ Path_Frame :: struct {
 @(private)
 compile_path :: proc(
 	s: ^Shapes,
-	r: Reader($D, $It),
-	root_id: store.Term_ID,
+	r: Reader,
+	root_id: u32,
 	shape_node: rdf.Term,
-	load: Term_Loader,
-	load_data: rawptr,
 	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
 ) -> (
 	root: int,
 	err: Error,
@@ -54,14 +48,14 @@ compile_path :: proc(
 	ill_formed := Error{.Path_Ill_Formed, shape_node, intern(&s.terms, rdf.IRI(PATH))}
 
 	// A bare IRI is a predicate path and needs no frame.
-	if store.id_kind(root_id) == .IRI {
-		return emit_path(s, .Predicate, materialize_term(s, load, load_data, root_id), nil), Error{}
+	if session_kind(r.se, root_id) == .IRI {
+		return emit_path(s, .Predicate, materialize_term(s, r.se, root_id), nil), Error{}
 	}
-	if store.id_kind(root_id) == .Literal {
+	if session_kind(r.se, root_id) == .Literal {
 		return -1, ill_formed
 	}
 
-	kind, operands, ok := classify_path(r, root_id, v, MATCH, NEXT, DESTROY)
+	kind, operands, ok := classify_path(r, root_id, v)
 	if !ok {
 		delete(operands)
 		return -1, ill_formed
@@ -80,16 +74,16 @@ compile_path :: proc(
 			child_id := top.operands[top.next]
 			top.next += 1
 
-			if store.id_kind(child_id) == .IRI {
-				index := emit_path(s, .Predicate, materialize_term(s, load, load_data, child_id), nil)
+			if session_kind(r.se, child_id) == .IRI {
+				index := emit_path(s, .Predicate, materialize_term(s, r.se, child_id), nil)
 				append(&top.children, index)
 				continue
 			}
-			if store.id_kind(child_id) == .Literal {
+			if session_kind(r.se, child_id) == .Literal {
 				return -1, ill_formed
 			}
 
-			child_kind, child_operands, child_ok := classify_path(r, child_id, v, MATCH, NEXT, DESTROY)
+			child_kind, child_operands, child_ok := classify_path(r, child_id, v)
 			if !child_ok {
 				delete(child_operands)
 				return -1, ill_formed
@@ -118,8 +112,6 @@ compile_path :: proc(
 }
 
 // classify_path decides what a non-IRI path node is and returns its operands.
-// Flat: it issues queries and calls list_items, but nothing calls it back, so
-// it cannot participate in an instantiation cycle.
 //
 // **A sequence wins over every other form**, which is why `rdf:first` is
 // tested before `sh:inversePath` and friends. §2.3.1 says nothing about a node
@@ -132,21 +124,18 @@ compile_path :: proc(
 // would have compiled the inverse instead.
 @(private = "file")
 classify_path :: proc(
-	r: Reader($D, $It),
-	node: store.Term_ID,
+	r: Reader,
+	node: u32,
 	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
 ) -> (
 	kind: Path_Kind,
-	operands: [dynamic]store.Term_ID,
+	operands: [dynamic]u32,
 	ok: bool,
 ) {
 	// A sequence path is a bare RDF list, recognised by rdf:first.
 	if r.has_first {
-		if _, is_cell := first_object(r, node, r.first_id, MATCH, NEXT, DESTROY); is_cell {
-			items, list_ok := list_items(r, node, MATCH, NEXT, DESTROY)
+		if _, is_cell := first_object(r, node, r.first_id); is_cell {
+			items, list_ok := list_items(r, node)
 			if !list_ok {
 				delete(items)
 				return .Sequence, operands, false
@@ -170,7 +159,7 @@ classify_path :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		if object, found := first_object(r, node, v.ids[entry.iri], MATCH, NEXT, DESTROY); found {
+		if object, found := first_object(r, node, v.ids[entry.iri]); found {
 			append(&operands, object)
 			return entry.kind, operands, true
 		}
@@ -178,8 +167,8 @@ classify_path :: proc(
 
 	// sh:alternativePath takes an RDF list.
 	if v.found[ALTERNATIVE_PATH] {
-		if head, found := first_object(r, node, v.ids[ALTERNATIVE_PATH], MATCH, NEXT, DESTROY); found {
-			items, list_ok := list_items(r, head, MATCH, NEXT, DESTROY)
+		if head, found := first_object(r, node, v.ids[ALTERNATIVE_PATH]); found {
+			items, list_ok := list_items(r, head)
 			if !list_ok {
 				delete(items)
 				return .Alternative, operands, false

@@ -1,17 +1,16 @@
-// Package shacl is the backend-independent core of the SHACL validation
-// engine: shapes compilation, target resolution, path evaluation, constraint
-// dispatch, validation results, and the validation report graph.
+// Package shacl is the SHACL Core validation engine: shapes compilation,
+// target resolution, path evaluation, constraint dispatch, validation
+// results, and the validation report graph.
 //
-// It names no storage backend and imports none. Data reaches it through
-// odin-rdf-store's published match contract, bound at compile time by a thin
-// instantiation package — `shacl/kvstore`, over odin-rdf-store's persistent
-// backend. That split was originally not stylistic: kvstore foreign-imports a
-// static LMDB archive, so a core that imported it would put LMDB into the link
-// of every consumer, including the ones that only ever wanted an in-memory
-// store. odin-rdf-store has since retired that backend (STORE-A-0006), so
-// every consumer links LMDB and the split now earns its keep as the seam a
-// second backend would bind to. `tests/purity` still asserts that this package
-// acquires no backend import.
+// Data reaches it from **odin-rdf-record** — the family's system of record,
+// and the one and only store, by decision (SHACL-I-0004): an append-only,
+// hash-chained log replayed into a memory-resident projection serving
+// epoch-pinned snapshots. The engine reads a snapshot through the session
+// verbs in session.odin and nothing else; there is no backend abstraction,
+// because there is no other backend and none is planned. (The engine was
+// built backend-independent against odin-rdf-store's match interface, with
+// `shacl/kvstore` binding it; the port that collapsed those seams is
+// SHACL-I-0004, and the old shape survives in this repository's history.)
 //
 // The engine is deliberately validation-only. Inference and entailment
 // regimes, SHACL Advanced Features (rules, functions), and any server or
@@ -24,23 +23,31 @@
 // # The shape of a validation
 //
 // Four objects and three steps. A caller compiles a shapes graph once, binds
-// the model to the data store once, and then validates as often as it likes:
+// the model to the data snapshot once, and then validates as often as it
+// likes:
 //
-//	shapes   := compile(...)      // from a store holding the shapes graph
-//	bindings := bind(...)         // the model's terms → the data store's IDs
-//	validate(shapes, bindings, ..., visitor, data)
+//	se := session over a snapshot   // record.store_latest / store_at + session_init
+//	compile(&shapes, se)            // from the graph holding the shapes
+//	bindings_init(&b, &shapes, se)  // the model's terms → the snapshot's ids
+//	validate(&shapes, &b, se, visitor, data)
 //
-// `compile`, `bind`, and `validate` are supplied by the instantiation package,
-// because each names a backend; everything they call is here. The three
+// The shapes session and the data session may be the same, two graphs of one
+// store, or two stores entirely: the model owns every term it holds
+// (SHACL-A-0001), so it binds to whatever snapshot it is given. The three
 // consumers most callers want — a raw result visitor, a `sh:ValidationReport`
-// graph, and a conformance boolean — are also there, as `validate`,
-// `validate_report`, and `conforms`.
+// graph, and a conformance boolean — are `validate`, `validate_report`, and
+// `conforms`.
 //
 // A fourth entry point answers a narrower question: `conforms_node` asks whether
 // one node conforms to one *named* shape, producing no results at all. It is the
 // public face of suppressed validation (SHACL-A-0002), which is also what
 // `sh:not`, `sh:and`, `sh:or`, `sh:xone`, `sh:node`, and `sh:qualifiedValueShape`
-// are built on — the reason it exists before they do.
+// are built on. `validate_node` is the same walk with the results streamed.
+//
+// A snapshot is a value: acquire it, build sessions over it, release it. The
+// engine never retains one past the call it received it in — which is also
+// what makes it usable inside a `record.Validator`, whose candidate snapshot
+// must not be retained.
 //
 //
 // # Memory contract
@@ -50,33 +57,29 @@
 // rule for everything else.
 //
 //   - **A compiled `Shapes` owns every term it holds** and frees them at
-//     `shapes_destroy`. This is the deviation, and SHACL-A-0001 decision 3 is
-//     why: the two backends disagree about what `lookup_term` returns —
-//     kvstore builds a term from
-//     the database's bytes — so a borrowing model would have had a
-//     backend-dependent lifetime rule in its public contract. Owning states
-//     one rule instead: **the store a shapes graph was compiled from may be
-//     destroyed immediately afterwards**, and the model stays valid until
-//     `shapes_destroy`. Shapes graphs are small and bounded, so this costs a
-//     copy of a handful of terms, once.
+//     `shapes_destroy` (SHACL-A-0001 decision 3). The terms the store hands
+//     out are decoded from its dictionary arena, which closing the store
+//     frees — so the model interns copies, and **the store a shapes graph was
+//     compiled from may be closed immediately afterwards**; the model stays
+//     valid until `shapes_destroy`. Shapes graphs are small and bounded, so
+//     this costs a copy of a handful of terms, once.
 //
 //   - **A produced `Report` owns every term in its graph**, including the
 //     blank-node labels it mints, and frees them at `report_destroy`. Same
-//     reason, and on kvstore it is not a nicety but the only workable rule:
-//     the terms come from mapped database pages that closing the store
+//     reason: the terms come from arena bytes that closing the store
 //     invalidates. The triples `report_triples` hands out borrow from the
 //     report and die with it.
 //
-//   - **A `Result` borrows and owns nothing.** It names nodes by `Term_ID` and
-//     the shape and path by index into the model; it allocates nothing and is
-//     valid only for the duration of the visitor call. A caller keeping one
+//   - **A `Result` borrows and owns nothing.** It names nodes by resident id
+//     and the shape and path by index into the model; it allocates nothing and
+//     is valid only for the duration of the visitor call. A caller keeping one
 //     must copy what it needs — materialise the terms, or fold it into a
 //     `Report`. The alternative, results owning materialised terms, would
 //     allocate on the engine's hottest path to serve a case `Report` already
 //     serves.
 //
 //   - **`Bindings` borrow nothing** from either the model or the store; they
-//     hold IDs. `bindings_destroy` frees them, and the model and store are
+//     hold ids. `bindings_destroy` frees them, and the model and store are
 //     untouched.
 //
 //   - **`Error` terms borrow the model's table.** A failed compile still
@@ -131,19 +134,19 @@
 // shapes (§2.1.1) and nothing else, which is the right scope and worth saying
 // plainly: a `sh:` predicate on a node that is not a shape is not a parameter
 // anybody skipped. It is empty for all 98 entries of the vendored suite, and
-// `test_enabled_suites_are_green` asserts that rather than trusting it.
+// the suite harness asserts that rather than trusting it.
 //
 // **Blank nodes in a report come from three graphs and are standardised apart.**
 // A report names its own structure, nodes of the data graph (`sh:focusNode`,
 // `sh:value`), and nodes of the shapes graph (`sh:sourceShape`) — three separate
-// label spaces merged into one graph, and both backends start every store's
-// labels at `b0`. So the labels are made disjoint on the way in: a data-graph
-// blank node keeps the label the store gave it, because that is what lets a
-// consumer say *which* unnamed node failed; a shapes-graph blank node is
-// prefixed with `s`; and the report's own are `r0`, `r1`, …. Reading a
-// blank-node `sh:sourceShape` back against the shapes graph means stripping the
-// `s`. A caller supplying its own `Term_Loader` owes the other half of this:
-// borrowed labels must not begin with `r` or `s`.
+// label spaces merged into one graph. The labels are made disjoint on the way
+// in: a data-graph blank node keeps the label the store holds for it, because
+// that is what lets a consumer say *which* unnamed node failed; a shapes-graph
+// blank node is prefixed with `s`; and the report's own are `r0`, `r1`, ….
+// Reading a blank-node `sh:sourceShape` back against the shapes graph means
+// stripping the `s`. The record store interns labels as given, so keeping the
+// spaces apart *between documents* is the loader's `blank_prefix` — and a
+// caller's prefixes must not begin with `r` or `s`.
 //
 // **`sh:datatype` skips the lexical check for datatypes it does not model.**
 // §4.1.2 requires the value's lexical form to lie in the datatype's lexical
@@ -167,10 +170,10 @@
 // wrote and then reports conformance.
 //
 // **One data graph.** SHACL is specified against a single RDF graph;
-// odin-rdf-store holds a quad dataset. Validation reads one caller-named
+// odin-rdf-record holds a quad dataset. Validation reads one caller-named
 // graph — the default graph, or one named graph — never a union of them. The
-// core cannot even express a union: neither `Scan` nor `Step` takes a graph,
-// because the instantiation package's adapter binds it.
+// session is where that is enforced: the graph is bound into every pattern in
+// session.odin, and nothing above it ever writes one.
 //
 // **`sh:class` needs the class hierarchy in the *data* graph.** It walks
 // `rdfs:subClassOf*` in the graph being validated, not in the shapes graph, so

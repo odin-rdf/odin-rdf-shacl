@@ -5,25 +5,31 @@
 //
 // The bodies below are the README's, verbatim, with two differences and no
 // others. The import lines: the README writes them the way a consumer would,
-// through the `rdf:` and `store:` collections and its own module path, and this
-// package reaches sibling directories instead. And the opening line: the README
-// opens a path the reader would have chosen, while these call open_ephemeral,
-// which is what a suite wants and what a consumer with a real dataset does not.
-// Everything after that line is the README's.
+// through the `rdf:` and `record:` collections and its own module path, and
+// this package reaches sibling directories instead. And the opening line: the
+// README opens a directory on disk with `record.posix_file_ops()`, while
+// these open over the memory seam (`Mem_FS` + `mem_file_ops`), which is what
+// a suite wants and what a consumer with a real dataset does not. Everything
+// after that line is the README's.
 //
 // Keeping that true is the whole point. It stopped being true once (the quick
 // start lost its `session_init` calls and named a `Sink` field that did not
 // exist), because a mirror maintained by hand only verifies what someone
 // remembered to copy across. Change one, change the other, in the same commit.
+//
+// The validate-before-commit example left with `session_init_txn`
+// (SHACL-I-0004): its successor is the `record.Validator` binding, and its
+// example returns with SHACL-T-0034.
 package readme
 
+import "core:strings"
 import "core:testing"
 
 import rdf "rdf:rdf"
-import kvstore "store:store/kvstore"
+import "record:record"
+import "record:record/ingest"
 
 import shacl "../../shacl"
-import shacl_kvstore "../../shacl/kvstore"
 
 SHAPES :: `
 @prefix sh:  <http://www.w3.org/ns/shacl#> .
@@ -46,65 +52,93 @@ ex:alice a ex:Person ; ex:name "Alice" .
 ex:bob   a ex:Person .
 `
 
-// Validation is a compiled shapes model, a binding of that model to the store
-// holding the data, and a visitor the results stream to.
+// load turns one Turtle document into ops and commits them as one epoch. The
+// blank prefix scopes the document's blank nodes, so two documents cannot
+// collide on `_:b0`.
+load :: proc(db: ^record.Store, source: string, blank_prefix: string) -> bool {
+	ops, ingest_err := ingest.turtle(
+		transmute([]byte)source,
+		nil,
+		context.allocator,
+		blank_prefix = blank_prefix,
+	)
+	if ingest_err.kind != .None {
+		return false
+	}
+	defer ingest.ops_destroy(ops, context.allocator)
+	_, _, apply_err := record.apply(db, {ops = ops})
+	return apply_err == record.Apply_Error{}
+}
+
+// Validation is a compiled shapes model, a binding of that model to the
+// snapshot holding the data, and a visitor the results stream to.
 validate_example :: proc(report: ^[dynamic]string) -> shacl.Failure {
-	// 1. Open the store. It is a directory on disk, opened once and kept.
-	//    Shapes and data live in graphs of it; this example uses one store and
-	//    loads both into the default graph.
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	// 1. Open the store. Shapes and data live in graphs of it; this example
+	//    uses one store and loads both into the default graph.
+	fs: record.Mem_FS // suites and scratch; record.posix_file_ops() for a directory on disk
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "readme", record.mem_file_ops(&fs))
+	if open_err != .None {
 		return .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
 
-	// 2. Compile the shapes graph. The model owns every term it holds, so the
-	//    store may be closed afterwards and the model bound to another one.
-	//    Compile once and keep the model: loading a shapes graph twice does not
-	//    dedupe, because each load mints fresh blank nodes.
+	// 2. Load the two documents — each is one changeset, one epoch.
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return .None
+	}
+
+	// 3. Take a snapshot and bind a session over the graph to read. A
+	//    snapshot is a value: acquire, use, release.
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
+
+	// 4. Compile the shapes graph. The model owns every term it holds, so the
+	//    snapshot may be released afterwards and the model bound to another
+	//    store entirely. Compile once and keep the model.
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-
-	err, parse_err, _ := shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-	if parse_err.message != "" || err.kind != .None {
+	if shacl.compile(&shapes, se).kind != .None {
 		return .None
 	}
 
-	// 3. Load the data graph.
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
-
-	// 4. Bind the model's terms to this store's IDs — once per validation, not
-	//    once per check. A model compiled elsewhere binds here just as well.
+	// 5. Bind the model's terms to this snapshot's ids — once per validation,
+	//    not once per check. A model compiled elsewhere binds here just as well.
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
-	// 5. Validate. Results are handed to the visitor as they are found and
+	// 6. Validate. Results are handed to the visitor as they are found and
 	//    nothing is buffered, so memory stays flat however bad the data is.
 	sink := Sink {
-		shapes  = &shapes,
-		session = &session,
-		lines   = report,
+		shapes = &shapes,
+		se     = se,
+		lines  = report,
 	}
-	return shacl_kvstore.validate(&shapes, &bindings, &session, on_result, &sink)
+	return shacl.validate(&shapes, &bindings, se, on_result, &sink)
 }
 
 Sink :: struct {
-	shapes:  ^shacl.Shapes,
-	session: ^shacl_kvstore.Session,
-	lines:   ^[dynamic]string,
+	shapes: ^shacl.Shapes,
+	se:     shacl.Session,
+	lines:  ^[dynamic]string,
 }
 
-// A Result borrows and owns nothing: it names nodes by Term_ID and the shape
-// by index, and is valid only for this call. Keep anything you need by copying
+// A Result borrows and owns nothing: it names nodes by id and the shape by
+// index, and is valid only for this call. Keep anything you need by copying
 // it out — or use `validate_report` and let the report do it for you.
 on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
-	focus, _ := kvstore.lookup_term(sink.session.db, result.focus.id, context.temp_allocator)
+	buf: shacl.Term_Buf
+	focus, _ := shacl.session_term(sink.se, result.focus.id, buf[:])
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
-		append(sink.lines, string(iri))
+		append(sink.lines, strings.clone(string(iri), context.temp_allocator))
 	}
 	// Returning false would stop validation here — no further focus nodes
 	// resolved, no further paths walked.
@@ -129,25 +163,34 @@ test_readme_validate_example :: proc(t: ^testing.T) {
 // The conformance-only form, which is the README's second example: it stops at
 // the first violation instead of finding them all.
 conforms_example :: proc() -> (bool, shacl.Failure) {
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "readme", record.mem_file_ops(&fs))
+	if open_err != .None {
 		return false, .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return false, .None
+	}
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return false, .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
 
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	shacl.compile(&shapes, se)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
-	return shacl_kvstore.conforms(&shapes, &bindings, &session)
+	return shacl.conforms(&shapes, &bindings, se)
 }
 
 @(test)
@@ -163,25 +206,34 @@ test_readme_conforms_example :: proc(t: ^testing.T) {
 // odin-rdf-parser's job through any of its four emitters — this produces the
 // graph and leaves the format to the caller.
 report_example :: proc(r: ^shacl.Report) -> shacl.Failure {
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "readme", record.mem_file_ops(&fs))
+	if open_err != .None {
 		return .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return .None
+	}
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
 
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	shacl.compile(&shapes, se)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
-	return shacl_kvstore.validate_report(r, &shapes, &bindings, &session)
+	return shacl.validate_report(r, &shapes, &bindings, se)
 }
 
 @(test)
@@ -208,34 +260,44 @@ test_readme_report_example :: proc(t: ^testing.T) {
 // example, and the public face of suppressed validation (SHACL-A-0002) — it
 // produces no results, and it does not care what the shapes graph targets.
 conforms_node_example :: proc() -> (bool, shacl.Failure) {
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "readme", record.mem_file_ops(&fs))
+	if open_err != .None {
 		return false, .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return false, .None
+	}
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return false, .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
 
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	shacl.compile(&shapes, se)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
 	// A shape is named by its index in the compiled model, the same index a
-	// Result carries. Shapes with an IRI can be found by it.
+	// Result carries. Shapes with an IRI can be found by it; a focus node is
+	// named by term, through `node_focus`.
 	shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
 
-	return shacl_kvstore.conforms_node(
+	return shacl.conforms_node(
 		&shapes,
 		&bindings,
-		&session,
-		rdf.IRI("http://example.org/alice"),
+		se,
 		shape_index,
+		shacl.node_focus(se, rdf.IRI("http://example.org/alice")),
 	)
 }
 
@@ -248,38 +310,39 @@ test_readme_conforms_node_example :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 }
 
-// The same question with the results: `validate_node`, and its report-building
-// sibling. The README's answer to "which constraint did this resource break?"
-// (SHACL-T-0027).
+// The same question with the results: `validate_node_report`. The README's
+// answer to "which constraint did this resource break?" (SHACL-T-0027).
 validate_node_example :: proc(r: ^shacl.Report, node: string) -> shacl.Failure {
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "readme", record.mem_file_ops(&fs))
+	if open_err != .None {
 		return .None
 	}
-	defer kvstore.close(db)
+	defer record.store_close(&db)
+	if !load(&db, SHAPES, "shapes_") || !load(&db, DATA, "data_") {
+		return .None
+	}
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return .None
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
 
 	shapes: shacl.Shapes
 	defer shacl.shapes_destroy(&shapes)
-	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(SHAPES))
-
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	shacl.compile(&shapes, se)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
+	shacl.bindings_init(&bindings, &shapes, se)
 	defer shacl.bindings_destroy(&bindings)
 
 	shape_index, _ := shacl.shape_index_of(&shapes, rdf.IRI("http://example.org/PersonShape"))
 
-	return shacl_kvstore.validate_node_report(
-		r,
-		&shapes,
-		&bindings,
-		&session,
-		rdf.IRI(node),
-		shape_index,
-	)
+	return shacl.validate_node_report(r, &shapes, &bindings, se, rdf.IRI(node), shape_index)
 }
 
 @(test)
@@ -309,84 +372,4 @@ test_readme_validate_node_example :: proc(t: ^testing.T) {
 		}
 		testing.expect_value(t, results, 1)
 	}
-}
-
-
-// The validate-before-commit form: the candidate is decided against the dataset
-// it would produce. The README's fifth example (SHACL-T-0029).
-
-ONE_NAME_SHAPES :: `
-@prefix sh: <http://www.w3.org/ns/shacl#> .
-@prefix ex: <http://example.org/> .
-
-ex:OneNameShape a sh:NodeShape ;
-	sh:targetClass ex:Person ;
-	sh:property [ sh:path ex:name ; sh:maxCount 1 ] .
-`
-
-CANDIDATE :: `
-@prefix ex: <http://example.org/> .
-
-ex:alice ex:name "Alice Smith" .
-`
-
-// Returns whether the candidate was kept.
-validate_before_commit_example :: proc() -> (kept: bool, failure: shacl.Failure) {
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
-		return false, .None
-	}
-	defer kvstore.close(db)
-
-	shapes: shacl.Shapes
-	defer shacl.shapes_destroy(&shapes)
-	shacl_kvstore.compile_turtle(&shapes, db, transmute([]byte)string(ONE_NAME_SHAPES))
-
-	// The dataset as it stands: ex:alice is a Person and already has one name.
-	kvstore.load_turtle(db, transmute([]byte)string(DATA))
-
-	// 1. Open a write transaction and build the candidate inside it. Nothing is
-	//    visible outside the transaction and nothing is durable until commit.
-	tx, txn_err := kvstore.txn_begin(db, .Write)
-	if txn_err != nil {
-		return false, .None
-	}
-	// A no-op after a successful commit, so this is the whole cleanup story.
-	defer kvstore.txn_abort(&tx)
-
-	kvstore.load_turtle_txn(&tx, transmute([]byte)string(CANDIDATE))
-
-	// 2. Validate *through the same transaction*. This is the point: the
-	//    validator sees the committed data and the candidate together, which is
-	//    the dataset the commit would produce.
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init_txn(&session, &tx)
-
-	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &shapes, &session)
-	defer shacl.bindings_destroy(&bindings)
-
-	ok, fail := shacl_kvstore.conforms(&shapes, &bindings, &session)
-	if fail != .None || shacl_kvstore.session_error(&session) != nil {
-		return false, fail
-	}
-
-	// 3. Keep or discard the write on the answer. Returning without committing
-	//    discards it, because the deferred abort is what runs.
-	if !ok {
-		return false, .None
-	}
-	kvstore.txn_commit(&tx)
-	return true, .None
-}
-
-@(test)
-test_readme_validate_before_commit_example :: proc(t: ^testing.T) {
-	kept, failure := validate_before_commit_example()
-	testing.expect_value(t, failure, shacl.Failure.None)
-	// The candidate gives ex:alice a second ex:name, which sh:maxCount 1
-	// forbids — and it violates only because the committed data is visible.
-	// Validated on its own it would carry no ex:Person target at all and would
-	// conform vacuously, which is the answer this pattern exists to avoid.
-	testing.expect(t, !kept)
 }

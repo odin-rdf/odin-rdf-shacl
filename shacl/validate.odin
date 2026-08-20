@@ -2,7 +2,7 @@ package shacl
 
 import "base:runtime"
 
-import store "store:store"
+import rdf "rdf:rdf"
 
 // Validation: the join point where the compiled model, the targets, the paths,
 // the constraints, and the result stream become one engine (SHACL §3.4).
@@ -14,49 +14,25 @@ import store "store:store"
 // else here is the machinery that keeps that honest.
 //
 // **The walk is an explicit stack over the flat model** (SHACL-A-0001 decision
-// 4). Recursion would work — this is ordinary non-generic code, so it is not
-// the compiler hang that forced the flat representation — but the stack is what
-// makes recursion *detection* free: the set of shapes currently being validated
-// is literally the stack, and `on_stack` is a bit per shape rather than a
-// search. §3.4 leaves recursive shapes undefined and permits a processor to
-// signal a failure instead, which is what this does, at the first re-entry,
-// before any traversal can hang on cyclic data.
+// 4). Recursion would work — but the stack is what makes recursion *detection*
+// free: the set of shapes currently being validated is literally the stack,
+// and `on_stack` is a bit per shape rather than a search. §3.4 leaves
+// recursive shapes undefined and permits a processor to signal a failure
+// instead, which is what this does, at the first re-entry, before any
+// traversal can hang on cyclic data.
 //
 // **The dispatch seam is a switch, not a table** (`check.odin`), consistent
 // with SPARQL-T-0011's finding that the family's no-dynamic-dispatch default
 // costs nothing here. Adding a constraint component means adding a
 // `Constraint_Kind`, a scope, and a case — nothing in this file.
 //
-// **The store is reached through the four procedures in `Access`** and nothing
-// else. There is no backend name anywhere in this package; `shacl/kvstore`
-// `shacl/kvstore` supply the concrete four.
-
-// Access is everything the validator may do to the data graph.
-//
-// `scan`, `step` and `outgoing` all read it, and all take the same `data`
-// because the adapters need the same two things — the dataset and the graph —
-// and the graph belongs to the adapter rather than to the core, so a validation
-// cannot widen itself to the whole dataset (SHACL-A-0001 decision 5). `load`
-// materialises an ID and takes its own `load_data`, because on some backends that is
-// the dictionary while the dataset is a separate handle.
-//
-// **`outgoing` is the fourth read verb and the first one added since the spine**
-// (SHACL-T-0016). The three above it each yield *one* position of a matched
-// quad; `sh:closed` needs the predicate and the object of the same triple
-// together, which none of them can express. That is a gap in this struct, not in
-// the store — see `docs/store-evidence.md`.
-Access :: struct {
-	scan:      Scan,
-	step:      Step,
-	outgoing:  Outgoing,
-	load:      Term_Loader,
-	data:      rawptr,
-	load_data: rawptr,
-}
+// **The store is reached through the session verbs in session.odin** and
+// nothing else — odin-rdf-record, directly, the one and only store
+// (SHACL-I-0004).
 
 // Bindings is the term-binding bridge for a whole validation: every `rdf.Term`
-// the compiled model holds, resolved to the *data* store's `Term_ID`s once,
-// before anything is validated.
+// the compiled model holds, resolved to the *data* store's ids once, before
+// anything is validated.
 //
 // This is the SHACL half of what odin-rdf-sparql does for algebra constants,
 // and it carries the asymmetry SHACL-I-0001 warned about rather than
@@ -72,31 +48,26 @@ Bindings :: struct {
 
 	// Indexed by Shapes.constraints: the single-term parameter of
 	// Class/Datatype/Has_Value. Meaningless for the other kinds.
-	constraint:       []store.Term_ID,
+	constraint:       []u32,
 	constraint_bound: []bool,
 
 	// Indexed by Shapes.values: the members of every list-valued parameter —
 	// `sh:in`, `sh:languageIn`, and `sh:closed`'s allowed predicates.
-	value:            []store.Term_ID,
+	value:            []u32,
 	value_bound:      []bool,
 	allocator:        runtime.Allocator,
 }
 
-// bindings_init resolves the model against a data store. `find` must be the
-// *non-interning* lookup, so preparing a validation never writes to the graph
-// it is about to read.
-bindings_init :: proc(
-	b: ^Bindings,
-	s: ^Shapes,
-	find: Term_Finder,
-	find_data: rawptr,
-	allocator := context.allocator,
-) {
+// bindings_init resolves the model against the data session's snapshot.
+// Resolving is the non-interning lookup by construction — record's read side
+// cannot write — so preparing a validation never touches the graph it is
+// about to read.
+bindings_init :: proc(b: ^Bindings, s: ^Shapes, se: Session, allocator := context.allocator) {
 	b.allocator = allocator
-	target_bindings_init(&b.targets, s, find, find_data, allocator)
-	path_bindings_init(&b.paths, s, find, find_data, allocator)
+	target_bindings_init(&b.targets, s, se, allocator)
+	path_bindings_init(&b.paths, s, se, allocator)
 
-	b.constraint = make([]store.Term_ID, len(s.constraints), allocator)
+	b.constraint = make([]u32, len(s.constraints), allocator)
 	b.constraint_bound = make([]bool, len(s.constraints), allocator)
 	// Only the components that compare their parameter **by ID** need it bound.
 	// The value-range components hold a term too and never look here: they
@@ -123,16 +94,16 @@ bindings_init :: proc(
 		     .Disjoint,
 		     .Less_Than,
 		     .Less_Than_Or_Equals:
-			id, found := find(find_data, c.term)
+			id, found := session_resolve(se, c.term)
 			b.constraint[i] = id
 			b.constraint_bound[i] = found
 		}
 	}
 
-	b.value = make([]store.Term_ID, len(s.values), allocator)
+	b.value = make([]u32, len(s.values), allocator)
 	b.value_bound = make([]bool, len(s.values), allocator)
 	for term, i in s.values {
-		id, found := find(find_data, term)
+		id, found := session_resolve(se, term)
 		b.value[i] = id
 		b.value_bound[i] = found
 	}
@@ -177,8 +148,8 @@ failure_message :: proc(f: Failure) -> string {
 	return "unknown failure"
 }
 
-// validate runs the whole shapes model against the data graph and streams every
-// result to `visit`.
+// validate runs the whole shapes model against the data graph the session
+// reads and streams every result to `visit`.
 //
 // Returns a Failure rather than results: results went to the visitor as they
 // were found. `.None` means the traversal completed *or* the visitor stopped it
@@ -193,7 +164,7 @@ failure_message :: proc(f: Failure) -> string {
 validate :: proc(
 	s: ^Shapes,
 	b: ^Bindings,
-	access: Access,
+	se: Session,
 	visit: Result_Visitor,
 	visit_data: rawptr,
 	allocator := context.allocator,
@@ -201,7 +172,7 @@ validate :: proc(
 	v := Validation {
 		s          = s,
 		b          = b,
-		access     = access,
+		se         = se,
 		visit      = visit,
 		visit_data = visit_data,
 		allocator  = allocator,
@@ -217,9 +188,50 @@ validate :: proc(
 			v     = &v,
 			shape = root,
 		}
-		resolve_targets(s, &b.targets, root, access.scan, access.data, visit_focus, &state, allocator)
+		resolve_targets(s, &b.targets, root, se, visit_focus, &state, allocator)
 	}
 	return v.failure
+}
+
+// validate_report runs a validation and builds the `sh:ValidationReport`
+// graph, finished and ready to serialise. The report owns every term in it,
+// so it outlives the snapshot it was produced from.
+validate_report :: proc(
+	r: ^Report,
+	s: ^Shapes,
+	b: ^Bindings,
+	se: Session,
+	allocator := context.allocator,
+) -> Failure {
+	sink := Report_Sink {
+		report = r,
+		shapes = s,
+		se     = se,
+	}
+	failure := validate(s, b, se, report_sink_visitor, &sink, allocator)
+	report_finish(r)
+	return failure
+}
+
+// conforms answers "does this graph conform?" and stops at the first result of
+// **any severity**, which is what early exit is for. Severity does not enter
+// into it (§3.1): a warning breaks conformance exactly as a violation does, and
+// `misc/severity-001` is the entry that settles it.
+//
+// The boolean is meaningless when the Failure is not `.None`.
+conforms :: proc(
+	s: ^Shapes,
+	b: ^Bindings,
+	se: Session,
+	allocator := context.allocator,
+) -> (
+	bool,
+	Failure,
+) {
+	c: Conformance
+	conformance_init(&c)
+	failure := validate(s, b, se, conformance_visitor, &c, allocator)
+	return c.conforms, failure
 }
 
 // validate_node validates **one node against one shape** and streams the
@@ -239,6 +251,10 @@ validate :: proc(
 // the data around it, which for a consumer doing this per write is a latency
 // problem before it is anything worse.
 //
+// `focus` names the node — build one from a term with `node_focus`, which
+// resolves it against the session's snapshot: a term the data graph never
+// mentions is still a perfectly good focus node, validated as unbound.
+//
 // The `Failure` means what it means everywhere else: `.None` says the walk
 // completed or the visitor stopped it, and anything else says the stream is
 // incomplete and must not be read as conformance. Recursion detection, the
@@ -257,7 +273,7 @@ validate :: proc(
 validate_node :: proc(
 	s: ^Shapes,
 	b: ^Bindings,
-	access: Access,
+	se: Session,
 	shape_index: int,
 	focus: Focus_Node,
 	visit: Result_Visitor,
@@ -270,7 +286,7 @@ validate_node :: proc(
 	v := Validation {
 		s          = s,
 		b          = b,
-		access     = access,
+		se         = se,
 		visit      = visit,
 		visit_data = visit_data,
 		allocator  = allocator,
@@ -282,6 +298,41 @@ validate_node :: proc(
 	return v.failure
 }
 
+// validate_node_report validates one node against one shape and builds the
+// `sh:ValidationReport` graph for it — standing to `validate_node` as
+// `validate_report` stands to `validate`.
+//
+// The report is about that one node, so `sh:conforms` in it answers the narrow
+// question and not the graph's. It owns every term in it and outlives the
+// snapshot.
+validate_node_report :: proc(
+	r: ^Report,
+	s: ^Shapes,
+	b: ^Bindings,
+	se: Session,
+	node: rdf.Term,
+	shape_index: int,
+	allocator := context.allocator,
+) -> Failure {
+	sink := Report_Sink {
+		report = r,
+		shapes = s,
+		se     = se,
+	}
+	failure := validate_node(
+		s,
+		b,
+		se,
+		shape_index,
+		node_focus(se, node),
+		report_sink_visitor,
+		&sink,
+		allocator,
+	)
+	report_finish(r)
+	return failure
+}
+
 // validation_init prepares the two pieces of per-validation state that outlive
 // a single frame: the recursion set and the subclass-closure cache. Split out
 // of `validate` because a suppressed sub-run needs them too — and needs to
@@ -291,8 +342,8 @@ validation_init :: proc(v: ^Validation, allocator := context.allocator) {
 	v.allocator = allocator
 	v.on_stack = make([]bool, len(v.s.shapes), allocator)
 	v.classes.allocator = allocator
-	v.classes.class = make([dynamic]store.Term_ID, allocator)
-	v.classes.member = make([dynamic]map[store.Term_ID]bool, allocator)
+	v.classes.class = make([dynamic]u32, allocator)
+	v.classes.member = make([dynamic]map[u32]bool, allocator)
 }
 
 @(private)
@@ -311,7 +362,7 @@ validation_destroy :: proc(v: ^Validation) {
 Validation :: struct {
 	s:          ^Shapes,
 	b:          ^Bindings,
-	access:     Access,
+	se:         Session,
 	visit:      Result_Visitor,
 	visit_data: rawptr,
 	on_stack:   []bool, // indexed by Shapes.shapes: the recursion set
@@ -352,7 +403,7 @@ visit_focus :: proc(data: rawptr, focus: Focus_Node) -> bool {
 Frame :: struct {
 	shape:   int,
 	focus:   Focus_Node,
-	values:  [dynamic]store.Term_ID,
+	values:  [dynamic]u32,
 	unbound: bool,
 	cursor:  int,
 }
@@ -363,7 +414,7 @@ Frame :: struct {
 @(private)
 Value_Set :: struct {
 	focus:   Focus_Node,
-	ids:     []store.Term_ID,
+	ids:     []u32,
 	unbound: bool,
 }
 
@@ -458,27 +509,19 @@ push_frame :: proc(v: ^Validation, stack: ^[dynamic]Frame, shape_index: int, foc
 	}
 	if shape.path < 0 {
 		// A node shape's value node is its focus node.
-		f.values = make([dynamic]store.Term_ID, v.allocator)
+		f.values = make([dynamic]u32, v.allocator)
 		if focus.bound {
 			append(&f.values, focus.id)
 		} else {
 			f.unbound = true
 		}
 	} else if focus.bound {
-		f.values = value_nodes(
-			v.s,
-			&v.b.paths,
-			shape.path,
-			focus.id,
-			v.access.step,
-			v.access.data,
-			v.allocator,
-		)
+		f.values = value_nodes(v.s, &v.b.paths, shape.path, focus.id, v.se, v.allocator)
 	} else {
 		// No triple can mention a term the dictionary does not hold, so a path
 		// from an unbound focus node reaches nothing. That is emptiness, and it
 		// is meaningful: `sh:minCount 1` on such a node is a violation.
-		f.values = make([dynamic]store.Term_ID, v.allocator)
+		f.values = make([dynamic]u32, v.allocator)
 	}
 
 	v.on_stack[shape_index] = true
@@ -489,7 +532,7 @@ push_frame :: proc(v: ^Validation, stack: ^[dynamic]Frame, shape_index: int, foc
 // emit_result hands one result to the visitor and records a stop.
 //
 // The result borrows and owns nothing (see result.odin): it names nodes by
-// `Term_ID` and the shape and path by index, and is valid only for the duration
+// id and the shape and path by index, and is valid only for the duration
 // of the call.
 //
 // The two trailing parameters serve `sh:closed` alone and default to off. A
@@ -534,28 +577,28 @@ emit_result :: proc(
 // It is cached per class rather than per check because the closure is a walk
 // over the data graph and the same class is asked about once per value node.
 // The cache is a linear scan: a shapes graph names a handful of classes, and a
-// map keyed on a `Term_ID` would cost more bookkeeping than the scan saves.
+// map keyed on an id would cost more bookkeeping than the scan saves.
 
 @(private)
 Class_Closures :: struct {
-	class:     [dynamic]store.Term_ID,
-	member:    [dynamic]map[store.Term_ID]bool,
+	class:     [dynamic]u32,
+	member:    [dynamic]map[u32]bool,
 	allocator: runtime.Allocator,
 }
 
 // class_closure returns the members of `class`'s closure, computing it on first
 // ask. The map borrows the cache and is valid until the validation ends.
 @(private)
-class_closure :: proc(v: ^Validation, class: store.Term_ID) -> ^map[store.Term_ID]bool {
+class_closure :: proc(v: ^Validation, class: u32) -> ^map[u32]bool {
 	for known, i in v.classes.class {
 		if known == class {
 			return &v.classes.member[i]
 		}
 	}
-	ids := subclass_closure(&v.b.targets, v.access.scan, v.access.data, class, v.allocator)
+	ids := subclass_closure(&v.b.targets, v.se, class, v.allocator)
 	defer delete(ids)
 
-	set := make(map[store.Term_ID]bool, v.classes.allocator)
+	set := make(map[u32]bool, v.classes.allocator)
 	for id in ids {
 		set[id] = true
 	}

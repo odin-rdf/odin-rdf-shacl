@@ -3,7 +3,7 @@ package shacl
 import "core:testing"
 
 import rdf "rdf:rdf"
-import store "store:store"
+import "record:record"
 
 // Suppressed validation, tested where it lives.
 //
@@ -16,117 +16,24 @@ import store "store:store"
 // **Reviewed at SHACL-T-0017, as its acceptance criteria required, and kept.**
 // The question was whether a hand-built model still earns its place once real
 // consumers exist, and the risk named against it was drift: nothing here checks
-// the model against what `compile` actually produces. Two things settled it.
-//
-// The drift risk is now covered from the other side — `shacl/kvstore`'s
-// `test_inner_results_do_not_reach_the_caller` and
-// `test_an_inner_stop_does_not_truncate_the_outer_traversal` assert the same two
-// properties through a compiled shapes graph and a real backend, so a model here
-// that stopped resembling a compiled one would no longer be the only evidence.
-// And what is left is genuinely unreachable from outside: the assertions below
-// name `v.visit`, `v.visit_data`, `v.stopped`, `v.on_stack` and
+// the model against what `compile` actually produces. What settles it is that
+// what these tests reach is genuinely unreachable from outside: the assertions
+// below name `v.visit`, `v.visit_data`, `v.stopped`, `v.on_stack` and
 // `Suppressed_Probe` directly. SHACL-A-0002 records the save/restore as **a
 // discipline rather than a type** — a future field belonging to the caller's
 // stream must be added to `node_conforms`'s three and nothing in the compiler
 // will say so — and these are what would notice. A test that can only see
 // results cannot.
 //
-// They are in package `shacl` rather than in a backend package for that reason:
-// `node_conforms` takes an in-flight `Validation`, and a test in
-// `shacl/kvstore` can only reach the public `conforms_node`, which builds its
-// own `Validation` and therefore cannot see the save/restore at all.
-//
-// The store is a fake: `Access` is a handful of procedure pointers, so a
-// hand-built triple list satisfies it, and the model is built field by field
-// rather than compiled. That is the point — no shapes graph has to exist for
-// this mechanism to be wrong.
-
-// ---- A fake data graph, and a model built by hand -------------------------
+// The data graph is a one-quad record store over the memory seam (the seam
+// these tests faked before SHACL-I-0004 collapsed the backend seams): the
+// focus node is a bound IRI, and the model's `ex:p` predicate is absent from
+// the store, so the nested property shape's path reaches nothing and its
+// cardinality violates. The model is still built field by field rather than
+// compiled — no shapes graph has to exist for this mechanism to be wrong.
 
 @(private = "file")
-Fake :: struct {
-	triples: [][3]store.Term_ID,
-	terms:   []rdf.Term, // parallel to the IDs made by fake_id
-}
-
-@(private = "file")
-fake_id :: proc(i: int) -> store.Term_ID {
-	return store.make_id(.IRI, u64(i))
-}
-
-@(private = "file")
-fake_scan :: proc(
-	data: rawptr,
-	subject, predicate, object: store.Term_ID,
-	position: int,
-	visit: proc(data: rawptr, id: store.Term_ID) -> bool,
-	visit_data: rawptr,
-) -> bool {
-	f := cast(^Fake)data
-	for tr in f.triples {
-		if subject != store.WILDCARD && tr[0] != subject {
-			continue
-		}
-		if predicate != store.WILDCARD && tr[1] != predicate {
-			continue
-		}
-		if object != store.WILDCARD && tr[2] != object {
-			continue
-		}
-		if !visit(visit_data, tr[position]) {
-			return false
-		}
-	}
-	return true
-}
-
-@(private = "file")
-fake_step :: proc(
-	data: rawptr,
-	from: store.Term_ID,
-	predicate: store.Term_ID,
-	inverted: bool,
-	out: ^[dynamic]store.Term_ID,
-) {
-	f := cast(^Fake)data
-	for tr in f.triples {
-		if tr[1] != predicate {
-			continue
-		}
-		if inverted {
-			if tr[2] == from {
-				append(out, tr[0])
-			}
-		} else if tr[0] == from {
-			append(out, tr[2])
-		}
-	}
-}
-
-@(private = "file")
-fake_load :: proc(
-	data: rawptr,
-	id: store.Term_ID,
-	allocator := context.allocator,
-) -> (
-	term: rdf.Term,
-	owned: bool,
-) {
-	return nil, false
-}
-
-// The finder answers "not in this store" for everything, which is the honest
-// answer for a graph with no dictionary: nothing here binds a term, and no test
-// below depends on one.
-@(private = "file")
-fake_find :: proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, found: bool) {
-	return store.WILDCARD, false
-}
-
-@(private = "file")
-fake_access :: proc(f: ^Fake) -> Access {
-	return Access{scan = fake_scan, step = fake_step, load = fake_load, data = f, load_data = f}
-}
+FOCUS_IRI :: "http://example.org/focus"
 
 // The model: three node shapes and one property shape, none of them targeting
 // anything, because a suppressed run is asked about a node the caller names.
@@ -136,8 +43,8 @@ fake_access :: proc(f: ^Fake) -> Access {
 //	2  SHAPE_NESTED   — no constraints of its own, one sh:property child (3)
 //	3                 — a property shape on ex:p with sh:minCount 1
 //
-// Shape 3 is what makes shape 2 fail: the fake graph holds no ex:p triple, so
-// the path reaches nothing and the cardinality violates. It is in the model to
+// Shape 3 is what makes shape 2 fail: the store holds no ex:p triple, so the
+// path reaches nothing and the cardinality violates. It is in the model to
 // assert that a suppressed run descends into property shapes rather than
 // checking only the named shape's own constraints.
 @(private = "file")
@@ -213,30 +120,65 @@ counting_visitor :: proc(data: rawptr, result: Result) -> bool {
 }
 
 // harness sets up a validation the way `validate` does, with an outer visitor
-// installed, and hands it to the body. The focus node is a bound IRI.
+// installed, and hands it to the body. The focus node is a bound IRI: the
+// store holds one quad naming it, and nothing else — in particular no `ex:p`.
 @(private = "file")
 with_validation :: proc(t: ^testing.T, body: proc(t: ^testing.T, v: ^Validation, sink: ^Counting_Sink, focus: Focus_Node)) {
-	f := Fake{}
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	st: record.Store
+	_, open_err, _, _ := record.store_open(&st, "suppress", record.mem_file_ops(&fs))
+	testing.expect_value(t, open_err, record.Open_Error.None)
+	if open_err != .None {
+		return
+	}
+	defer record.store_close(&st)
+
+	ops := []record.Op {
+		{
+			kind = .Assert,
+			quad = rdf.Quad {
+				triple = rdf.Triple {
+					subject   = rdf.IRI(FOCUS_IRI),
+					predicate = rdf.IRI("http://example.org/q"),
+					object    = rdf.IRI("http://example.org/other"),
+				},
+			},
+		},
+	}
+	_, _, apply_err := record.apply(&st, {ops = ops})
+	testing.expect_value(t, apply_err, record.Apply_Error{})
+
+	snap, snap_err := record.store_latest(&st)
+	testing.expect_value(t, snap_err, record.Snapshot_Error.None)
+	if snap_err != .None {
+		return
+	}
+	defer record.snapshot_release(&snap)
+
+	se: Session
+	session_init(&se, snap)
+
 	s: Shapes
 	defer shapes_destroy(&s)
 	build_model(&s)
 
 	b: Bindings
-	bindings_init(&b, &s, fake_find, &f)
+	bindings_init(&b, &s, se)
 	defer bindings_destroy(&b)
 
 	sink: Counting_Sink
 	v := Validation {
 		s          = &s,
 		b          = &b,
-		access     = fake_access(&f),
+		se         = se,
 		visit      = counting_visitor,
 		visit_data = &sink,
 	}
 	validation_init(&v)
 	defer validation_destroy(&v)
 
-	body(t, &v, &sink, Focus_Node{id = fake_id(1), bound = true})
+	body(t, &v, &sink, node_focus(se, rdf.IRI(FOCUS_IRI)))
 }
 
 // ---- The properties -------------------------------------------------------

@@ -10,6 +10,11 @@
 // decision 3). So the promise under test is not "no allocation" but "every
 // allocation is owned and returned": compile then destroy must be net zero,
 // and must free exactly what it allocated.
+//
+// The store under everything here is odin-rdf-record over the memory seam
+// (SHACL-I-0004), opened with the tracked allocator — so the guards cover the
+// engine *and* the store lifecycle it drives: a stranded byte in either fails
+// the same assertion.
 package guards
 
 import "core:log"
@@ -17,10 +22,10 @@ import "core:mem"
 import "core:testing"
 
 import rdf "rdf:rdf"
-import kvstore "store:store/kvstore"
+import "record:record"
+import "record:record/ingest"
 
 import shacl "../../shacl"
-import shacl_kvstore "../../shacl/kvstore"
 
 // A cyclic graph with every path form over it, for the evaluation guard.
 PATHS :: `
@@ -95,9 +100,7 @@ ex:PersonShape a sh:NodeShape, rdfs:Class ;
 	# ignored-parameter record interns a term per unimplemented parameter it
 	# finds. sh:name is inert and sh:sparql is unimplemented — SHACL-SPARQL, a
 	# later phase — so the record has to distinguish them without leaking
-	# either. It was sh:minInclusive until SHACL-T-0013 implemented it, which
-	# left this guard covering an empty record for six tasks; a parameter this
-	# project has decided *not* to implement is the one that stays honest.
+	# either.
 	#
 	# All six shape-expecting parameters appear here, which is the point of the
 	# fixture rather than a flourish: each one allocates a nested suppressed
@@ -113,6 +116,74 @@ ex:PersonShape a sh:NodeShape, rdfs:Class ;
 ex:Nested sh:path ex:p ; sh:minCount 1 ; sh:maxLength 5 .
 ex:AlsoNested sh:not ex:Nested .
 `
+
+// Guard_DB is one record store over the memory seam, opened with the guard's
+// tracked allocator so its whole lifecycle is under the same assertion.
+// Never copied after open: the writer points at the Mem_FS inside.
+@(private)
+Guard_DB :: struct {
+	fs:       record.Mem_FS,
+	st:       record.Store,
+	snap:     record.Snapshot,
+	has_snap: bool,
+	ok:       bool,
+}
+
+@(private)
+gdb_open :: proc(db: ^Guard_DB, allocator: mem.Allocator) {
+	_, err, _, _ := record.store_open(&db.st, "guards", record.mem_file_ops(&db.fs), allocator = allocator)
+	db.ok = err == .None
+}
+
+@(private)
+gdb_load :: proc(db: ^Guard_DB, source: string, allocator: mem.Allocator) {
+	if !db.ok {
+		return
+	}
+	ops, ierr := ingest.turtle(transmute([]byte)source, nil, allocator, blank_prefix = "g_")
+	if ierr.kind != .None {
+		return
+	}
+	defer ingest.ops_destroy(ops, allocator)
+	_, _, _ = record.apply(&db.st, {ops = ops}, allocator)
+}
+
+@(private)
+gdb_session :: proc(db: ^Guard_DB) -> shacl.Session {
+	if !db.has_snap {
+		snap, serr := record.store_latest(&db.st)
+		assert(serr == .None)
+		db.snap = snap
+		db.has_snap = true
+	}
+	se: shacl.Session
+	shacl.session_init(&se, db.snap)
+	return se
+}
+
+@(private)
+gdb_close :: proc(db: ^Guard_DB) {
+	if db.has_snap {
+		record.snapshot_release(&db.snap)
+		db.has_snap = false
+	}
+	if db.ok {
+		record.store_close(&db.st)
+		db.ok = false
+	}
+	record.mem_fs_destroy(&db.fs)
+}
+
+// gdb_compile is open + load + compile in one call — what compile_turtle was.
+@(private)
+gdb_compile :: proc(db: ^Guard_DB, s: ^shacl.Shapes, source: string, allocator: mem.Allocator) -> shacl.Error {
+	gdb_open(db, allocator)
+	gdb_load(db, source, allocator)
+	if !db.ok {
+		return shacl.Error{}
+	}
+	return shacl.compile(s, gdb_session(db), allocator)
+}
 
 // track runs body under a tracking allocator and reports what it leaked.
 @(private)
@@ -154,9 +225,9 @@ test_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "compile/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 		s: shacl.Shapes
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
+		db: Guard_DB
+		defer gdb_close(&db)
+		_ = gdb_compile(&db, &s, SHAPES, allocator)
 		shacl.shapes_destroy(&s)
 	})
 }
@@ -176,9 +247,9 @@ test_failed_compile_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 			sh:property [ sh:path ex:p ; sh:minCount "not a number" ] .
 		`
 		s: shacl.Shapes
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(BAD), nil, "", allocator)
+		db: Guard_DB
+		defer gdb_close(&db)
+		_ = gdb_compile(&db, &s, BAD, allocator)
 		shacl.shapes_destroy(&s)
 	})
 }
@@ -193,35 +264,24 @@ test_path_evaluation_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "path evaluation", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-
-		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(PATHS), "", nil, allocator)
-
+		db: Guard_DB
+		defer gdb_close(&db)
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_kvstore.compile(&s, &session, allocator)
+		_ = gdb_compile(&db, &s, PATHS, allocator)
+		se := gdb_session(&db)
 
 		b: shacl.Path_Bindings
 		defer shacl.path_bindings_destroy(&b)
-		shacl_kvstore.bind_paths(&b, &s, &session, allocator)
+		shacl.path_bindings_init(&b, &s, se, allocator)
 
-		focus, _, _ := kvstore.find_term(db, rdf.IRI("http://example.org/a"))
+		focus, _ := shacl.session_resolve(se, rdf.IRI("http://example.org/a"))
 		for sh in s.shapes {
 			if sh.path < 0 {
 				continue
 			}
 			for _ in 0 ..< 4 {
-				nodes := shacl_kvstore.value_nodes(
-					&s,
-					&b,
-					&session,
-					sh.path,
-					focus,
-					allocator,
-				)
+				nodes := shacl.value_nodes(&s, &b, sh.path, focus, se, allocator)
 				delete(nodes)
 			}
 		}
@@ -236,20 +296,16 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "target resolution", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-
-		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(TARGETS), "", nil, allocator)
-
+		db: Guard_DB
+		defer gdb_close(&db)
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_kvstore.compile(&s, &session, allocator)
+		_ = gdb_compile(&db, &s, TARGETS, allocator)
+		se := gdb_session(&db)
 
 		b: shacl.Target_Bindings
 		defer shacl.target_bindings_destroy(&b)
-		shacl_kvstore.bind_targets(&b, &s, &session, allocator)
+		shacl.target_bindings_init(&b, &s, se, allocator)
 
 		count := 0
 		visit :: proc(data: rawptr, focus: shacl.Focus_Node) -> bool {
@@ -259,15 +315,7 @@ test_target_resolution_is_net_zero :: proc(t: ^testing.T) {
 		}
 		for _, i in s.shapes {
 			for _ in 0 ..< 4 {
-				shacl_kvstore.resolve_targets(
-					&s,
-					&b,
-					i,
-					&session,
-					visit,
-					&count,
-					allocator,
-				)
+				shacl.resolve_targets(&s, &b, i, se, visit, &count, allocator)
 			}
 		}
 	})
@@ -280,17 +328,14 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 	track(t, "report build/destroy", proc(allocator: mem.Allocator) {
 		context.allocator = allocator
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-		_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(PATHS), "", nil, allocator)
-
+		db: Guard_DB
+		defer gdb_close(&db)
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		_ = shacl_kvstore.compile(&s, &session, allocator)
+		_ = gdb_compile(&db, &s, PATHS, allocator)
+		se := gdb_session(&db)
 
-		focus, _, _ := kvstore.find_term(db, rdf.IRI("http://example.org/a"))
+		focus, _ := shacl.session_resolve(se, rdf.IRI("http://example.org/a"))
 
 		r: shacl.Report
 		shacl.report_init(&r, allocator)
@@ -299,7 +344,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 		// serialiser builds are all exercised.
 		for sh, i in s.shapes {
 			for _ in 0 ..< 8 {
-				shacl_kvstore.report_add(
+				shacl.report_add(
 					&r,
 					&s,
 					shacl.Result {
@@ -309,7 +354,7 @@ test_report_build_then_destroy_is_net_zero :: proc(t: ^testing.T) {
 						component = .Min_Count,
 						severity = rdf.IRI(shacl.VIOLATION),
 					},
-					&session,
+					se,
 				)
 			}
 		}
@@ -413,24 +458,18 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(shapes_db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
+		shapes_db: Guard_DB
+		defer gdb_close(&shapes_db)
+		_ = gdb_compile(&shapes_db, &s, VALIDATION_SHAPES, allocator)
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-		_, _, _ = kvstore.load_turtle(
-			db,
-			transmute([]byte)string(VALIDATION_DATA),
-			"",
-			nil,
-			allocator,
-		)
+		db: Guard_DB
+		defer gdb_close(&db)
+		gdb_open(&db, allocator)
+		gdb_load(&db, VALIDATION_DATA, allocator)
+		se := gdb_session(&db)
 
 		b: shacl.Bindings
-		shacl_kvstore.bind(&b, &s, &session, allocator)
+		shacl.bindings_init(&b, &s, se, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		count := 0
@@ -442,14 +481,7 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 		// Repeated, because a per-validation leak and a per-result leak look the
 		// same after one run.
 		for _ in 0 ..< 4 {
-			_ = shacl_kvstore.validate(
-				&s,
-				&b,
-				&session,
-				visit,
-				&count,
-				allocator,
-			)
+			_ = shacl.validate(&s, &b, se, visit, &count, allocator)
 		}
 	})
 }
@@ -470,27 +502,24 @@ test_validation_is_net_zero :: proc(t: ^testing.T) {
 test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 	s: shacl.Shapes
 	defer shacl.shapes_destroy(&s)
-	shapes_db, shapes_open := kvstore.open_ephemeral()
-	if !testing.expectf(t, shapes_open == nil, "shapes store: %v", shapes_open) {
-		return
-	}
-	defer kvstore.close(shapes_db)
-	err, _, _ := shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES))
+	shapes_db: Guard_DB
+	defer gdb_close(&shapes_db)
+	err := gdb_compile(&shapes_db, &s, VALIDATION_SHAPES, context.allocator)
 	if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
 		return
 	}
 
-	db, open_err := kvstore.open_ephemeral()
-	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
+	db: Guard_DB
+	defer gdb_close(&db)
+	gdb_open(&db, context.allocator)
+	if !testing.expect(t, db.ok, "data store failed to open") {
 		return
 	}
-	defer kvstore.close(db)
-	_, _, _ = kvstore.load_turtle(db, transmute([]byte)string(VALIDATION_DATA))
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	gdb_load(&db, VALIDATION_DATA, context.allocator)
+	se := gdb_session(&db)
 
 	b: shacl.Bindings
-	shacl_kvstore.bind(&b, &s, &session)
+	shacl.bindings_init(&b, &s, se)
 	defer shacl.bindings_destroy(&b)
 
 	count := 0
@@ -499,13 +528,7 @@ test_the_validation_guard_fixture_is_fully_walked :: proc(t: ^testing.T) {
 		n^ += 1
 		return true
 	}
-	failure := shacl_kvstore.validate(
-		&s,
-		&b,
-		&session,
-		visit,
-		&count,
-	)
+	failure := shacl.validate(&s, &b, se, visit, &count)
 	testing.expectf(
 		t,
 		failure == .None,
@@ -537,38 +560,25 @@ test_early_exit_and_recursion_unwind_cleanly :: proc(t: ^testing.T) {
 		for source in sources {
 			s: shacl.Shapes
 			defer shacl.shapes_destroy(&s)
-			shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-			defer kvstore.close(shapes_db, allocator)
-			_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)source, nil, "", allocator)
+			shapes_db: Guard_DB
+			defer gdb_close(&shapes_db)
+			_ = gdb_compile(&shapes_db, &s, source, allocator)
 
-			db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-			defer kvstore.close(db, allocator)
-			session: shacl_kvstore.Session
-			shacl_kvstore.session_init(&session, db)
-			_, _, _ = kvstore.load_turtle(
-				db,
-				transmute([]byte)string(VALIDATION_DATA),
-				"",
-				nil,
-				allocator,
-			)
+			db: Guard_DB
+			defer gdb_close(&db)
+			gdb_open(&db, allocator)
+			gdb_load(&db, VALIDATION_DATA, allocator)
+			se := gdb_session(&db)
 
 			b: shacl.Bindings
-			shacl_kvstore.bind(&b, &s, &session, allocator)
+			shacl.bindings_init(&b, &s, se, allocator)
 			defer shacl.bindings_destroy(&b)
 
 			stop :: proc(data: rawptr, result: shacl.Result) -> bool {
 				return false
 			}
 			for _ in 0 ..< 4 {
-				_ = shacl_kvstore.validate(
-					&s,
-					&b,
-					&session,
-					stop,
-					nil,
-					allocator,
-				)
+				_ = shacl.validate(&s, &b, se, stop, nil, allocator)
 			}
 		}
 	})
@@ -585,28 +595,22 @@ test_conformance_validation_is_net_zero :: proc(t: ^testing.T) {
 
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(shapes_db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(VALIDATION_SHAPES), nil, "", allocator)
+		shapes_db: Guard_DB
+		defer gdb_close(&shapes_db)
+		_ = gdb_compile(&shapes_db, &s, VALIDATION_SHAPES, allocator)
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-		_, _, _ = kvstore.load_turtle(
-			db,
-			transmute([]byte)string(VALIDATION_DATA),
-			"",
-			nil,
-			allocator,
-		)
+		db: Guard_DB
+		defer gdb_close(&db)
+		gdb_open(&db, allocator)
+		gdb_load(&db, VALIDATION_DATA, allocator)
+		se := gdb_session(&db)
 
 		b: shacl.Bindings
-		shacl_kvstore.bind(&b, &s, &session, allocator)
+		shacl.bindings_init(&b, &s, se, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		for _ in 0 ..< 4 {
-			_, _ = shacl_kvstore.conforms(&s, &b, &session, allocator)
+			_, _ = shacl.conforms(&s, &b, se, allocator)
 		}
 	})
 }
@@ -620,9 +624,9 @@ test_repeated_compiles_do_not_accumulate :: proc(t: ^testing.T) {
 		context.allocator = allocator
 		for _ in 0 ..< 8 {
 			s: shacl.Shapes
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, db, transmute([]byte)string(SHAPES), nil, "", allocator)
+			db: Guard_DB
+			defer gdb_close(&db)
+			_ = gdb_compile(&db, &s, SHAPES, allocator)
 			shacl.shapes_destroy(&s)
 		}
 	})
@@ -634,8 +638,6 @@ test_repeated_compiles_do_not_accumulate :: proc(t: ^testing.T) {
 // abnormally — the probe stops at its first result, which unwinds by hand, and
 // a recursive shape abandons the walk mid-flight.
 //
-// It is also the machinery with no suite entry behind it until SHACL-T-0017, so
-// this guard and `shacl/suppress_test.odin` are the whole of its cover.
 // Repeated asks rather than one: a leak of a stack per ask is what would
 // otherwise hide inside a single call's noise.
 @(test)
@@ -655,35 +657,29 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 		`
 		s: shacl.Shapes
 		defer shacl.shapes_destroy(&s)
-		shapes_db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(shapes_db, allocator)
-		_, _, _ = shacl_kvstore.compile_turtle(&s, shapes_db, transmute([]byte)string(SUPPRESS), nil, "", allocator)
+		shapes_db: Guard_DB
+		defer gdb_close(&shapes_db)
+		_ = gdb_compile(&shapes_db, &s, SUPPRESS, allocator)
 
-		db, _ := kvstore.open_ephemeral(kvstore.EPHEMERAL_OPTIONS, allocator)
-		defer kvstore.close(db, allocator)
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-		_, _, _ = kvstore.load_turtle(
-			db,
-			transmute([]byte)string(VALIDATION_DATA),
-			"",
-			nil,
-			allocator,
-		)
+		db: Guard_DB
+		defer gdb_close(&db)
+		gdb_open(&db, allocator)
+		gdb_load(&db, VALIDATION_DATA, allocator)
+		se := gdb_session(&db)
 
 		b: shacl.Bindings
-		shacl_kvstore.bind(&b, &s, &session, allocator)
+		shacl.bindings_init(&b, &s, se, allocator)
 		defer shacl.bindings_destroy(&b)
 
 		node := rdf.Term(rdf.IRI("http://example.org/a"))
 		for shape_index in 0 ..< len(s.shapes) {
 			for _ in 0 ..< 4 {
-				_, _ = shacl_kvstore.conforms_node(
+				_, _ = shacl.conforms_node(
 					&s,
 					&b,
-					&session,
-					node,
+					se,
 					shape_index,
+					shacl.node_focus(se, node),
 					allocator,
 				)
 			}

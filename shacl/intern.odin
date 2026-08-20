@@ -4,7 +4,6 @@ import "base:runtime"
 import "core:strings"
 
 import rdf "rdf:rdf"
-import store "store:store"
 
 // Term_Table is the model's term storage: it owns a cloned copy of every term
 // the compiled shapes model holds, and frees them all at destroy.
@@ -81,18 +80,19 @@ intern :: proc(tt: ^Term_Table, term: rdf.Term) -> rdf.Term {
 	return cloned
 }
 
-// materialize_term resolves a store ID into the model's own storage: load it
-// from the backend, intern it, and free the loader's copy if it owned one.
-// Every term the compiler keeps goes through here, which is exactly what makes
-// a compiled model independent of the store it came from.
+// materialize_term resolves a store ID into the model's own storage: decode
+// it from the snapshot and intern the copy. Every term the compiler keeps
+// goes through here, which is exactly what makes a compiled model independent
+// of the store it came from — the decoded term is borrowed (see
+// `session_term`) and the intern is the copy that outlives it.
 @(private)
-materialize_term :: proc(s: ^Shapes, load: Term_Loader, load_data: rawptr, id: store.Term_ID) -> rdf.Term {
-	term, owned := load(load_data, id, s.allocator)
-	result := intern(&s.terms, term)
-	if owned {
-		rdf.destroy_term(term, s.allocator)
+materialize_term :: proc(s: ^Shapes, se: Session, id: u32) -> rdf.Term {
+	buf: Term_Buf
+	term, ok := session_term(se, id, buf[:])
+	if !ok {
+		return nil
 	}
-	return result
+	return intern(&s.terms, term)
 }
 
 // intern_string returns the table's own copy of s. Used for message text and

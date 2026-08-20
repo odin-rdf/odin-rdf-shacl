@@ -3,48 +3,25 @@ package shacl
 import "base:runtime"
 
 import rdf "rdf:rdf"
-import store "store:store"
 
 // Shapes-graph compilation.
 //
-// The shapes graph is read **through the match interface** (SHACL-A-0001
-// decision 1), and the access pattern is random rather than sequential:
-// reading a property shape means following `sh:property` to a node and then
-// reading `sh:path`, `sh:minCount`, `sh:class` off *that* node. Compiling from
-// the parser's stream instead would mean buffering the whole document and
-// building a private index over it — a store, reimplemented worse — and it
-// would read the entire graph where this reads only what the shapes reach.
-// That matters more here than it looks: in the W3C suite the shapes graph and
-// the data graph are usually the same document.
+// The shapes graph is read **through the session's snapshot** (SHACL-A-0001
+// decision 1's discipline, on the record store), and the access pattern is
+// random rather than sequential: reading a property shape means following
+// `sh:property` to a node and then reading `sh:path`, `sh:minCount`,
+// `sh:class` off *that* node. Compiling from the parser's stream instead
+// would mean buffering the whole document and building a private index over
+// it — a store, reimplemented worse — and it would read the entire graph
+// where this reads only what the shapes reach. That matters more here than it
+// looks: in the W3C suite the shapes graph and the data graph are usually the
+// same document.
 //
-// **Why this is one long procedure.** SPARQL-T-0011 established that a generic
-// procedure taking `$`-procedure constants and calling itself hangs the Odin
-// compiler (dev-2026-07) rather than failing. Shape and path structures are
-// recursive, so the recursion is carried in explicit worklists inside a single
-// generic procedure, and every helper that issues a query is generic-but-flat.
-// Pure logic — classifying a node kind, reading an integer — lives in ordinary
-// non-generic procedures in query.odin.
-//
-// The two cold operations reach the compiler as ordinary procedure pointers
-// rather than compile-time constants, the same split odin-rdf-sparql uses:
-// compilation runs once over a small graph, and SPARQL-T-0011 measured
-// procedure-pointer dispatch as noise even on a hot path.
-
-// Term_Loader materializes an ID into a term. `owned` reports whether the
-// caller must destroy it: memstore borrows its dictionary's storage, kvstore
-// builds the term from the database's bytes.
-Term_Loader :: #type proc(
-	data: rawptr,
-	id: store.Term_ID,
-	allocator: runtime.Allocator,
-) -> (
-	term: rdf.Term,
-	owned: bool,
-)
-
-// Term_Finder is the non-interning direction: it never assigns an ID, so
-// compiling a shapes graph never writes to the store it reads.
-Term_Finder :: #type proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, found: bool)
+// This used to be one long *generic* procedure threading `$MATCH`-style
+// compile-time constants, under SPARQL-T-0011's compiler-hang discipline.
+// With odin-rdf-record bound directly (SHACL-I-0004) it is one long ordinary
+// procedure: the explicit worklists stay — they are what keeps recursive
+// shape structures iterative — and the generic plumbing is gone.
 
 // Vocab holds the shapes graph's IDs for the vocabulary the compiler asks
 // about. A term the store has never seen has no ID, and no triple can mention
@@ -52,7 +29,7 @@ Term_Finder :: #type proc(data: rawptr, term: rdf.Term) -> (id: store.Term_ID, f
 // skipped rather than run.
 @(private)
 Vocab :: struct {
-	ids:   map[string]store.Term_ID,
+	ids:   map[string]u32,
 	found: map[string]bool,
 }
 
@@ -158,48 +135,36 @@ SHAPE_EXPECTING_PARAMETERS := [6]struct {
 	{XONE, true},
 }
 
-// compile builds a shapes model from the shapes graph in `dataset` at
-// `graph`, a bound graph ID — `store.DEFAULT_GRAPH` for the default graph.
-// The model owns everything it holds and outlives the dataset.
+// compile builds a shapes model from the shapes graph the session reads —
+// one graph of one snapshot; see `session_init`. The model owns everything it
+// holds and outlives the snapshot: release the snapshot as soon as this
+// returns.
 //
 // On a malformed shapes graph the returned Error names the shape node and the
 // parameter at fault. The model is still returned and must still be
 // destroyed: its term table is what the error's terms borrow from.
-compile :: proc(
-	s: ^Shapes,
-	dataset: ^$D,
-	graph: store.Term_ID,
-	load: Term_Loader,
-	load_data: rawptr,
-	find: Term_Finder,
-	find_data: rawptr,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> $It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-	allocator := context.allocator,
-) -> Error {
+compile :: proc(s: ^Shapes, se: Session, allocator := context.allocator) -> Error {
 	shapes_init(s, allocator)
 	context.allocator = allocator
 
 	v: Vocab
-	v.ids = make(map[string]store.Term_ID, allocator)
+	v.ids = make(map[string]u32, allocator)
 	v.found = make(map[string]bool, allocator)
 	defer delete(v.ids)
 	defer delete(v.found)
 	for iri in VOCAB_TERMS {
-		id, ok := find(find_data, rdf.IRI(iri))
+		id, ok := session_resolve(se, rdf.IRI(iri))
 		v.ids[iri] = id
 		v.found[iri] = ok
 	}
-	rdf_type_id, has_type := find(find_data, rdf.RDF_TYPE)
-	rdfs_class_id, has_class := find(find_data, rdf.IRI(RDFS_CLASS))
-	first_id, has_first := find(find_data, rdf.RDF_FIRST)
-	rest_id, has_rest := find(find_data, rdf.RDF_REST)
-	nil_id, has_nil := find(find_data, rdf.RDF_NIL)
+	rdf_type_id, has_type := session_resolve(se, rdf.RDF_TYPE)
+	rdfs_class_id, has_class := session_resolve(se, rdf.IRI(RDFS_CLASS))
+	first_id, has_first := session_resolve(se, rdf.RDF_FIRST)
+	rest_id, has_rest := session_resolve(se, rdf.RDF_REST)
+	nil_id, has_nil := session_resolve(se, rdf.RDF_NIL)
 
-	r := Reader(D, It) {
-		dataset   = dataset,
-		graph     = graph,
+	r := Reader {
+		se        = se,
 		first_id  = first_id,
 		has_first = has_first,
 		rest_id   = rest_id,
@@ -233,20 +198,20 @@ compile :: proc(
 	// it would make every node carrying sh:minCount a root-less shape, and
 	// nothing needs it.
 
-	pending: [dynamic]store.Term_ID
+	pending: [dynamic]u32
 	pending_kind: [dynamic]Shape_Kind
-	queued: map[store.Term_ID]bool
-	compiled: map[store.Term_ID]int
+	queued: map[u32]bool
+	compiled: map[u32]int
 	defer delete(pending)
 	defer delete(pending_kind)
 	defer delete(queued)
 	defer delete(compiled)
 
 	enqueue :: proc(
-		pending: ^[dynamic]store.Term_ID,
+		pending: ^[dynamic]u32,
 		pending_kind: ^[dynamic]Shape_Kind,
-		queued: ^map[store.Term_ID]bool,
-		id: store.Term_ID,
+		queued: ^map[u32]bool,
+		id: u32,
 		kind: Shape_Kind,
 	) {
 		if queued[id] {
@@ -258,14 +223,14 @@ compile :: proc(
 	}
 
 	if has_type && v.found[NODE_SHAPE] {
-		subs := subjects_matching(r, rdf_type_id, v.ids[NODE_SHAPE], MATCH, NEXT, DESTROY)
+		subs := subjects_matching(r, rdf_type_id, v.ids[NODE_SHAPE])
 		defer delete(subs)
 		for id in subs {
 			enqueue(&pending, &pending_kind, &queued, id, .Node)
 		}
 	}
 	if has_type && v.found[PROPERTY_SHAPE] {
-		subs := subjects_matching(r, rdf_type_id, v.ids[PROPERTY_SHAPE], MATCH, NEXT, DESTROY)
+		subs := subjects_matching(r, rdf_type_id, v.ids[PROPERTY_SHAPE])
 		defer delete(subs)
 		for id in subs {
 			enqueue(&pending, &pending_kind, &queued, id, .Property)
@@ -275,7 +240,7 @@ compile :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		subs := subjects_with_predicate(r, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		subs := subjects_with_predicate(r, v.ids[entry.iri])
 		defer delete(subs)
 		for id in subs {
 			enqueue(&pending, &pending_kind, &queued, id, .Node)
@@ -291,7 +256,7 @@ compile :: proc(
 		at += 1
 
 		sh: Shape
-		sh.node = materialize_term(s, load, load_data, shape_id)
+		sh.node = materialize_term(s, se, shape_id)
 		sh.kind = kind
 		sh.path = -1
 		sh.severity = intern(&s.terms, rdf.IRI(VIOLATION))
@@ -299,14 +264,14 @@ compile :: proc(
 		// sh:path decides the kind regardless of what discovery guessed: a
 		// shape with a path is a property shape (§2.1.2).
 		if v.found[PATH] {
-			paths := objects_of(r, shape_id, v.ids[PATH], MATCH, NEXT, DESTROY)
+			paths := objects_of(r, shape_id, v.ids[PATH])
 			defer delete(paths)
 			if len(paths) > 1 {
 				return Error{.Path_Multiple, sh.node, intern(&s.terms, rdf.IRI(PATH))}
 			}
 			if len(paths) == 1 {
 				sh.kind = .Property
-				root, err := compile_path(s, r, paths[0], sh.node, load, load_data, &v, MATCH, NEXT, DESTROY)
+				root, err := compile_path(s, r, paths[0], sh.node, &v)
 				if err.kind != .None {
 					return err
 				}
@@ -318,10 +283,10 @@ compile :: proc(
 		}
 
 		if v.found[DEACTIVATED] {
-			vals := objects_of(r, shape_id, v.ids[DEACTIVATED], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_id, v.ids[DEACTIVATED])
 			defer delete(vals)
 			for id in vals {
-				term := materialize_term(s, load, load_data, id)
+				term := materialize_term(s, se, id)
 				b, ok := boolean_value(term)
 				if !ok {
 					return Error{.Deactivated_Not_Boolean, sh.node, intern(&s.terms, rdf.IRI(DEACTIVATED))}
@@ -334,10 +299,10 @@ compile :: proc(
 		// here, and a shapes graph declaring its own — which `misc/severity-002`
 		// does — compiles and reports under it.
 		if v.found[SEVERITY] {
-			vals := objects_of(r, shape_id, v.ids[SEVERITY], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_id, v.ids[SEVERITY])
 			defer delete(vals)
 			for id in vals {
-				term := materialize_term(s, load, load_data, id)
+				term := materialize_term(s, se, id)
 				if _, is_iri := term.(rdf.IRI); !is_iri {
 					return Error{.Severity_Not_IRI, sh.node, intern(&s.terms, rdf.IRI(SEVERITY))}
 				}
@@ -347,10 +312,14 @@ compile :: proc(
 
 		sh.messages.start = len(s.messages)
 		if v.found[MESSAGE] {
-			vals := objects_of(r, shape_id, v.ids[MESSAGE], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_id, v.ids[MESSAGE])
 			defer delete(vals)
 			for id in vals {
-				term, owned := load(load_data, id, s.allocator)
+				buf: Term_Buf
+				term, ok := session_term(se, id, buf[:])
+				if !ok {
+					continue
+				}
 				if lit, is_lit := term.(rdf.Literal); is_lit {
 					append(
 						&s.messages,
@@ -359,9 +328,6 @@ compile :: proc(
 							language = intern_string(&s.terms, lit.language),
 						},
 					)
-				}
-				if owned {
-					rdf.destroy_term(term, s.allocator)
 				}
 			}
 		}
@@ -372,17 +338,17 @@ compile :: proc(
 			if !v.found[entry.iri] {
 				continue
 			}
-			vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_id, v.ids[entry.iri])
 			defer delete(vals)
 			for id in vals {
-				append(&s.targets, Target{kind = entry.kind, term = materialize_term(s, load, load_data, id)})
+				append(&s.targets, Target{kind = entry.kind, term = materialize_term(s, se, id)})
 			}
 		}
 		// Implicit class target: a shape that is also an rdfs:Class targets
 		// its own instances (§2.1.3.3). The shape node itself is stored as the
-		// class, so target resolution has no special case.
+		// class, so target resolution does not have to special-case it.
 		if has_type && has_class {
-			types := objects_of(r, shape_id, rdf_type_id, MATCH, NEXT, DESTROY)
+			types := objects_of(r, shape_id, rdf_type_id)
 			defer delete(types)
 			for id in types {
 				if id == rdfs_class_id {
@@ -394,23 +360,12 @@ compile :: proc(
 		sh.targets.count = len(s.targets) - sh.targets.start
 
 		sh.constraints.start = len(s.constraints)
-		if err := compile_constraints(
-			s,
-			r,
-			shape_id,
-			sh.node,
-			load,
-			load_data,
-			&v,
-			MATCH,
-			NEXT,
-			DESTROY,
-		); err.kind != .None {
+		if err := compile_constraints(s, r, shape_id, sh.node, &v); err.kind != .None {
 			return err
 		}
 		sh.constraints.count = len(s.constraints) - sh.constraints.start
 
-		record_ignored_parameters(s, r, shape_id, load, load_data, MATCH, NEXT, DESTROY)
+		record_ignored_parameters(s, r, shape_id)
 
 		compiled[shape_id] = len(s.shapes)
 		append(&s.shapes, sh)
@@ -418,10 +373,10 @@ compile :: proc(
 		// sh:property values are shapes. Queue them; the link is recorded in
 		// the fixup pass, because their indices are not known yet.
 		if v.found[PROPERTY] {
-			props := objects_of(r, shape_id, v.ids[PROPERTY], MATCH, NEXT, DESTROY)
+			props := objects_of(r, shape_id, v.ids[PROPERTY])
 			defer delete(props)
 			for id in props {
-				if store.id_kind(id) == .Literal {
+				if session_kind(se, id) == .Literal {
 					return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(PROPERTY))}
 				}
 				enqueue(&pending, &pending_kind, &queued, id, .Property)
@@ -440,11 +395,11 @@ compile :: proc(
 			if !v.found[entry.iri] {
 				continue
 			}
-			vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_id, v.ids[entry.iri])
 			defer delete(vals)
 			for id in vals {
 				if !entry.is_list {
-					if store.id_kind(id) == .Literal {
+					if session_kind(se, id) == .Literal {
 						return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(entry.iri))}
 					}
 					enqueue(&pending, &pending_kind, &queued, id, .Node)
@@ -458,13 +413,13 @@ compile :: proc(
 				// than two is the whole of the reason; discovery skipping a list
 				// it cannot walk is harmless, because that pass then errors on
 				// it before anything validates.
-				items, list_ok := list_items(r, id, MATCH, NEXT, DESTROY)
+				items, list_ok := list_items(r, id)
 				defer delete(items)
 				if !list_ok {
 					continue
 				}
 				for member in items {
-					if store.id_kind(member) == .Literal {
+					if session_kind(se, member) == .Literal {
 						return Error{.Shape_Expected, sh.node, intern(&s.terms, rdf.IRI(entry.iri))}
 					}
 					enqueue(&pending, &pending_kind, &queued, member, .Node)
@@ -481,7 +436,7 @@ compile :: proc(
 	// they were compiled, so the shapes graph is not re-queried for them.
 	if v.found[PROPERTY] {
 		for shape_index in 0 ..< len(s.shapes) {
-			props := objects_of(r, pending[shape_index], v.ids[PROPERTY], MATCH, NEXT, DESTROY)
+			props := objects_of(r, pending[shape_index], v.ids[PROPERTY])
 			defer delete(props)
 			start := len(s.shape_children)
 			for pid in props {
@@ -502,46 +457,17 @@ compile :: proc(
 	// fixup above. Both were created in `compile_constraints`, because
 	// `Shape.constraints` is a contiguous span; these two passes only fill in
 	// what they could not.
-	if err := compile_shape_operands(
-		s,
-		r,
-		pending[:len(s.shapes)],
-		&compiled,
-		&v,
-		MATCH,
-		NEXT,
-		DESTROY,
-	); err.kind != .None {
+	if err := compile_shape_operands(s, r, pending[:len(s.shapes)], &compiled, &v); err.kind != .None {
 		return err
 	}
 
 	// Siblings after operands: a sibling contributes its `sh:qualifiedValueShape`,
 	// which the pass above is what resolves.
-	if err := compile_qualified_siblings(
-		s,
-		r,
-		pending[:len(s.shapes)],
-		load,
-		load_data,
-		&v,
-		MATCH,
-		NEXT,
-		DESTROY,
-	); err.kind != .None {
+	if err := compile_qualified_siblings(s, r, pending[:len(s.shapes)], &v); err.kind != .None {
 		return err
 	}
 
-	if err := compile_closed_sets(
-		s,
-		r,
-		pending[:len(s.shapes)],
-		load,
-		load_data,
-		&v,
-		MATCH,
-		NEXT,
-		DESTROY,
-	); err.kind != .None {
+	if err := compile_closed_sets(s, r, pending[:len(s.shapes)], &v); err.kind != .None {
 		return err
 	}
 

@@ -4,40 +4,29 @@ import "core:strings"
 import "core:text/regex"
 
 import rdf "rdf:rdf"
-import store "store:store"
 
 // Constraint-parameter compilation.
 //
-// Seven components: the five SHACL-I-0001 named, plus `sh:in` and
-// `sh:hasValue`, which SHACL-T-0002 found the exit-criteria suite directories
-// exercise. The catalogue initiative adds the rest, and this procedure is the
-// seam it extends — a new component is a new case here and a new
-// Constraint_Kind, with nothing in the evaluator to touch.
-//
-// Flat and generic, like the query helpers: it issues store reads but calls
-// no generic procedure that could call it back, and never itself.
+// The full SHACL Core catalogue. A new component is a new case here and a new
+// Constraint_Kind, with — usually — nothing in the evaluator to touch; see
+// check.odin's package note for the exceptions that discipline has met.
 @(private)
 compile_constraints :: proc(
 	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_id: store.Term_ID,
+	r: Reader,
+	shape_id: u32,
 	shape_node: rdf.Term,
-	load: Term_Loader,
-	load_data: rawptr,
 	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
 ) -> Error {
 	// The components whose parameter is a non-negative integer: the two
 	// cardinalities (§4.2) and the two string lengths (§4.4.1–4.4.2). They read
 	// identically and cite different sections, so the error kinds travel in the
 	// table rather than being decided by the reader.
 	counts := [4]struct {
-		iri:          string,
-		kind:         Constraint_Kind,
-		not_integer:  Error_Kind,
-		negative:     Error_Kind,
+		iri:         string,
+		kind:        Constraint_Kind,
+		not_integer: Error_Kind,
+		negative:    Error_Kind,
 	} {
 		{MIN_COUNT, .Min_Count, .Count_Not_Integer, .Count_Negative},
 		{MAX_COUNT, .Max_Count, .Count_Not_Integer, .Count_Negative},
@@ -48,10 +37,10 @@ compile_constraints :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[entry.iri])
 		defer delete(vals)
 		for id in vals {
-			term := materialize_term(s, load, load_data, id)
+			term := materialize_term(s, r.se, id)
 			n, ok := integer_value(term)
 			if !ok {
 				return Error{entry.not_integer, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
@@ -90,22 +79,19 @@ compile_constraints :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[entry.iri])
 		defer delete(vals)
 		for id in vals {
-			append(
-				&s.constraints,
-				Constraint{kind = entry.kind, term = materialize_term(s, load, load_data, id)},
-			)
+			append(&s.constraints, Constraint{kind = entry.kind, term = materialize_term(s, r.se, id)})
 		}
 	}
 
 	// sh:nodeKind.
 	if v.found[NODE_KIND] {
-		vals := objects_of(r, shape_id, v.ids[NODE_KIND], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[NODE_KIND])
 		defer delete(vals)
 		for id in vals {
-			term := materialize_term(s, load, load_data, id)
+			term := materialize_term(s, r.se, id)
 			nk, ok := node_kind_value(term)
 			if !ok {
 				return Error{.Node_Kind_Unknown, shape_node, intern(&s.terms, rdf.IRI(NODE_KIND))}
@@ -126,17 +112,17 @@ compile_constraints :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[entry.iri])
 		defer delete(vals)
 		for head in vals {
-			items, ok := list_items(r, head, MATCH, NEXT, DESTROY)
+			items, ok := list_items(r, head)
 			defer delete(items)
 			if !ok {
 				return Error{entry.not_list, shape_node, intern(&s.terms, rdf.IRI(entry.iri))}
 			}
 			start := len(s.values)
 			for id in items {
-				append(&s.values, materialize_term(s, load, load_data, id))
+				append(&s.values, materialize_term(s, r.se, id))
 			}
 			append(&s.constraints, Constraint{kind = entry.kind, values = Span{start, len(s.values) - start}})
 		}
@@ -153,20 +139,20 @@ compile_constraints :: proc(
 	if v.found[PATTERN] {
 		flags: regex.Flags
 		if v.found[FLAGS] {
-			ids := objects_of(r, shape_id, v.ids[FLAGS], MATCH, NEXT, DESTROY)
+			ids := objects_of(r, shape_id, v.ids[FLAGS])
 			defer delete(ids)
 			for id in ids {
-				parsed, ok := regex_flags(materialize_term(s, load, load_data, id))
+				parsed, ok := regex_flags(materialize_term(s, r.se, id))
 				if !ok {
 					return Error{.Flags_Unsupported, shape_node, intern(&s.terms, rdf.IRI(FLAGS))}
 				}
 				flags |= parsed
 			}
 		}
-		vals := objects_of(r, shape_id, v.ids[PATTERN], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[PATTERN])
 		defer delete(vals)
 		for id in vals {
-			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			literal, is_literal := materialize_term(s, r.se, id).(rdf.Literal)
 			if !is_literal {
 				return Error{.Pattern_Ill_Formed, shape_node, intern(&s.terms, rdf.IRI(PATTERN))}
 			}
@@ -198,10 +184,10 @@ compile_constraints :: proc(
 	// Recorded rather than smoothed over: if a later revision of the corpus
 	// reverses it, one comparison here changes and this note is the reason why.
 	if v.found[UNIQUE_LANG] {
-		vals := objects_of(r, shape_id, v.ids[UNIQUE_LANG], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[UNIQUE_LANG])
 		defer delete(vals)
 		for id in vals {
-			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			literal, is_literal := materialize_term(s, r.se, id).(rdf.Literal)
 			if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
 				return Error{.Unique_Lang_Not_Boolean, shape_node, intern(&s.terms, rdf.IRI(UNIQUE_LANG))}
 			}
@@ -231,10 +217,10 @@ compile_constraints :: proc(
 	// linked to it until the fixup pass. `compile` fills `values` afterwards; see
 	// `compile_closed_sets`.
 	if v.found[CLOSED] {
-		vals := objects_of(r, shape_id, v.ids[CLOSED], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[CLOSED])
 		defer delete(vals)
 		for id in vals {
-			literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+			literal, is_literal := materialize_term(s, r.se, id).(rdf.Literal)
 			if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
 				return Error{.Closed_Not_Boolean, shape_node, intern(&s.terms, rdf.IRI(CLOSED))}
 			}
@@ -258,7 +244,7 @@ compile_constraints :: proc(
 		if !v.found[entry.iri] {
 			continue
 		}
-		vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+		vals := objects_of(r, shape_id, v.ids[entry.iri])
 		defer delete(vals)
 		for _ in vals {
 			append(&s.constraints, Constraint{kind = entry.kind})
@@ -294,8 +280,7 @@ compile_constraints :: proc(
 	// shape is resolved in `compile_shape_operands`; only its presence matters
 	// here.
 	if v.found[QUALIFIED_VALUE_SHAPE] {
-		if _, has_shape := first_object(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPE], MATCH, NEXT, DESTROY);
-		   has_shape {
+		if _, has_shape := first_object(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPE]); has_shape {
 			// Where this shape's qualified constraints begin. The two passes below
 			// fill the *same* constraints from opposite sides — the k-th minimum
 			// and the k-th maximum are one constraint — so the second pass has to
@@ -318,10 +303,10 @@ compile_constraints :: proc(
 				if !v.found[entry.iri] {
 					continue
 				}
-				vals := objects_of(r, shape_id, v.ids[entry.iri], MATCH, NEXT, DESTROY)
+				vals := objects_of(r, shape_id, v.ids[entry.iri])
 				defer delete(vals)
 				for id, i in vals {
-					n, ok := integer_value(materialize_term(s, load, load_data, id))
+					n, ok := integer_value(materialize_term(s, r.se, id))
 					if !ok {
 						return Error {
 							.Qualified_Count_Not_Integer,
@@ -397,13 +382,10 @@ SHAPE_VALUED_PARAMETERS := [5]struct {
 @(private)
 compile_shape_operands :: proc(
 	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_ids: []store.Term_ID,
-	compiled: ^map[store.Term_ID]int,
+	r: Reader,
+	shape_ids: []u32,
+	compiled: ^map[u32]int,
 	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
 ) -> Error {
 	for shape_index in 0 ..< len(s.shapes) {
 		shape := s.shapes[shape_index]
@@ -424,14 +406,7 @@ compile_shape_operands :: proc(
 			}
 			if carries_qualified {
 				start := len(s.shape_children)
-				if value, has := first_object(
-					r,
-					shape_ids[shape_index],
-					v.ids[QUALIFIED_VALUE_SHAPE],
-					MATCH,
-					NEXT,
-					DESTROY,
-				); has {
+				if value, has := first_object(r, shape_ids[shape_index], v.ids[QUALIFIED_VALUE_SHAPE]); has {
 					if operand, found := compiled[value]; found {
 						append(&s.shape_children, operand)
 					}
@@ -463,7 +438,7 @@ compile_shape_operands :: proc(
 				continue
 			}
 
-			vals := objects_of(r, shape_ids[shape_index], v.ids[entry.iri], MATCH, NEXT, DESTROY)
+			vals := objects_of(r, shape_ids[shape_index], v.ids[entry.iri])
 			defer delete(vals)
 
 			cursor := 0
@@ -480,7 +455,7 @@ compile_shape_operands :: proc(
 
 				start := len(s.shape_children)
 				if entry.is_list {
-					items, ok := list_items(r, value, MATCH, NEXT, DESTROY)
+					items, ok := list_items(r, value)
 					defer delete(items)
 					if !ok {
 						return Error {
@@ -529,17 +504,7 @@ compile_shape_operands :: proc(
 // the evaluator. Runs after the qualified shapes are resolved, since that is what
 // a sibling contributes.
 @(private)
-compile_qualified_siblings :: proc(
-	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_ids: []store.Term_ID,
-	load: Term_Loader,
-	load_data: rawptr,
-	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> Error {
+compile_qualified_siblings :: proc(s: ^Shapes, r: Reader, shape_ids: []u32, v: ^Vocab) -> Error {
 	if !v.found[QUALIFIED_VALUE_SHAPES_DISJOINT] {
 		return Error{}
 	}
@@ -559,18 +524,7 @@ compile_qualified_siblings :: proc(
 		}
 
 		for child in children {
-			disjoint, err := qualified_is_disjoint(
-				s,
-				r,
-				shape_ids[child],
-				s.shapes[child].node,
-				load,
-				load_data,
-				v,
-				MATCH,
-				NEXT,
-				DESTROY,
-			)
+			disjoint, err := qualified_is_disjoint(s, r, shape_ids[child], s.shapes[child].node, v)
 			if err.kind != .None {
 				return err
 			}
@@ -622,23 +576,18 @@ compile_qualified_siblings :: proc(
 @(private = "file")
 qualified_is_disjoint :: proc(
 	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_id: store.Term_ID,
+	r: Reader,
+	shape_id: u32,
 	shape_node: rdf.Term,
-	load: Term_Loader,
-	load_data: rawptr,
 	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
 ) -> (
 	disjoint: bool,
 	err: Error,
 ) {
-	ids := objects_of(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPES_DISJOINT], MATCH, NEXT, DESTROY)
+	ids := objects_of(r, shape_id, v.ids[QUALIFIED_VALUE_SHAPES_DISJOINT])
 	defer delete(ids)
 	for id in ids {
-		literal, is_literal := materialize_term(s, load, load_data, id).(rdf.Literal)
+		literal, is_literal := materialize_term(s, r.se, id).(rdf.Literal)
 		if !is_literal || literal.datatype != rdf.XSD_BOOLEAN {
 			return false, Error {
 				.Qualified_Disjoint_Not_Boolean,
@@ -678,17 +627,7 @@ qualified_is_disjoint :: proc(
 // shape index — `compile`'s worklist, which already holds them in that order, so
 // the graph is not re-queried to find them.
 @(private)
-compile_closed_sets :: proc(
-	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_ids: []store.Term_ID,
-	load: Term_Loader,
-	load_data: rawptr,
-	v: ^Vocab,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) -> Error {
+compile_closed_sets :: proc(s: ^Shapes, r: Reader, shape_ids: []u32, v: ^Vocab) -> Error {
 	for shape_index in 0 ..< len(s.shapes) {
 		shape := s.shapes[shape_index]
 		for offset in 0 ..< shape.constraints.count {
@@ -699,17 +638,10 @@ compile_closed_sets :: proc(
 			start := len(s.values)
 
 			if v.found[IGNORED_PROPERTIES] {
-				heads := objects_of(
-					r,
-					shape_ids[shape_index],
-					v.ids[IGNORED_PROPERTIES],
-					MATCH,
-					NEXT,
-					DESTROY,
-				)
+				heads := objects_of(r, shape_ids[shape_index], v.ids[IGNORED_PROPERTIES])
 				defer delete(heads)
 				for head in heads {
-					items, ok := list_items(r, head, MATCH, NEXT, DESTROY)
+					items, ok := list_items(r, head)
 					defer delete(items)
 					if !ok {
 						return Error {
@@ -719,7 +651,7 @@ compile_closed_sets :: proc(
 						}
 					}
 					for id in items {
-						append(&s.values, materialize_term(s, load, load_data, id))
+						append(&s.values, materialize_term(s, r.se, id))
 					}
 				}
 			}
@@ -872,21 +804,16 @@ INERT_PARAMETERS := []string{NAME, DESCRIPTION, ORDER, GROUP, DEFAULT_VALUE}
 // carries `rdf:type`, `rdfs:label`, and whatever else the document says about
 // it, and none of that is evidence of a missing component.
 @(private)
-record_ignored_parameters :: proc(
-	s: ^Shapes,
-	r: Reader($D, $It),
-	shape_id: store.Term_ID,
-	load: Term_Loader,
-	load_data: rawptr,
-	$MATCH: proc(dataset: ^D, pattern: store.Match_Pattern) -> It,
-	$NEXT: proc(it: ^It) -> (store.Encoded_Quad, bool),
-	$DESTROY: proc(it: ^It),
-) {
-	preds := predicates_of(r, shape_id, MATCH, NEXT, DESTROY)
+record_ignored_parameters :: proc(s: ^Shapes, r: Reader, shape_id: u32) {
+	preds := predicates_of(r, shape_id)
 	defer delete(preds)
 
 	for id in preds {
-		term, owned := load(load_data, id, s.allocator)
+		buf: Term_Buf
+		term, ok := session_term(r.se, id, buf[:])
+		if !ok {
+			continue
+		}
 		if parameter_is_ignored(term) {
 			recorded := intern(&s.terms, term)
 			seen := false
@@ -900,16 +827,12 @@ record_ignored_parameters :: proc(
 				append(&s.ignored, recorded)
 			}
 		}
-		if owned {
-			rdf.destroy_term(term, s.allocator)
-		}
 	}
 }
 
 // parameter_is_ignored decides whether one predicate belongs in the record: a
-// `sh:`-namespace IRI that is neither implemented nor inert. Ordinary and
-// non-generic, like every other decision the compiler makes without touching
-// the store — and, incidentally, the only place the namespace test lives.
+// `sh:`-namespace IRI that is neither implemented nor inert. The only place
+// the namespace test lives.
 @(private = "file")
 parameter_is_ignored :: proc(term: rdf.Term) -> bool {
 	iri, is_iri := term.(rdf.IRI)

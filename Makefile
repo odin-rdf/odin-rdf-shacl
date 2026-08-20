@@ -1,23 +1,21 @@
 NAME  := shacl-bench
 BENCH := bench
 
-# Odin rejects an output path with no extension on Windows -- "Output path
-# build/purity must have an appropriate extension" -- so every `-out:` in this
-# file is spelled through EXE. `OS` is set to Windows_NT by Windows itself
-# rather than by the shell, which is the one test that holds whether make is
-# MSYS, MinGW, or native.
+# Odin rejects an output path with no extension on Windows -- so every `-out:`
+# in this file is spelled through EXE. `OS` is set to Windows_NT by Windows
+# itself rather than by the shell, which is the one test that holds whether
+# make is MSYS, MinGW, or native.
 #
-# It is only the two built binaries that need it. `odin test` names its own
-# output and `odin check` writes none, so the suite and the vet pass were never
-# affected -- which is why this surfaced on the purity check and nowhere else.
+# Only the built benchmark binary needs it. `odin test` names its own output
+# and `odin check` writes none, so the suite and the vet pass were never
+# affected.
 ifeq ($(OS),Windows_NT)
 EXE := .exe
 else
 EXE :=
 endif
 
-OUT    := build/$(NAME)$(EXE)
-PURITY := build/purity$(EXE)
+OUT := build/$(NAME)$(EXE)
 
 # Odin source collections. The parser and the store are sibling checkouts
 # rather than vendored copies, so they are reached through collections instead
@@ -38,20 +36,16 @@ PURITY := build/purity$(EXE)
 COLL := -collection:rdf=../odin-rdf-parser -collection:store=../odin-rdf-store -collection:record=../odin-rdf-record
 
 # Every package with tests, listed rather than discovered (SHACL-T-0001).
-# `shacl` is the backend-independent core; the two instantiation packages bind
-# it to a backend each and are peers, so each carries its own tests; guards
-# holds the allocation assertions; readme compiles the README's examples so the
+# `shacl` is the engine, one package over odin-rdf-record (SHACL-T-0032 —
+# the instantiation split went with the backend seams); guards holds the
+# allocation assertions; readme compiles the README's examples so the
 # documentation cannot drift from the API; w3c/harness reads the vendored W3C
-# SHACL suite and is what will run it (SHACL-T-0002).
+# SHACL suite (SHACL-T-0002) — **temporarily out of the list** while
+# SHACL-T-0033 ports it onto the record store, and back in when it lands.
 PKGS := shacl \
-				shacl/kvstore \
 				tests/guards \
 				tests/readme \
-				tests/smoke \
-				tests/w3c/harness
-
-# Packages that are built rather than tested, and so are vetted separately.
-BUILD_PKGS := tests/purity
+				tests/smoke
 
 # STORE-A-0001 makes the store's Term_ID width a build-time choice, and this
 # project compiles the store's sources into its own binaries. Validation code
@@ -59,7 +53,7 @@ BUILD_PKGS := tests/purity
 # than once. This is what CI should invoke -- `make test`, the whole matrix.
 WIDTHS := 64 32
 
-.PHONY: all help test check purity bench build-bench clean
+.PHONY: all help test check bench build-bench clean
 
 all: test
 
@@ -83,49 +77,21 @@ test: ## Run the full suite at both Term_ID widths
 		done; \
 	done
 
-# Vets every package including the ones the suite never instantiates, then runs
-# the linkage property check -- a vet-clean tree that quietly links LMDB into
-# the core would pass `check` without it.
-check: ## Vet every package at the default Term_ID width, then check core purity
+# Vets every package including the ones the suite never instantiates.
+#
+# The `purity` target (grep a built binary for LMDB symbols) retired with
+# SHACL-T-0032: it guarded the seam a second backend would bind to, and by
+# owner decision there is no second backend and never will be —
+# odin-rdf-record is the one and only store, and shacl imports it directly.
+# With LMDB out of the link entirely the check was trivially true.
+#
+# bench/ is temporarily out of the vet loop while SHACL-T-0036 rebuilds it
+# against the record store; the guard below comes back with it.
+check: ## Vet every package at the default Term_ID width
 	@for pkg in $(PKGS); do \
 		echo "-- $$pkg --"; \
 		odin check $$pkg -no-entry-point -vet -strict-style $(COLL) || exit 1; \
 	done
-	@for pkg in $(BUILD_PKGS); do \
-		echo "-- $$pkg --"; \
-		odin check $$pkg -vet -strict-style $(COLL) || exit 1; \
-	done
-	@if [ -d $(BENCH) ]; then \
-		echo "-- $(BENCH) --"; \
-		odin check $(BENCH) -vet -strict-style $(COLL) || exit 1; \
-	fi
-	@$(MAKE) --no-print-directory purity
-
-# SHACL-A-0001's linkage property, asserted rather than trusted: a consumer of
-# the SHACL core and the in-memory backend must not carry LMDB. The core is
-# what protects this -- one convenience import of `store:store/kvstore` inside
-# `shacl` would put a static archive into every consumer's link, including the
-# ones that only ever want an in-memory store, and nothing else in the build
-# would complain.
-#
-# `nm` is not available everywhere (notably on the Windows runner), so its
-# absence skips the check with a message rather than failing the build. The
-# property is platform-independent, so checking it on the platforms that can is
-# enough.
-purity: ## Assert package shacl links no LMDB (builds tests/purity and inspects it)
-	@mkdir -p build
-	@odin build tests/purity -out:$(PURITY) $(COLL) || exit 1
-	@if ! command -v nm >/dev/null 2>&1; then \
-		echo "purity: nm unavailable, skipping symbol check"; \
-		exit 0; \
-	fi; \
-	if nm $(PURITY) 2>/dev/null | grep -qi 'mdb_'; then \
-		echo "purity: FAIL -- LMDB symbols found in a core-only consumer."; \
-		echo "         Something under package shacl imports store:store/kvstore."; \
-		nm $(PURITY) | grep -i 'mdb_' | head; \
-		exit 1; \
-	fi; \
-	echo "purity: ok -- no LMDB symbols in a core-only consumer"
 
 # Benchmarks measure the validator, and a debug build measures the compiler
 # instead, so they get the release flags.
