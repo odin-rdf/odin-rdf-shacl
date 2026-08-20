@@ -6,10 +6,10 @@ import "core:path/filepath"
 import "core:strings"
 
 import rdf "rdf:rdf"
-import kvstore "store:store/kvstore"
+import "record:record"
+import "record:record/ingest"
 
 import shacl "../../../shacl"
-import shacl_kvstore "../../../shacl/kvstore"
 
 // Running one suite entry: data graph + shapes graph → validation report.
 //
@@ -21,29 +21,121 @@ import shacl_kvstore "../../../shacl/kvstore"
 // case where an entry names the same file for both (`sht:dataGraph <>`,
 // `sht:shapesGraph <>`). Parsing it twice costs a few microseconds and buys the
 // property the whole design rests on: the shapes model owns its terms
-// (SHACL-A-0001 decision 3), so the shapes store is destroyed before the data
+// (SHACL-A-0001 decision 3), so the shapes store is closed before the data
 // store is even opened, and every run proves it rather than only the test that
 // asserts it. Sharing one store would also silently merge the two graphs'
 // blank-node label spaces, which is a bug waiting for the first entry whose
 // shapes and data are different files.
 //
-// **Both backends run the same entries**, and the runner is one procedure with
-// a switch rather than two, so a divergence between them has to be deliberate.
+// The store is odin-rdf-record over its memory seam (SHACL-I-0004): there is
+// one backend, by decision, and the runner is one procedure rather than a
+// switch over a seam no second backend will ever use.
 
-// One arm today. Kept rather than collapsed: it is the seam a second
-// backend would use, the same reason odin-rdf-store retained its
-// conformance Backend adapter when it became a single-backend library
-// (STORE-A-0006).
-Backend :: enum {
-	Kvstore,
+// Graph_DB is one record store over the memory seam holding one loaded
+// graph: open, load, session, close — the shape every store in this package
+// takes. It is the harness's counterpart of the engine's own test helper,
+// which package `w3c` cannot see.
+//
+// **Never copied or moved after `gdb_open`**: the writer holds a pointer to
+// the `Mem_FS` inside the struct. Declare one where it lives and pass it by
+// pointer.
+@(private)
+Graph_DB :: struct {
+	fs:       record.Mem_FS,
+	st:       record.Store,
+	snap:     record.Snapshot,
+	has_snap: bool,
+	ok:       bool,
 }
 
-backend_name :: proc(b: Backend) -> string {
-	switch b {
-	case .Kvstore:
-		return "kvstore"
+// GRAPH_BLANK_PREFIX is the load scope of every document this package loads.
+// Label characters only, and beginning with neither `r` nor `s` — the
+// report's own blank nodes and its relabelled shapes-graph ones are kept
+// apart from a store's by prefix (`shacl/report.odin`), and the caller's
+// ingest prefix is where that contract is honoured.
+@(private)
+GRAPH_BLANK_PREFIX :: "b_"
+
+@(private)
+gdb_open :: proc(db: ^Graph_DB, name: string) -> bool {
+	_, err, _, _ := record.store_open(&db.st, name, record.mem_file_ops(&db.fs))
+	db.ok = err == .None
+	return db.ok
+}
+
+// Load_Outcome says which stage of a load refused, for a runner that must
+// report "failed to parse" and "could not be loaded" as different things:
+// the first is the entry's problem, the second is this harness's.
+@(private)
+Load_Outcome :: enum {
+	Loaded,
+	Syntax,
+	Not_Loaded,
+}
+
+// gdb_load ingests one Turtle document into the default graph and applies it
+// as one epoch. A document with no triples loads as nothing — `apply`
+// refuses an empty changeset, and an empty graph is a graph. The ops are the
+// document's *set* of statements — `ingest` deduplicates since odin-rdf-record
+// `v0.2.0` (RECORD-T-0019, found by this suite: `core/complex/shacl-shacl`'s
+// shapes graph states two triples twice, and `apply` refuses a second assert
+// within one changeset), so they go to `apply` as they come.
+@(private)
+gdb_load :: proc(db: ^Graph_DB, source: string, base := "") -> Load_Outcome {
+	if !db.ok {
+		return .Not_Loaded
 	}
-	return "unknown"
+	ops, ierr := ingest.turtle(
+		transmute([]byte)source,
+		nil,
+		context.allocator,
+		blank_prefix = GRAPH_BLANK_PREFIX,
+		base = base,
+	)
+	switch ierr.kind {
+	case .None:
+	case .Syntax:
+		return .Syntax
+	case .Allocation:
+		return .Not_Loaded
+	}
+	defer ingest.ops_destroy(ops, context.allocator)
+	if len(ops) == 0 {
+		return .Loaded
+	}
+	_, _, aerr := record.apply(&db.st, {ops = ops})
+	return aerr == record.Apply_Error{} ? .Loaded : .Not_Loaded
+}
+
+// gdb_session binds a session over the head snapshot, pinning it on first
+// use. Load before you session: an epoch applied after the pin is invisible
+// to every session already handed out.
+@(private)
+gdb_session :: proc(db: ^Graph_DB) -> shacl.Session {
+	if !db.has_snap {
+		snap, serr := record.store_latest(&db.st)
+		assert(serr == .None, "gdb_session: store_latest failed")
+		db.snap = snap
+		db.has_snap = true
+	}
+	se: shacl.Session
+	shacl.session_init(&se, db.snap)
+	return se
+}
+
+// gdb_close releases the snapshot before the store, the order record asserts,
+// and is safe on a Graph_DB that never opened.
+@(private)
+gdb_close :: proc(db: ^Graph_DB) {
+	if db.has_snap {
+		record.snapshot_release(&db.snap)
+		db.has_snap = false
+	}
+	if db.ok {
+		record.store_close(&db.st)
+		db.ok = false
+	}
+	record.mem_fs_destroy(&db.fs)
 }
 
 // Run is what happened mechanically, as distinct from whether the report was
@@ -79,10 +171,7 @@ run_destroy :: proc(run: ^Run) {
 
 // run_entry validates one entry and folds the results into `r`, which the
 // caller must have `report_init`ed and must destroy.
-//
-// `tag` distinguishes the temporary store this run opens on the persistent
-// backend; it is ignored in memory.
-run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry, backend: Backend, tag: string) -> Run {
+run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry) -> Run {
 	shapes_src, shapes_read := read_entry_file(dir, e.shapes_graph)
 	defer delete(shapes_src)
 	if !shapes_read {
@@ -102,100 +191,69 @@ run_entry :: proc(r: ^shacl.Report, dir: string, e: Entry, backend: Backend, tag
 	data_base := strings.concatenate({MANIFEST_BASE, e.data_graph})
 	defer delete(data_base)
 
-	switch backend {
-	case .Kvstore:
-		return run_kvstore(r, shapes_src, shapes_base, data_src, data_base, tag)
-	}
-	return Run{detail = "unknown backend"}
+	return run_record(r, shapes_src, shapes_base, data_src, data_base)
 }
 
-// The two backend runs use a named result rather than composing a Run at each
-// return: from the moment the shapes graph compiles, the result owns a string,
-// and a `return Run{...}` that forgot to carry it would leak silently.
+// The run uses a named result rather than composing a Run at each return:
+// from the moment the shapes graph compiles, the result owns a string, and a
+// `return Run{...}` that forgot to carry it would leak silently.
 @(private = "file")
-run_kvstore :: proc(
-	r: ^shacl.Report,
-	shapes_src, shapes_base, data_src, data_base: string,
-	tag: string,
-) -> (
-	run: Run,
-) {
+run_record :: proc(r: ^shacl.Report, shapes_src, shapes_base, data_src, data_base: string) -> (run: Run) {
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 
-	shapes_parsed := false
-	compile_err := shacl.Error{}
-	shapes_store_err: kvstore.Error
+	// The shapes store lives only as long as this block. The model compiled
+	// from it is read for the rest of the run — the per-entry proof that it
+	// owns its terms.
 	{
-		db, open_err := kvstore.open_ephemeral()
-		if open_err != nil {
+		shapes_db: Graph_DB
+		defer gdb_close(&shapes_db)
+		if !gdb_open(&shapes_db, "shapes") {
 			run.detail = "shapes store could not be opened"
 			return
 		}
-		defer kvstore.close(db)
-
-		_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)shapes_src, shapes_base)
-		if load_err != nil {
+		switch gdb_load(&shapes_db, shapes_src, shapes_base) {
+		case .Loaded:
+		case .Syntax:
+			run.detail = "shapes graph failed to parse"
+			return
+		case .Not_Loaded:
 			run.detail = "shapes graph could not be loaded"
 			return
 		}
-		shapes_parsed = parse_err.message == ""
-		if shapes_parsed {
-			session: shacl_kvstore.Session
-			shacl_kvstore.session_init(&session, db)
-			compile_err = shacl_kvstore.compile(&model, &session)
-			shapes_store_err = shacl_kvstore.session_error(&session)
+		compile_err := shacl.compile(&model, gdb_session(&shapes_db))
+		if compile_err.kind != .None {
+			run.detail = shacl.error_message(compile_err.kind)
+			return
 		}
-	}
-	if !shapes_parsed {
-		run.detail = "shapes graph failed to parse"
-		return
-	}
-	if shapes_store_err != nil {
-		run.detail = "a store read failed while compiling the shapes graph"
-		return
-	}
-	if compile_err.kind != .None {
-		run.detail = shacl.error_message(compile_err.kind)
-		return
 	}
 	run.ignored = ignored_text(&model)
 
-	db, open_err := kvstore.open_ephemeral()
-	if open_err != nil {
+	db: Graph_DB
+	defer gdb_close(&db)
+	if !gdb_open(&db, "data") {
 		run.detail = "data store could not be opened"
 		return
 	}
-	defer kvstore.close(db)
-
-	_, parse_err, load_err := kvstore.load_turtle(db, transmute([]byte)data_src, data_base)
-	if load_err != nil {
+	switch gdb_load(&db, data_src, data_base) {
+	case .Loaded:
+	case .Syntax:
+		run.detail = "data graph failed to parse"
+		return
+	case .Not_Loaded:
 		run.detail = "data graph could not be loaded"
 		return
 	}
-	if parse_err.message != "" {
-		run.detail = "data graph failed to parse"
-		return
-	}
-
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	session := gdb_session(&db)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &model, &session)
+	shacl.bindings_init(&bindings, &model, session)
 	defer shacl.bindings_destroy(&bindings)
 
-	failure := shacl_kvstore.validate_report(r, &model, &bindings, &session)
+	failure := shacl.validate_report(r, &model, &bindings, session)
 	if failure != .None {
 		run.failure = failure
 		run.detail = shacl.failure_message(failure)
-		return
-	}
-	// An LMDB read that failed yields no value nodes, which is exactly what a
-	// conforming graph looks like. Reporting the report without this check
-	// would turn a broken store into a green suite.
-	if shacl_kvstore.session_error(&session) != nil {
-		run.detail = "a store read failed during validation"
 		return
 	}
 	run.ok = true

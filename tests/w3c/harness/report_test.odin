@@ -6,10 +6,8 @@ import "core:testing"
 import rdf "rdf:rdf"
 import triples "rdf:rdf/triples"
 import turtle "rdf:rdf/turtle"
-import kvstore "store:store/kvstore"
 
 import shacl "../../../shacl"
-import shacl_kvstore "../../../shacl/kvstore"
 
 // Report-graph tests live in the harness package because this is where the
 // blank-node isomorphism comparison lives, and comparing a produced report to
@@ -53,35 +51,32 @@ ex:QuietShape a sh:PropertyShape ;
 ex:alice ex:name "Alice" .
 `
 
+// A Fixture is one store and the model compiled from it. Never copied after
+// `fixture_init` — the Graph_DB inside must stay where it was opened.
 @(private = "file")
 Fixture :: struct {
-	db:      ^kvstore.Store,
-	session: shacl_kvstore.Session,
+	db:      Graph_DB,
+	session: shacl.Session,
 	shapes:  shacl.Shapes,
 }
 
 @(private = "file")
 fixture_init :: proc(t: ^testing.T, f: ^Fixture) -> bool {
-	db, open_err := kvstore.open_ephemeral()
-	if !testing.expectf(t, open_err == nil, "store: %v", open_err) {
+	if !testing.expect(t, gdb_open(&f.db, "report"), "store could not be opened") {
 		return false
 	}
-	f.db = db
-	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)string(REPORT_SHAPES))
-	if !testing.expectf(t, load_err.message == "" && db_err == nil, "load: %s %v", load_err.message, db_err) {
+	if !testing.expect(t, gdb_load(&f.db, REPORT_SHAPES) == .Loaded, "shapes graph failed to load") {
 		return false
 	}
-	shacl_kvstore.session_init(&f.session, db)
-	err := shacl_kvstore.compile(&f.shapes, &f.session)
+	f.session = gdb_session(&f.db)
+	err := shacl.compile(&f.shapes, f.session)
 	return testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind))
 }
 
 @(private = "file")
 fixture_destroy :: proc(f: ^Fixture) {
 	shacl.shapes_destroy(&f.shapes)
-	if f.db != nil {
-		kvstore.close(f.db)
-	}
+	gdb_close(&f.db)
 }
 
 @(private = "file")
@@ -96,7 +91,7 @@ shape_index :: proc(f: ^Fixture, iri: string) -> int {
 
 @(private = "file")
 term_id :: proc(f: ^Fixture, iri: string) -> shacl.Node_Ref {
-	id, found, _ := kvstore.find_term(f.db, rdf.IRI(iri))
+	id, found := shacl.session_resolve(f.session, rdf.IRI(iri))
 	return shacl.Node_Ref{id = id, bound = found}
 }
 
@@ -147,7 +142,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
 
-	shacl_kvstore.report_add(
+	shacl.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -157,7 +152,7 @@ test_report_matches_expected_graph :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.session,
+		f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -228,7 +223,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_kvstore.report_add(
+		shacl.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -238,7 +233,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.WARNING),
 			},
-			&f.session,
+			f.session,
 		)
 		shacl.report_finish(&r)
 		testing.expect(t, !shacl.report_conforms(&r), "any result breaks conformance, warnings included")
@@ -249,7 +244,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_kvstore.report_add(
+		shacl.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -259,7 +254,7 @@ test_conforms_both_directions :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.VIOLATION),
 			},
-			&f.session,
+			f.session,
 		)
 		shacl.report_finish(&r)
 		testing.expect(t, !shacl.report_conforms(&r), "a violation must break conformance")
@@ -297,7 +292,7 @@ test_result_path_serialisation :: proc(t: ^testing.T) {
 		r: shacl.Report
 		shacl.report_init(&r)
 		defer shacl.report_destroy(&r)
-		shacl_kvstore.report_add(
+		shacl.report_add(
 			&r,
 			&f.shapes,
 			shacl.Result {
@@ -307,7 +302,7 @@ test_result_path_serialisation :: proc(t: ^testing.T) {
 				component = .Min_Count,
 				severity = rdf.IRI(shacl.VIOLATION),
 			},
-			&f.session,
+			f.session,
 		)
 		shacl.report_finish(&r)
 
@@ -359,7 +354,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	shacl_kvstore.report_add(
+	shacl.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -369,7 +364,7 @@ test_no_undeclared_messages :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.session,
+		f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -401,7 +396,7 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	shacl_kvstore.report_add(
+	shacl.report_add(
 		&r,
 		&f.shapes,
 		shacl.Result {
@@ -413,7 +408,7 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 			component = .Min_Count,
 			severity = rdf.IRI(shacl.VIOLATION),
 		},
-		&f.session,
+		f.session,
 	)
 	shacl.report_finish(&r)
 
@@ -443,17 +438,22 @@ test_report_round_trips_through_the_emitter :: proc(t: ^testing.T) {
 // Blank nodes from three graphs meet in one report, and they have to stay
 // apart (SHACL-T-0019). This is the test the suite could not be: every `core/`
 // entry names one file as both its data graph and its shapes graph, so the two
-// loads assign identical labels and a report that merged the two namespaces
-// would be accidentally right. Here they are two files, written so that both
-// stores hand out `b0` for nodes that have nothing to do with each other — the
-// shapes graph's blank property shape and the data graph's blank value.
+// loads carry identical labels and a report that merged the two namespaces
+// would be accidentally right. Here they are two files, **written to collide**:
+// the shapes graph's blank property shape and the data graph's blank value are
+// both labelled `_:n0`, and both documents load under the harness's one
+// `blank_prefix`, so the two stores hold the same label for nodes that have
+// nothing to do with each other. (The record store interns labels as given —
+// the collision the old stores produced by minting `b0` from zero is now
+// constructed rather than inherited, which is the only way to keep the test
+// meaning what it did.)
 //
 // The property asserted is the merge rule itself rather than the labels that
 // implement it: no blank node the report *borrowed* may be a blank node the
 // report *built*, and the two borrowed graphs may not share one either. It
-// bites in both directions — swapping `fresh_blank`'s prefix back to `b` fails
-// it on the first clause, and dropping `shape_term`'s prefix fails it on the
-// second.
+// bites in both directions — swapping `fresh_blank`'s prefix to the harness's
+// fails it on the first clause, and dropping `shape_term`'s prefix fails it on
+// the second.
 @(test)
 test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 	shapes_src := `
@@ -461,51 +461,47 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 		@prefix ex: <http://example.org/> .
 		ex:Shape a sh:NodeShape ;
 			sh:targetClass ex:Thing ;
-			sh:property [ sh:path ex:p ; sh:nodeKind sh:IRI ] .`
+			sh:property _:n0 .
+		_:n0 sh:path ex:p ; sh:nodeKind sh:IRI .`
 	data_src := `
 		@prefix ex: <http://example.org/> .
-		ex:thing a ex:Thing ; ex:p _:anon .`
+		ex:thing a ex:Thing ; ex:p _:n0 .`
 
 	model: shacl.Shapes
 	defer shacl.shapes_destroy(&model)
 	{
-		db, open_err := kvstore.open_ephemeral()
-		if !testing.expectf(t, open_err == nil, "shapes store: %v", open_err) {
+		shapes_db: Graph_DB
+		defer gdb_close(&shapes_db)
+		if !testing.expect(t, gdb_open(&shapes_db, "shapes"), "shapes store could not be opened") {
 			return
 		}
-		defer kvstore.close(db)
-		_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)shapes_src)
-		if !testing.expectf(t, load_err.message == "" && db_err == nil, "shapes load: %s %v", load_err.message, db_err) {
+		if !testing.expect(t, gdb_load(&shapes_db, shapes_src) == .Loaded, "shapes graph failed to load") {
 			return
 		}
-		session: shacl_kvstore.Session
-		shacl_kvstore.session_init(&session, db)
-		err := shacl_kvstore.compile(&model, &session)
+		err := shacl.compile(&model, gdb_session(&shapes_db))
 		if !testing.expectf(t, err.kind == .None, "compile: %s", shacl.error_message(err.kind)) {
 			return
 		}
 	}
 
-	db, open_err := kvstore.open_ephemeral()
-	if !testing.expectf(t, open_err == nil, "data store: %v", open_err) {
+	db: Graph_DB
+	defer gdb_close(&db)
+	if !testing.expect(t, gdb_open(&db, "data"), "data store could not be opened") {
 		return
 	}
-	defer kvstore.close(db)
-	_, load_err, db_err := kvstore.load_turtle(db, transmute([]byte)data_src)
-	if !testing.expectf(t, load_err.message == "" && db_err == nil, "data load: %s %v", load_err.message, db_err) {
+	if !testing.expect(t, gdb_load(&db, data_src) == .Loaded, "data graph failed to load") {
 		return
 	}
-	session: shacl_kvstore.Session
-	shacl_kvstore.session_init(&session, db)
+	session := gdb_session(&db)
 
 	bindings: shacl.Bindings
-	shacl_kvstore.bind(&bindings, &model, &session)
+	shacl.bindings_init(&bindings, &model, session)
 	defer shacl.bindings_destroy(&bindings)
 
 	r: shacl.Report
 	shacl.report_init(&r)
 	defer shacl.report_destroy(&r)
-	failure := shacl_kvstore.validate_report(&r, &model, &bindings, &session)
+	failure := shacl.validate_report(&r, &model, &bindings, session)
 	if !testing.expectf(t, failure == .None, "validate: %s", shacl.failure_message(failure)) {
 		return
 	}
@@ -572,7 +568,7 @@ test_report_blank_nodes_are_standardised_apart :: proc(t: ^testing.T) {
 
 // The conformance-only consumer: it stops at the first result, which is what
 // early exit is for. Asserted here on a synthetic stream;
-// `shacl/kvstore/validate_semantics_test.odin` asserts it end to end, on a traversal
+// `shacl/validate_semantics_test.odin` asserts it end to end, on a traversal
 // that actually stops.
 @(test)
 test_conformance_consumer_stops_at_the_first_result :: proc(t: ^testing.T) {

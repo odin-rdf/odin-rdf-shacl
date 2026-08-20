@@ -8,7 +8,7 @@ import "core:testing"
 import shacl "../../../shacl"
 
 // The conformance run itself: every entry of every enabled directory, against
-// both backends, at whichever `Term_ID` width the build chose.
+// the record store.
 //
 // **Enabled means fully green.** There is no skip list and no expected-failure
 // file, so this test is the whole scoreboard: a directory either passes
@@ -29,25 +29,19 @@ Counts :: struct {
 @(test)
 test_enabled_suites_are_green :: proc(t: ^testing.T) {
 	counts: Counts
-	for backend in Backend {
-		per_backend: Counts
-		for suite in SUITES {
-			if !suite.enabled {
-				continue
-			}
-			run_suite(t, suite, backend, &per_backend)
+	for suite in SUITES {
+		if !suite.enabled {
+			continue
 		}
-		testing.expectf(
-			t,
-			per_backend.entries == ENABLED_ENTRIES,
-			"%s: ran %d entries, ENABLED_ENTRIES pinned at %d",
-			backend_name(backend),
-			per_backend.entries,
-			ENABLED_ENTRIES,
-		)
-		counts.entries += per_backend.entries
-		counts.passed += per_backend.passed
+		run_suite(t, suite, &counts)
 	}
+	testing.expectf(
+		t,
+		counts.entries == ENABLED_ENTRIES,
+		"ran %d entries, ENABLED_ENTRIES pinned at %d",
+		counts.entries,
+		ENABLED_ENTRIES,
+	)
 	testing.expectf(
 		t,
 		counts.passed == counts.entries,
@@ -74,7 +68,7 @@ test_enabled_entry_count_is_consistent :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-run_suite :: proc(t: ^testing.T, suite: Suite, backend: Backend, counts: ^Counts) {
+run_suite :: proc(t: ^testing.T, suite: Suite, counts: ^Counts) {
 	manifest_path, _ := filepath.join({SUITE_ROOT, suite.dir, "manifest.ttl"})
 	defer delete(manifest_path)
 	manifest, manifest_err := os.read_entire_file(manifest_path, context.allocator)
@@ -100,7 +94,7 @@ run_suite :: proc(t: ^testing.T, suite: Suite, backend: Backend, counts: ^Counts
 
 		for e in tf.entries {
 			counts.entries += 1
-			if run_one(t, suite, backend, &tf, e) {
+			if run_one(t, suite, &tf, e) {
 				counts.passed += 1
 			}
 		}
@@ -108,15 +102,15 @@ run_suite :: proc(t: ^testing.T, suite: Suite, backend: Backend, counts: ^Counts
 }
 
 @(private = "file")
-run_one :: proc(t: ^testing.T, suite: Suite, backend: Backend, tf: ^Test_File, e: Entry) -> bool {
-	origin := strings.concatenate({backend_name(backend), " ", suite.dir, "/", e.id})
+run_one :: proc(t: ^testing.T, suite: Suite, tf: ^Test_File, e: Entry) -> bool {
+	origin := strings.concatenate({suite.dir, "/", e.id})
 	defer delete(origin)
 
 	report: shacl.Report
 	shacl.report_init(&report)
 	defer shacl.report_destroy(&report)
 
-	run := run_entry(&report, suite.dir, e, backend, e.id)
+	run := run_entry(&report, suite.dir, e)
 	defer run_destroy(&run)
 	if !testing.expectf(t, run.ok, "%s: could not be validated — %s", origin, run.detail) {
 		return false

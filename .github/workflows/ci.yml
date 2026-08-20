@@ -1,23 +1,22 @@
-# `make test` runs the whole matrix (both Term_ID widths) and `make check`
-# vets every package and asserts the core-purity property, so this workflow's
-# only real job is arranging the checkout the way the Makefile's collections
-# expect.
+# `make test` runs the suite and `make check` vets every package, so this
+# workflow's only real job is arranging the checkout the way the Makefile's
+# collections expect.
 #
-# Three checkouts, not one. This repo reaches its dependencies through
-# -collection:rdf=../odin-rdf-parser, -collection:store=../odin-rdf-store and
-# -collection:record=../odin-rdf-record, all relative to this repo, so all
-# four go into sibling directories under the workspace rather than the default
-# layout. The `rdf:` collection is needed even where this project only names a
-# store: both stores' own sources import `rdf:`, and a collection resolves in
-# the importing compilation.
+# Two checkouts, not one. This repo reaches its dependencies through
+# -collection:rdf=../odin-rdf-parser and -collection:record=../odin-rdf-record,
+# both relative to this repo, so all three go into sibling directories under
+# the workspace rather than the default layout. The `rdf:` collection is
+# needed even where this project only names the record: record's own sources
+# import `rdf:`, and a collection resolves in the importing compilation.
 #
-# The platform matrix is odin-rdf-store's, and it is load-bearing here rather
-# than inherited decoration. `shacl/kvstore` links the LMDB archives vendored
-# in odin-rdf-store (STORE-A-0004), which exist for darwin arm64/amd64, linux
-# arm64/amd64, and windows amd64 — anything else falls back to a system
-# library that will not be there. The three runners below are all covered
-# platforms, and `shacl/kvstore`'s linkage test is what proves the archive
-# actually resolves and runs on each rather than merely compiling.
+# The platform matrix is the family's. It used to be load-bearing for
+# linkage — `shacl/kvstore` linked the LMDB archives odin-rdf-store vendored
+# per platform — and with the SHACL-I-0004 port there is no native code in
+# any link. What the three runners prove now is that the record store
+# compiles everywhere this repository is built (its posix `File_Ops` is
+# `#+build linux, darwin`; Windows compiles the package without it) and that
+# the suites, which open every store over the platform-free memory seam, run
+# identically on each.
 name: CI
 
 # Documentation-only commits do not run this workflow. More than half the
@@ -68,28 +67,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # **Windows runs one Term_ID width, not both**, and the reason is that
-        # the width matrix and the platform matrix test different things. A
-        # width-sensitive bug is arithmetic — a 32-bit `Term_ID` overflowing, or
-        # a cast that assumed 64 — and it surfaces identically wherever it runs,
-        # so ubuntu and macos cover it in about fifteen seconds each. What
-        # Windows uniquely proves is linkage (the vendored LMDB `.lib` actually
-        # resolves), path handling, and the executable-extension rule the
-        # Makefile's EXE variable exists for. One width proves all three.
-        #
-        # It is worth halving because `make test` is 6 packages x N widths =
-        # 6N separate `odin test` invocations, each a fresh compile *and link*.
-        # Windows links slowly and was paying for it twelve times: 244s against
-        # ubuntu's 15s for the same target, which is where 9x of the job's 293s
-        # went. Nothing else in the job is meaningfully slow.
-        #
-        # The other two are left alone: `WIDTHS` defaults to `64 32` in the
-        # Makefile, so only the override needs stating. Keep the value
-        # space-free — it is interpolated unquoted into a PowerShell command
-        # line on this runner.
-        include:
-          - os: windows-latest
-            test_widths: WIDTHS=64
+        # Windows used to run one `Term_ID` width where the others ran two,
+        # to halve a job that was paying LMDB's link time twelve times over.
+        # The width matrix left with odin-rdf-store (SHACL-T-0033) — record's
+        # widths are fixed by design — so every runner now runs the same
+        # `make test`, once.
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -103,83 +85,35 @@ jobs:
       # repository broke, which is the only way to tell a local regression from
       # an upstream one.
       #
-      # **odin-rdf-store v0.3.0 is a floor, not just a pin**, and by now for
-      # three reasons, each one strictly above the last. `v0.1.0` vendored
-      # exactly one LMDB archive — `liblmdb_darwin_arm64.a` — and
-      # `shacl/kvstore` links those archives, so against that tag this builds on
-      # macOS and fails to link on the ubuntu and windows runners below;
-      # STORE-A-0004's five-platform vendoring is what `v0.1.1` released.
-      # SHACL-T-0028 added a second floor: `shacl/kvstore.compile_turtle` takes
-      # the caller's `^kvstore.Store` and a scratch graph, the signature this
-      # repository adopted when odin-rdf-store retired its in-memory backend
-      # (STORE-A-0006), which `v0.2.0` released. SHACL-T-0029 adds the third and
-      # current one: `Session` reads through an optional `^kvstore.Txn`, and
-      # `match_txn`, `find_term_txn`, `lookup_term_txn`, `find_graph_label_txn`
-      # and `load_turtle_txn` do not exist before `v0.3.0` (STORE-A-0007). Do
-      # not pin the store below it.
-      #
-      # **`v0.5.0` is a floor** (SHACL-T-0030). `as_of_test.odin` calls
-      # `kvstore.txn_begin_as_of` and `kvstore.remove`, neither of which exists
-      # before it (STORE-A-0008), so the pin cannot go below `v0.5.0` while that
-      # test is in the suite. `v0.5.0` is also a **format** break — a database
-      # written by an earlier store will not open — which costs this repository
-      # nothing, since every store it makes is ephemeral.
-      #
-      # **`v0.6.0` is the pin and is *not* a floor**, and the distinction is
-      # worth keeping because everything above this line is a floor. Nothing in
-      # this repository needs `v0.6.0` to compile — it is purely additive over
-      # `v0.5.0` (`estimate`, the three ordering procedures, `store.NAMED_GRAPHS`,
-      # `graphs`/`nodes`), the format version is unchanged at 2, and no
-      # signature moved. SHACL Core consumes none of it and has no task that
-      # will: the planner surface is odin-rdf-sparql's, and this repository
-      # reads the data graph through `match` alone.
-      #
-      # So the pin is here for one reason: **to be the second consumer that
-      # proves a store release safe.** A store's own CI cannot tell whether a
-      # capability it added broke somebody downstream, and a release validated
-      # by one consumer is validated against one consumer's usage. This job is
-      # the other half of that check, and it costs nothing to keep current.
-      #
-      # The reasoning for the previous pin is kept below because it is still
-      # true and is still why the floor cannot fall back to `v0.3.x`.
-      #
-      # **`v0.4.0` was pinned for a reason that is not a floor.** Nothing here
-      # needed it to compile. This job failed intermittently under `open_ephemeral` —
-      # one or two of ~58 opens per run, a different test each time. `v0.3.1`
-      # made the reservation report the OS error instead of collapsing it into
-      # `Temp_Unavailable`, which named the cause on the first run here:
-      # ERROR_ACCESS_DENIED from CREATE_NEW on a fresh temp name, i.e. another
-      # process on the runner holding a file briefly. `v0.4.0` retries the
-      # reservation eight times over ~35ms rather than treating one refusal as
-      # a verdict. If this job ever fails that way again, the pin is where to
-      # look first.
+      # odin-rdf-store was the third checkout here from SHACL-T-0020 until
+      # SHACL-T-0033, pinned last at `v0.6.0` over a floor that rose three
+      # times (`v0.1.1` for the per-platform LMDB archives, `v0.2.0` for
+      # `compile_turtle`'s post-memstore signature, `v0.3.0` for transactions,
+      # `v0.5.0` for as-of reads — SHACL-T-0020/-T-0028/-T-0029/-T-0030). The
+      # SHACL-I-0004 port replaced it with odin-rdf-record; the checkout and
+      # the `store:` collection are gone, not retained beside the record.
       #
       # To bump either: change the ref, run `make test` and `make check` locally
       # against the new checkout, and commit them together — a collection is
-      # resolved in the *importing* compilation, so the store's sources are built
-      # against whichever parser this file names, and moving one without the
-      # other is how two versions of the data model end up in one binary.
+      # resolved in the *importing* compilation, so the record's sources are
+      # built against whichever parser this file names, and moving one without
+      # the other is how two versions of the data model end up in one binary.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-parser
           ref: v0.1.0
           path: odin-rdf-parser
 
-      - uses: actions/checkout@v5
-        with:
-          repository: odin-rdf/odin-rdf-store
-          ref: v0.6.0
-          path: odin-rdf-store
-
-      # **odin-rdf-record `v0.1.0` is the pin and the first floor at once**
-      # (SHACL-T-0031, the SHACL-I-0004 port): it is the record's first tag,
-      # so nothing below it exists to fall back to, and everything this
-      # repository consumes — `store_open`/`apply`, the snapshot read API,
-      # `record/ingest`, `Mem_FS`/`mem_file_ops`, the `Validator` hook — is in
-      # it. The port replaces odin-rdf-store with odin-rdf-record
-      # (SHACL-I-0004); the store checkout above leaves this file when
-      # SHACL-T-0032/T-0033 delete the last `store:` import. Two things worth
-      # knowing at this seam:
+      # **odin-rdf-record `v0.2.0` is the pin and a floor** (SHACL-T-0033).
+      # `v0.1.0` was the first floor (SHACL-T-0031, the SHACL-I-0004 port):
+      # the record's first tag, holding everything this repository consumes —
+      # `store_open`/`apply`, the snapshot read API, `record/ingest`,
+      # `Mem_FS`/`mem_file_ops`, the `Validator` hook. `v0.2.0` raised it for
+      # one reason this suite found: `ingest` emits a document's *set* of
+      # statements (RECORD-T-0019), where `v0.1.0` emitted its list and
+      # `apply` refused the second assert of a repeated statement — and
+      # `core/complex/shacl-shacl`'s shapes graph repeats two. Below `v0.2.0`
+      # that entry cannot load. Two things worth knowing at this seam:
       #
       #   - **Windows**: the record has no Windows `File_Ops` — its posix file
       #     is `#+build linux, darwin`, so the package compiles on Windows
@@ -189,14 +123,10 @@ jobs:
       #   - **python3**: the record's *own* `make test` needs it (the
       #     cross-implementation verifier); a consumer compiling the library
       #     does not, so this job installs nothing.
-      #
-      # To bump: change the ref, run `make test` and `make check` locally
-      # against the new checkout, and commit together — the same
-      # collections-resolve-in-the-importer rule as the two above.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.1.0
+          ref: v0.2.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2
@@ -207,17 +137,10 @@ jobs:
       - name: Odin version
         run: odin version
 
-      # `check` ends by building tests/purity and inspecting it for LMDB
-      # symbols. On Windows `nm` is absent and the symbol check skips itself
-      # with a message — the property is platform-independent, so proving it
-      # on the runners that can is enough.
-      - name: Vet every package and check core purity
+      - name: Vet every package
         working-directory: odin-rdf-shacl
         run: make check
 
-      # Both Term_ID widths everywhere except Windows, which runs 64-bit only —
-      # see the matrix above for why. `matrix.test_widths` is empty on the other
-      # two, so they get the Makefile's own `WIDTHS := 64 32`.
-      - name: Test at both Term_ID widths
+      - name: Test
         working-directory: odin-rdf-shacl
-        run: make test ${{ matrix.test_widths }}
+        run: make test
