@@ -395,71 +395,79 @@ a `Session` where these take a dictionary and a dataset.
 
 ### Deciding whether a write may join the dataset
 
-A `Session` reads through the store by default, one autocommit operation per
-read. `session_init_txn` binds it to an open transaction instead, and every read
-below it then sees that transaction's dataset — which is what lets a validator
-decide about **the dataset a write would produce** rather than about the one
-already committed (odin-rdf-store v0.3.0, `STORE-A-0007`).
+The record store has one write entrance, `apply`, and one validator per store,
+wired at `store_open` and consulted on every changeset before a byte is
+written (`RECORD-A-0006`). A `Validator` is a compiled shapes model in that role:
+`apply` hands it **the dataset the write would produce** — head plus changeset,
+as an ordinary snapshot at the new epoch — and it is validated like any other
+snapshot.
 
 ```odin
-// 1. Build the candidate inside a write transaction. Nothing is visible outside
-//    it and nothing is durable until commit.
-tx, txn_err := kvstore.txn_begin(db, .Write)
-if txn_err != nil {
+// 1. Compile the shapes once, from wherever they live. The model owns every
+//    term it holds, so the store it came from may be closed — here it is.
+shapes: shacl.Shapes
+defer shacl.shapes_destroy(&shapes)
+compile_shapes(&shapes, SHAPES)
+
+// 2. Make a validator of the model and open the data store with it wired in.
+//    One validator per store; it must stay where it is until the store closes.
+v: shacl.Validator
+shacl.validator_init(&v, &shapes)
+defer shacl.validator_destroy(&v)
+
+db: record.Store
+_, open_err, _, _ := record.store_open(
+	&db,
+	"data",
+	record.posix_file_ops(),
+	validator = shacl.validator_hook(&v),
+)
+if open_err != .None {
 	return
 }
-// A no-op after a successful commit, so this is the whole cleanup story.
-defer kvstore.txn_abort(&tx)
+defer record.store_close(&db)
 
-kvstore.load_turtle_txn(&tx, transmute([]byte)string(CANDIDATE))
+// 3. Every apply is judged against the dataset it would produce. Under
+//    Enforce a violation is refused and nothing is written; under Record it
+//    commits and `conforms` carries the verdict.
+ops, _ := ingest.turtle(transmute([]byte)string(CANDIDATE), nil, context.allocator, blank_prefix = "c_")
+defer ingest.ops_destroy(ops, context.allocator)
+_, conforms, err := record.apply(&db, {ops = ops, mode = .Enforce})
 
-// 2. Validate through that same transaction: the committed data and the
-//    candidate, together.
-session: shacl_kvstore.Session
-shacl_kvstore.session_init_txn(&session, &tx)
-
-bindings: shacl.Bindings
-shacl_kvstore.bind(&bindings, &shapes, &session)
-defer shacl.bindings_destroy(&bindings)
-
-ok, failure := shacl_kvstore.conforms(&shapes, &bindings, &session)
-
-// 3. Keep or discard the write on the answer. Returning without committing
-//    discards it, because the deferred abort is what runs.
-if failure == .None && ok {
-	kvstore.txn_commit(&tx)
+// 4. The validator holds the last apply's report — valid until the next apply.
+if err.kind == .Rejected {
+	report := shacl.validator_report(&v)
+	// report_triples(report): the sh:ValidationReport, ready for any emitter
 }
 ```
 
 **The obvious alternative is wrong, not merely slow.** Building the candidate in
-a second store and validating *that* makes every constraint which must consult
-existing data read an empty world and pass: a `sh:maxCount` over a property the
-dataset already carries values for, a `sh:class` against a hierarchy that lives
-only in the committed graph, uniqueness across the dataset. A validator that
-cannot fail is worse than one that is absent.
+a store of its own and validating *that* makes every constraint which must
+consult existing data read an empty world and pass: a `sh:maxCount` over a
+property the dataset already carries values for, a `sh:class` against a
+hierarchy that lives only in the committed graph, uniqueness across the
+dataset. A validator that cannot fail is worse than one that is absent.
 
-**Two costs come with the pattern, and they are contract rather than backend
-detail:**
+Four things the binding decides, each stated in `validator.odin`:
 
-- A **write** transaction holds the environment's writer lock for its whole
-  life, serializing every other writer against that environment — and this
-  pattern holds one across an entire validation by construction, because
-  read-your-own-writes is the point. At ~200 processes per machine each
-  embedding its own store, that serializes within an environment and not between
-  them, which is why it is acceptable here. Putting one store behind many
-  concurrent writers is a different bargain, and worth knowing about first.
-- A **read** transaction (`session_init_txn` with a `.Read` handle, which makes a
-  validation one answer about one dataset) pins pages, so a concurrent writer
-  grows the file for as long as it is held.
-
-An autocommit read is *not* refused while a write transaction is open — only
-writes are. It succeeds and answers about the last committed dataset, so a
-session bound to the wrong thing does not announce itself.
-
-The compiled model is unaffected either way: it owns every term it holds, so
-compile once at startup and validate many, each validation inside a transaction
-of its own. `compile_turtle_txn` is the transactional twin of `compile_turtle`
-for the case where the shapes graph itself is being loaded inside one.
+- **The verdict's effect is the changeset's `Mode`, not the validator's.** Enforce
+  refuses (`apply` returns `.Rejected`, the store is exactly as it was);
+  Record commits and reports. **The log does not record that a validator
+  objected** — a Record-mode epoch whose changeset did not conform is
+  byte-for-byte the epoch a conforming one would have written. A consumer
+  that wants the verdict durable writes the report as facts.
+- **Reset per apply.** The validator's report and verdict are always the *last*
+  apply's; keep a report by emitting or copying it before applying again.
+  `validator_init(…, reporting = false)` keeps no report at all and allocates
+  nothing per result — the shape a gate that only needs yes or no should take.
+- **A `Failure` is a refusal.** When the engine cannot answer (a recursive
+  shape), the verdict is false and `v.failure` says why; a validator that
+  cannot answer does not let a write through.
+- **Whole graph, one graph.** Each check validates every target of every
+  shape in the validator's graph (`validator_init`'s `graph`; the default graph by
+  default), not only the nodes the changeset touched — a change to one node
+  can make another violate. The candidate snapshot is never retained past
+  the check, which is record's contract for it.
 
 ## Memory contract
 

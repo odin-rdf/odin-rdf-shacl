@@ -49,6 +49,13 @@
 // what makes it usable inside a `record.Validator`, whose candidate snapshot
 // must not be retained.
 //
+// That binding is the `Validator` (validator.odin): a compiled model wired into a
+// store at `record.store_open`, so every `apply` is validated against the
+// dataset it would produce — head plus changeset — before a byte is written.
+// Under `.Enforce` a violation is refused; under `.Record` it commits and is
+// reported. It is how validate-before-commit is done here, and the one place
+// the engine is called by the store rather than the other way round.
+//
 //
 // # Memory contract
 //

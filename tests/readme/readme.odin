@@ -17,9 +17,8 @@
 // exist), because a mirror maintained by hand only verifies what someone
 // remembered to copy across. Change one, change the other, in the same commit.
 //
-// The validate-before-commit example left with `session_init_txn`
-// (SHACL-I-0004): its successor is the `record.Validator` binding, and its
-// example returns with SHACL-T-0034.
+// The validate-before-commit example is the `Validator` one (SHACL-T-0034); like
+// the others it opens over the memory seam where the README opens a directory.
 package readme
 
 import "core:strings"
@@ -372,4 +371,100 @@ test_readme_validate_node_example :: proc(t: ^testing.T) {
 		}
 		testing.expect_value(t, results, 1)
 	}
+}
+
+CANDIDATE :: `
+@prefix ex: <http://example.org/> .
+
+ex:alice a ex:Person ; ex:name "Alice" ; ex:name "Alicia" .
+`
+
+MAX_ONE_NAME :: `
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://example.org/> .
+
+ex:PersonShape a sh:NodeShape ;
+	sh:targetClass ex:Person ;
+	sh:property [ sh:path ex:name ; sh:maxCount 1 ] .
+`
+
+// compile_shapes compiles a shapes document from a scratch store and closes
+// it — the model owns its terms and does not need the store afterwards.
+compile_shapes :: proc(shapes: ^shacl.Shapes, source: string) -> bool {
+	fs: record.Mem_FS
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(&db, "shapes", record.mem_file_ops(&fs))
+	if open_err != .None {
+		return false
+	}
+	defer record.store_close(&db)
+	if !load(&db, source, "shapes_") {
+		return false
+	}
+	snap, snap_err := record.store_latest(&db)
+	if snap_err != .None {
+		return false
+	}
+	defer record.snapshot_release(&snap)
+	se: shacl.Session
+	shacl.session_init(&se, snap)
+	return shacl.compile(shapes, se).kind == .None
+}
+
+// Validate-before-commit: the README's fifth example. Returns what apply
+// returned and how many results the validator's report holds.
+validator_example :: proc() -> (refused: bool, results: int) {
+	// 1. Compile the shapes once, from wherever they live. The model owns every
+	//    term it holds, so the store it came from may be closed — here it is.
+	shapes: shacl.Shapes
+	defer shacl.shapes_destroy(&shapes)
+	compile_shapes(&shapes, MAX_ONE_NAME)
+
+	// 2. Make a validator of the model and open the data store with it wired in.
+	//    One validator per store; it must stay where it is until the store closes.
+	v: shacl.Validator
+	shacl.validator_init(&v, &shapes)
+	defer shacl.validator_destroy(&v)
+
+	fs: record.Mem_FS // the README opens a directory with record.posix_file_ops()
+	defer record.mem_fs_destroy(&fs)
+	db: record.Store
+	_, open_err, _, _ := record.store_open(
+		&db,
+		"data",
+		record.mem_file_ops(&fs),
+		validator = shacl.validator_hook(&v),
+	)
+	if open_err != .None {
+		return
+	}
+	defer record.store_close(&db)
+
+	// 3. Every apply is judged against the dataset it would produce. Under
+	//    Enforce a violation is refused and nothing is written; under Record it
+	//    commits and `conforms` carries the verdict.
+	ops, _ := ingest.turtle(transmute([]byte)string(CANDIDATE), nil, context.allocator, blank_prefix = "c_")
+	defer ingest.ops_destroy(ops, context.allocator)
+	_, conforms, err := record.apply(&db, {ops = ops, mode = .Enforce})
+
+	// 4. The validator holds the last apply's report — valid until the next apply.
+	if err.kind == .Rejected {
+		report := shacl.validator_report(&v)
+		for triple in shacl.report_triples(report) {
+			if pred, is_iri := triple.predicate.(rdf.IRI); is_iri && string(pred) == shacl.RESULT {
+				results += 1
+			}
+		}
+	}
+	return err.kind == .Rejected && !conforms, results
+}
+
+@(test)
+test_readme_validator_example :: proc(t: ^testing.T) {
+	refused, results := validator_example()
+	// Two ex:name values against sh:maxCount 1: refused before a byte was
+	// written, with one result in the validator's report.
+	testing.expect(t, refused)
+	testing.expect_value(t, results, 1)
 }

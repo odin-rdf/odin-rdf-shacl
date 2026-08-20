@@ -686,3 +686,56 @@ test_suppressed_validation_is_net_zero :: proc(t: ^testing.T) {
 		}
 	})
 }
+
+// A validator runs once per apply for the life of a store, so what it must not
+// do is strand memory per check: the bindings and the validation's
+// transients come from apply's scratch, the report is rebuilt on the validator's
+// allocator every time, and both refusal and commit must return everything.
+// Four applies alternating verdicts, under the same tracker as the store.
+@(test)
+test_validator_is_net_zero :: proc(t: ^testing.T) {
+	track(t, "validator", proc(allocator: mem.Allocator) {
+		context.allocator = allocator
+
+		SHAPES :: `
+		@prefix sh: <http://www.w3.org/ns/shacl#> .
+		@prefix ex: <http://example.org/> .
+		ex:PersonShape a sh:NodeShape ; sh:targetClass ex:Person ;
+			sh:property [ sh:path ex:email ; sh:maxCount 1 ] .
+		`
+		s: shacl.Shapes
+		defer shacl.shapes_destroy(&s)
+		shapes_db: Guard_DB
+		defer gdb_close(&shapes_db)
+		_ = gdb_compile(&shapes_db, &s, SHAPES, allocator)
+
+		v: shacl.Validator
+		shacl.validator_init(&v, &s, allocator = allocator)
+		defer shacl.validator_destroy(&v)
+
+		fs: record.Mem_FS
+		defer record.mem_fs_destroy(&fs)
+		st: record.Store
+		_, err, _, _ := record.store_open(&st, "judged", record.mem_file_ops(&fs), validator = shacl.validator_hook(&v), allocator = allocator)
+		if err != .None {
+			return
+		}
+		defer record.store_close(&st)
+
+		docs := [4]string {
+			`@prefix ex: <http://example.org/> . ex:a a ex:Person ; ex:email "a@x" .`,
+			`@prefix ex: <http://example.org/> . ex:a ex:email "a2@x" .`, // refused under Enforce
+			`@prefix ex: <http://example.org/> . ex:b a ex:Person ; ex:email "b@x" .`,
+			`@prefix ex: <http://example.org/> . ex:b ex:email "b2@x" .`, // commits under Record
+		}
+		modes := [4]record.Mode{.Enforce, .Enforce, .Record, .Record}
+		for doc, i in docs {
+			ops, ierr := ingest.turtle(transmute([]byte)doc, nil, allocator, blank_prefix = "g_")
+			if ierr.kind != .None {
+				continue
+			}
+			_, _, _ = record.apply(&st, {ops = ops, mode = modes[i]}, allocator)
+			ingest.ops_destroy(ops, allocator)
+		}
+	})
+}

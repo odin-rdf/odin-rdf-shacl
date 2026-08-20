@@ -3,11 +3,11 @@ package w3c
 import "core:strings"
 import "core:testing"
 
-import rdf "rdf:rdf"
-import triples "rdf:rdf/triples"
-import turtle "rdf:rdf/turtle"
+import "rdf:rdf"
+import "rdf:rdf/triples"
+import "rdf:rdf/turtle"
 
-import shacl "../../../shacl"
+import "../../../shacl"
 
 // Report-graph tests live in the harness package because this is where the
 // blank-node isomorphism comparison lives, and comparing a produced report to

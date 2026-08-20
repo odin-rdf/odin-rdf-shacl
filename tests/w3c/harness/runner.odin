@@ -5,11 +5,11 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-import rdf "rdf:rdf"
+import "rdf:rdf"
 import "record:record"
 import "record:record/ingest"
 
-import shacl "../../../shacl"
+import "../../../shacl"
 
 // Running one suite entry: data graph + shapes graph → validation report.
 //
