@@ -4,7 +4,7 @@ level: vision
 title: "odin-rdf-shacl"
 short_code: "SHACL-V-0001"
 created_at: 2026-08-04T16:47:41.838764+00:00
-updated_at: 2026-08-20T18:00:00.000000+00:00
+updated_at: 2026-08-20T20:30:00.000000+00:00
 archived: false
 
 tags:
@@ -104,6 +104,13 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   discussion, not rescinded here (`docs/language-tag-status.md`).
 - **Remaining:** SHACL-SPARQL, unchanged in scope. The port's own paper trail is
   SHACL-T-0037, whose Status carries the handoff for odin-rdf-sparql's port.
+- **Released as `v0.2.0`** (2026-08-20, tag at `b3ca168`, the commit CI verified on
+  all three runners; GitHub release with notes). The first tag since `v0.1.0`, which
+  is the store-era engine — a consumer pinning tags gets the record engine from here.
+  The owner's reading on tagging: the rewrite is complete and, barring a consumer
+  saying otherwise or the record's API moving for the sparql port, this is the
+  version to use for the foreseeable future. No shacl consumer pins a tag today, so
+  the release walk ends here.
 
 ---
 
