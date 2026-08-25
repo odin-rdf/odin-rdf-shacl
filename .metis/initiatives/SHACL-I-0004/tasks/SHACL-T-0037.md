@@ -403,3 +403,22 @@ neither today — `bench/` does not exist there.)
 checkout, drop any width override; `rdf:` stays in `COLL` because the record's
 sources import it. Windows compiles the record without its posix file; the
 suites must open stores over `mem_file_ops`. No `python3` needed for a consumer.
+
+**Amended 2026-08-25 (SHACL-T-0038).** Two items above have been overtaken by
+odin-rdf-record `v0.4.0`, which this engine now pins as its floor. They stand as
+what was true at the port; what is true now:
+
+- ***Triple terms are refused by `apply`*** — no longer. `RECORD-I-0004` built
+  them (encoding tag `0x07`) together with base-direction literals (`0x08`), and
+  cut `v0.4.0` for the odin-rdf-sparql port. **Those twenty vendored data files
+  are not a backend limit any more**, and the release exists because that port
+  asked for it. `snapshot_triple_parts` reads a triple term's three component
+  ids without decoding it — the `Triple_Reader` shape sparql binds.
+- ***`session_term` borrows*** — no longer total. A **triple term is wholly
+  owned** (the node and every component) and a split IRI is joined in one
+  allocation, so `record.snapshot_term_destroy` — here, `session_term_destroy` —
+  is paired with every decode. Clone-what-you-keep still holds for the borrowing
+  kinds; the pairing is what makes the rule one rule.
+
+The rest of the handoff stands, the CI paragraph included except for the tag:
+`ref: v0.4.0`.

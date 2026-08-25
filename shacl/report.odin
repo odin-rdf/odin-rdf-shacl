@@ -240,9 +240,13 @@ write_list :: proc(r: ^Report, s: ^Shapes, operands: []int) -> rdf.Term {
 	return head
 }
 
-// node_term resolves a Node_Ref into a term the report owns. The decoded
-// term is borrowed (see `session_term`) and the intern is the copy that
-// outlives it.
+// node_term resolves a Node_Ref into a term the report owns. The decode
+// belongs to the store (see `session_term`) and is released here; the intern
+// is the copy that outlives it.
+//
+// This is the path a triple term in a report reaches: `sh:value` names the
+// value node that violated, and RDF 1.2 puts triple terms where value nodes
+// are (SHACL-T-0038).
 @(private = "file")
 node_term :: proc(r: ^Report, ref: Node_Ref, se: Session) -> rdf.Term {
 	if !ref.bound {
@@ -250,6 +254,7 @@ node_term :: proc(r: ^Report, ref: Node_Ref, se: Session) -> rdf.Term {
 	}
 	buf: Term_Buf
 	term, ok := session_term(se, ref.id, buf[:])
+	defer session_term_destroy(se, ref.id, term)
 	if !ok {
 		return nil
 	}

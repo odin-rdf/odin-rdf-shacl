@@ -136,6 +136,7 @@ on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
 	buf: shacl.Term_Buf
 	focus, _ := shacl.session_term(sink.se, result.focus.id, buf[:])
+	defer shacl.session_term_destroy(sink.se, result.focus.id, focus)
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
 		append(sink.lines, strings.clone(string(iri), context.temp_allocator))
 	}

@@ -35,6 +35,13 @@ import "../shacl"
 // numbers: ids are 32-bit natively, so every id-holding structure is smaller
 // (the 64-bit peak of 27076 B became 20868 B, the 32-bit build's old figure).
 // Allocation *counts* came through the port unchanged.
+//
+// *(Amended 2026-08-25, SHACL-T-0038: "borrows again" describes every term kind
+// that existed when this was written and every term in this corpus. Since
+// odin-rdf-record v0.4.0 a triple term and a split IRI are **owned**, paired
+// with `session_term_destroy`; neither occurs here, so the figures below are
+// unmoved — and a corpus that grew one would show the decode and the free, not
+// a leak.)*
 
 // Consumer_Stats is one consumer's allocation profile over one validation.
 Consumer_Stats :: struct {

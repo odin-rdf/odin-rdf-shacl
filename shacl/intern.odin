@@ -84,12 +84,17 @@ intern :: proc(tt: ^Term_Table, term: rdf.Term) -> rdf.Term {
 // materialize_term resolves a store ID into the model's own storage: decode
 // it from the snapshot and intern the copy. Every term the compiler keeps
 // goes through here, which is exactly what makes a compiled model independent
-// of the store it came from — the decoded term is borrowed (see
+// of the store it came from — the decode belongs to the store (see
 // `session_term`) and the intern is the copy that outlives it.
+//
+// The decode is released here, which is what the copy was always for: a term
+// kind that owns rather than borrows — a triple term, a split IRI — would
+// otherwise be leaked once per interned term (SHACL-T-0038).
 @(private)
 materialize_term :: proc(s: ^Shapes, se: Session, id: record.Term_ID) -> rdf.Term {
 	buf: Term_Buf
 	term, ok := session_term(se, id, buf[:])
+	defer session_term_destroy(se, id, term)
 	if !ok {
 		return nil
 	}

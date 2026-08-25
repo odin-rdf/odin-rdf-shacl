@@ -311,6 +311,17 @@ entries with separate shapes files would otherwise need a special case for.
   compiles its shapes from a store that is closed before the validated store
   opens.
 
+  *(Amended 2026-08-25, SHACL-T-0038: "`session_term` borrows" is no longer
+  total. Since odin-rdf-record `v0.4.0` a triple term decodes **owned** — the
+  node and every component — and a split IRI joins in one allocation, freed by
+  `session_term_destroy`. The decision is not weakened by it; it is confirmed
+  from the other side. A model that borrowed would dangle on the arena kinds
+  and leak on the owned ones, and the same interning that prevents the first
+  prevents the second: `materialize_term` clones into the table and releases
+  the decode. `sh:hasValue <<( ex:a ex:b ex:c )>>` compiles into a model that
+  outlives its store and binds against a different dictionary, which is this
+  decision holding for a term kind it was not written for.)*
+
   **Decision 5 — one caller-named graph.** Unchanged, and enforced in one
   file instead of through two graph-less procedure pointers: the graph is
   bound into every `record.Pattern` that `shacl/session.odin` issues, and

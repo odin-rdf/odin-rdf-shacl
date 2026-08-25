@@ -318,6 +318,7 @@ compile :: proc(s: ^Shapes, se: Session, allocator := context.allocator) -> Erro
 			for id in vals {
 				buf: Term_Buf
 				term, ok := session_term(se, id, buf[:])
+				defer session_term_destroy(se, id, term)
 				if !ok {
 					continue
 				}

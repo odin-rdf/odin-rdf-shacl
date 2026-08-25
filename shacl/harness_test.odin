@@ -101,14 +101,16 @@ tdb_close :: proc(db: ^Test_DB) {
 }
 
 // test_term materialises a term for rendering in an assertion. The decode
-// borrows a stack buffer, so the term is cloned to the temp allocator —
-// suites render it immediately and never keep one. An undecodable id yields
-// a blank node named for the failure rather than a panic, so one broken read
-// shows up as a mismatched expectation rather than as a lost test run.
+// borrows a stack buffer (or owns, for the two kinds that do — see
+// `session_term`), so the term is cloned to the temp allocator and the decode
+// released; suites render it immediately and never keep one. An undecodable id
+// yields a blank node named for the failure rather than a panic, so one broken
+// read shows up as a mismatched expectation rather than as a lost test run.
 @(private)
 test_term :: proc(se: Session, id: record.Term_ID) -> rdf.Term {
 	buf: Term_Buf
 	term, ok := session_term(se, id, buf[:])
+	defer session_term_destroy(se, id, term)
 	if !ok {
 		return rdf.Blank_Node("lookup-failed")
 	}

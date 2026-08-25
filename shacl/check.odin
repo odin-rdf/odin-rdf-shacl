@@ -425,8 +425,10 @@ check_property_pair :: proc(
 pair_ordered :: proc(v: ^Validation, kind: Constraint_Kind, value: Node_Ref, other: record.Term_ID) -> bool {
 	left_buf: Term_Buf
 	left := materialize(v, value, left_buf[:])
+	defer materialize_destroy(v, value, left)
 	right_buf: Term_Buf
 	right, _ := session_term(v.se, other, right_buf[:])
+	defer session_term_destroy(v.se, other, right)
 
 	order := compare_values(value_of(left), value_of(right))
 	#partial switch kind {
@@ -503,7 +505,9 @@ check_unique_lang :: proc(v: ^Validation, shape_index: int, values: Value_Set) {
 
 	for n in 0 ..< value_set_count(values) {
 		buf: Term_Buf
-		term := materialize(v, value_set_at(values, n), buf[:])
+		ref := value_set_at(values, n)
+		term := materialize(v, ref, buf[:])
+		defer materialize_destroy(v, ref, term)
 		if literal, is_literal := term.(rdf.Literal); is_literal && literal.language != "" {
 			append(&tags, strings.clone(literal.language, v.allocator))
 		}
@@ -840,6 +844,7 @@ check_datatype :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	}
 	buf: Term_Buf
 	term := materialize(v, value, buf[:])
+	defer materialize_destroy(v, value, term)
 	literal, is_literal := term.(rdf.Literal)
 	if !is_literal || literal.datatype != want {
 		return false
@@ -885,6 +890,7 @@ check_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	buf: Term_Buf
 	term := materialize(v, value, buf[:])
+	defer materialize_destroy(v, value, term)
 	// Ordered value-against-bound, so the component names read as they do in the
 	// shapes graph: `.Greater` is the value node above the minimum.
 	order := compare_values(value_of(term), value_of(c.term))
@@ -924,6 +930,7 @@ check_range :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 check_string :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	buf: Term_Buf
 	term := materialize(v, value, buf[:])
+	defer materialize_destroy(v, value, term)
 	text, has_text := node_string(term)
 	if !has_text {
 		return false
@@ -978,6 +985,7 @@ node_string :: proc(term: rdf.Term) -> (text: string, ok: bool) {
 check_language_in :: proc(v: ^Validation, c: Constraint, value: Node_Ref) -> bool {
 	buf: Term_Buf
 	term := materialize(v, value, buf[:])
+	defer materialize_destroy(v, value, term)
 	literal, is_literal := term.(rdf.Literal)
 	if !is_literal || literal.language == "" {
 		return false
@@ -1020,6 +1028,14 @@ language_matches :: proc(tag, range: string) -> bool {
 // so only the unbound arm can ever see one, and it satisfies none of the
 // kinds — an empty set, which the caller's intersection turns into a
 // violation.
+//
+// *(Amended 2026-08-25, SHACL-T-0038: the parenthesis above is no longer true.
+// odin-rdf-record v0.4.0 encodes triple terms under tag 0x07 and `apply`
+// commits them, so `record.Term_Kind` has a fourth member and the **bound** arm
+// sees one too. The verdict does not move — an empty set either way — and now
+// both arms say so in the same shape. The switch stays exhaustive on purpose:
+// `#partial` here would classify the next term kind the record adds by falling
+// off the end, and exhaustiveness is what caught this one.)*
 @(private = "file")
 node_kind_of :: proc(v: ^Validation, value: Node_Ref) -> Node_Kind {
 	if value.bound {
@@ -1030,6 +1046,8 @@ node_kind_of :: proc(v: ^Validation, value: Node_Ref) -> Node_Kind {
 			return NODE_KIND_BLANK_NODE
 		case .Literal:
 			return NODE_KIND_LITERAL
+		case .Triple:
+			return {}
 		}
 		return {}
 	}
@@ -1062,9 +1080,13 @@ node_is_term :: proc(v: ^Validation, value: Node_Ref, constraint_index: int, ter
 
 // materialize turns a value node into a term: an unbound node already carries
 // its own (borrowing the model), and a bound one decodes through the session
-// into `buf` (borrowing the buffer or the store's arena — see `session_term`).
-// Either way the term is borrowed: use it within the buffer's scope and never
-// destroy it.
+// into `buf`.
+//
+// **Pair every call with `materialize_destroy`** — one deferred line, and
+// ownership stops being a question the caller has to answer. A borrowed term
+// is still valid only within `buf`'s scope. (SHACL-T-0038: before it, every
+// kind borrowed and there was nothing to pair; `session_term`'s contract has
+// the two kinds that own.)
 @(private = "file")
 materialize :: proc(v: ^Validation, value: Node_Ref, buf: []byte) -> rdf.Term {
 	if !value.bound {
@@ -1075,4 +1097,15 @@ materialize :: proc(v: ^Validation, value: Node_Ref, buf: []byte) -> rdf.Term {
 		return nil
 	}
 	return term
+}
+
+// materialize_destroy frees what `materialize` returned. An unbound node's
+// term belongs to the model and is left alone; a bound one goes to
+// `session_term_destroy`, which frees nothing unless the decode allocated.
+@(private = "file")
+materialize_destroy :: proc(v: ^Validation, value: Node_Ref, term: rdf.Term) {
+	if !value.bound {
+		return
+	}
+	session_term_destroy(v.se, value.id, term)
 }

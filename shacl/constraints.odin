@@ -812,6 +812,7 @@ record_ignored_parameters :: proc(s: ^Shapes, r: Reader, shape_id: record.Term_I
 	for id in preds {
 		buf: Term_Buf
 		term, ok := session_term(r.se, id, buf[:])
+		defer session_term_destroy(r.se, id, term)
 		if !ok {
 			continue
 		}

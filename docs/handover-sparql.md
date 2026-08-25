@@ -38,6 +38,17 @@
 >   the SHACL corpus carries one; `data-shapes-test-suite/tests/sparql/` should be
 >   checked when it is vendored.
 
+**Amended 2026-08-25 (SHACL-T-0038): the last bullet's backend limit is gone.**
+odin-rdf-record `v0.4.0` encodes RDF 1.2's triple terms (tag `0x07`) and
+base-direction literals (`0x08`), and this engine is on that release —
+`RECORD-I-0004` built them for the odin-rdf-sparql port. `apply` accepts both. A
+triple term reaches validation as an ordinary value node: it is counted and
+reported like any other, it satisfies no `sh:nodeKind` (SHACL 1.0's six kinds do
+not name a fourth), and it has no value to order or compare, so the value-range
+and string components violate on it. `shacl/rdf12_term_test.odin` pins that
+behaviour, and `session_term`'s ownership rule changed with it — see the
+amendment on that procedure.
+
 Written at the close of SHACL-I-0002 (the SHACL Core constraint catalogue), in
 the shape of [`handover-catalogue.md`](handover-catalogue.md), which SHACL-I-0001
 wrote for this initiative and which is still worth reading for the seam and for

@@ -168,11 +168,14 @@ Both collections are required even though this engine only names the record:
 the record's own sources import `rdf:`, and a collection is resolved in the
 *importing* compilation, not the imported checkout. The `Makefile` and
 `ols.json` both declare them. CI pins `odin-rdf-parser@v0.1.1` and
-**`odin-rdf-record@v0.3.0`, which is a floor**: `v0.2.0` is where `ingest`
+**`odin-rdf-record@v0.4.0`, which is a floor**: `v0.2.0` is where `ingest`
 began emitting a document's *set* of statements (below it one W3C entry whose
-shapes graph repeats a triple cannot load), and `v0.3.0` is where the record's
+shapes graph repeats a triple cannot load), `v0.3.0` is where the record's
 `Term_ID`, `Fact_ID` and `Epoch` became distinct types, which this engine holds
-natively and does not compile without.
+natively, and `v0.4.0` is where RDF 1.2's triple terms arrived — a fourth
+`record.Term_Kind`, which this engine switches on exhaustively, and
+`snapshot_term_destroy`, the verb for the two term kinds that own their memory.
+It names both, so it does not compile below `v0.4.0`.
 
 ```
 make test    # the full suite, once — there is no width matrix
@@ -327,6 +330,7 @@ on_result :: proc(data: rawptr, result: shacl.Result) -> bool {
 	sink := cast(^Sink)data
 	buf: shacl.Term_Buf
 	focus, _ := shacl.session_term(sink.se, result.focus.id, buf[:])
+	defer shacl.session_term_destroy(sink.se, result.focus.id, focus)
 	if iri, is_iri := focus.(rdf.IRI); is_iri {
 		append(sink.lines, strings.clone(string(iri), context.temp_allocator))
 	}
@@ -343,9 +347,12 @@ Two things the example shows in passing. **A write is a changeset and an
 epoch**: `ingest.turtle` turns a document into ops, `apply` commits them, and
 the record refuses rather than ignores a changeset that re-asserts a fact
 already live — so a document is loaded once, not "again to be sure".
-**`session_term` borrows**: the term it returns lives in the record's
-dictionary arena or in the buffer you passed, which is why the visitor clones
-what it keeps.
+**`session_term` hands a term out and `session_term_destroy` takes it back**:
+most terms live in the record's dictionary arena or in the buffer you passed,
+which is why the visitor clones what it keeps — but a triple term and a split
+IRI are allocated, so pairing the two is what keeps ownership from being a
+question the caller has to answer. The destroy is a no-op for the borrowing
+kinds, which is what makes pairing it with *every* call the simple rule.
 
 ### Scratch stores
 

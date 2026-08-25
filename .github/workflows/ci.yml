@@ -109,8 +109,8 @@ jobs:
           ref: v0.1.1
           path: odin-rdf-parser
 
-      # **odin-rdf-record `v0.3.0` is the pin and a floor**, the third in a
-      # day. `v0.1.0` was the first floor (SHACL-T-0031, the SHACL-I-0004
+      # **odin-rdf-record `v0.4.0` is the pin and a floor**, the fourth; the
+      # first three were cut in one day. `v0.1.0` was the first floor (SHACL-T-0031, the SHACL-I-0004
       # port): the record's first tag, holding everything this repository
       # consumes — `store_open`/`apply`, the snapshot read API,
       # `record/ingest`, `Mem_FS`/`mem_file_ops`, the `Validator` hook.
@@ -122,8 +122,19 @@ jobs:
       # raised it again for a type: the record's ids are the distinct
       # `Term_ID`, `Fact_ID` and `Epoch` (RECORD-T-0020), and this engine
       # holds `record.Term_ID` natively — `Session.graph`, `Focus_Node.id`,
-      # the `Bindings` arrays — so it does not compile below `v0.3.0`. Two
-      # things worth knowing at this seam:
+      # the `Bindings` arrays — so it does not compile below `v0.3.0`.
+      # `v0.4.0` raised it a fourth time, and for once not for anything this
+      # suite found: it is the release RDF 1.2's triple terms landed in
+      # (RECORD-I-0004), cut for the odin-rdf-sparql port. **This engine does
+      # not need triple terms**; it needs the two things their arrival changed
+      # about the API it already used (SHACL-T-0038). `record.Term_Kind` gained
+      # a fourth member, `.Triple`, and `node_kind_of` switches on that enum
+      # exhaustively — a compile error, and the right one: it is the single
+      # site in the engine that had to be told a new term kind exists.
+      # `snapshot_term` can now return a term it *owns* rather than lends, so
+      # `snapshot_term_destroy` is paired with every decode, which also closes
+      # the split-IRI leak this contract had admitted since the port and had no
+      # verb to fix. Two things worth knowing at this seam:
       #
       #   - **Windows**: the record has no Windows `File_Ops` — its posix file
       #     is `#+build linux, darwin`, so the package compiles on Windows
@@ -136,7 +147,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.3.0
+          ref: v0.4.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2

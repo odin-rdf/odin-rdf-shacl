@@ -78,20 +78,42 @@ session_init :: proc(se: ^Session, snap: record.Snapshot, graph: rdf.Graph_Label
 // Sized by record's contract: at least INLINE_LEXICAL_MAX bytes.
 Term_Buf :: [record.INLINE_LEXICAL_MAX]u8
 
-// session_term decodes an id into a term. **The term is borrowed** — from the
-// store's dictionary arena, or from `buf` for an inlined id — and is valid
-// only while both are: use it or intern it before the buffer goes away, and
-// never destroy it.
+// session_term decodes an id into a term. **Most terms are borrowed** — from
+// the store's dictionary arena, or from `buf` for an inlined id — and are
+// valid only while both are: use one or intern it before the buffer goes
+// away.
 //
-// One caveat inherited from record: an IRI stored in the split encoding joins
-// in one allocation, which this contract would leak. No store written through
-// `record.apply` contains one (its encoder emits full IRIs only), and this
-// engine reads apply-written stores.
+// **Two kinds own instead, and `session_term_destroy` is how a caller frees
+// whatever it got without having to know which one it has.** Pair the two at
+// every call site and the question never comes up: the destroy is a no-op for
+// the borrowing kinds. A **triple term is wholly owned** — the node and every
+// component, allocated from the context allocator (record's RECORD-A-0008
+// decision 2) — and a **split IRI** is joined in one allocation.
+//
+// *(Amended 2026-08-25, SHACL-T-0038. This contract read "the term is
+// borrowed … never destroy it", with the split IRI recorded below it as a
+// caveat that would leak — no `record.apply`-written store held one, so it was
+// unreachable rather than fixed. odin-rdf-record v0.4.0 stores RDF 1.2 triple
+// terms, which are owned and are reachable, and published
+// `snapshot_term_destroy`: the verb the caveat had been missing. Both kinds
+// are covered by one call now, so the caveat is closed rather than restated.)*
 session_term :: proc(se: Session, id: record.Term_ID, buf: []byte) -> (term: rdf.Term, ok: bool) {
 	when SHACL_COUNT_READS {
 		read_counts.term += 1
 	}
 	return record.snapshot_term(se.snap, id, buf)
+}
+
+// session_term_destroy frees what `session_term` returned, and is total over
+// every kind it can return: nothing for the borrowing kinds, the joined string
+// for a split IRI, the whole tree for a triple term.
+//
+// It is safe on a decode that failed — a nil term frees nothing — which is
+// what lets a caller pair it with every call rather than only the ones that
+// succeeded. It is not a read and does not count as one: the decode was
+// counted when it happened.
+session_term_destroy :: proc(se: Session, id: record.Term_ID, term: rdf.Term) {
+	record.snapshot_term_destroy(se.snap, id, term)
 }
 
 // session_resolve is the non-interning term lookup: the id a term has in this
