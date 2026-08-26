@@ -4,15 +4,15 @@ level: task
 title: "Validate the union of a graph set: reopening SHACL-A-0001 decision 5 for workspaces"
 short_code: "SHACL-T-0039"
 created_at: 2026-08-26T21:10:59.438464+00:00
-updated_at: 2026-08-26T21:10:59.438464+00:00
+updated_at: 2026-08-26T23:32:42.898436+00:00
 parent: 
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/backlog"
   - "#feature"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -111,24 +111,26 @@ the decisions in this repository were made for this repository.
   `sh:class`-needs-the-hierarchy note, which gets a real answer — put the
   ontology graph in the set.
 
-## Acceptance Criteria **[REQUIRED]**
+## Acceptance Criteria
 
-- [ ] The case above: session set `{B, A}` conforms; set `{B}` reports
+**[REQUIRED]**
+
+- [x] The case above: session set `{B, A}` conforms; set `{B}` reports
       the violation it reports today — both pinned.
-- [ ] `sh:targetClass` with `rdfs:subClassOf` held in an ontology graph
+- [x] `sh:targetClass` with `rdfs:subClassOf` held in an ontology graph
       in the set: subclass instances are focus nodes.
-- [ ] A triple asserted in two graphs of the set: one focus node, one
+- [x] A triple asserted in two graphs of the set: one focus node, one
       value node, `sh:maxCount 1` conforms.
-- [ ] An empty scoped set validates as an empty data graph — never the
+- [x] An empty scoped set validates as an empty data graph — never the
       whole store — independent of record's `nil`/empty conflation
       (`RECORD-T-0029`).
-- [ ] 98/98 W3C `core/` entries unchanged; single-graph read pins
+- [x] 98/98 W3C `core/` entries unchanged; single-graph read pins
       unchanged; a pin for the set path.
-- [ ] `SHACL-A-0001` decision 5 amended with a dated note, not rewritten;
+- [x] `SHACL-A-0001` decision 5 amended with a dated note, not rewritten;
       the vision's Current State re-read; the record floor unchanged
       (`v0.4.0` suffices — `Filter.graphs` has been on the read API since
       `RECORD-I-0002`).
-- [ ] `make test` and `make check` green.
+- [x] `make test` and `make check` green.
 
 ## Implementation Notes
 
@@ -165,3 +167,79 @@ rest; M with those.
   and an empty set admits nothing at the record, so `GRAPH_ABSENT` for
   the empty case is belt and braces rather than the guard. Still not
   started; reopening decision 5 is still the owner's call.
+- **2026-08-27 — Active; the owner said "implement", which is the
+  decision. Plan**, before code. `Session` gains `scope:
+  record.Graph_Scope` and `graphs: []record.Term_ID`; `session_init`
+  is unchanged (`.All`, `graph` bound as today — the single graph stays
+  the degenerate case and keeps its pins), and a new
+  `session_init_union(se, snap, graphs: []record.Term_ID)` binds
+  `g = 0`, `.Set`, and the caller's resolved ids, borrowed like the
+  snapshot. A `session_resolve_graphs(snap, labels, out)` helper turns
+  labels into ids, dropping misses (a graph the store has never seen
+  holds nothing — `GRAPH_ABSENT`'s rule per element) and spelling the
+  default graph `MATCH_DEFAULT_GRAPH`. The three verbs pass
+  `Filter{origin = .Any, scope = se.scope, graphs = se.graphs}` and bind
+  `g = se.graph` as now — one line each, and nothing above `session.odin`
+  changes. `Validator` gains `graphs: []rdf.Graph_Label` (owned copies)
+  and `validator_init_union(v, shapes, graphs, reporting, allocator)`;
+  `validator_check` resolves them against the candidate per check, so a
+  graph the changeset itself creates resolves. An empty set — no labels,
+  or all misses — is `.Set` with no ids and admits nothing at the record
+  (`v0.6.0`), so `GRAPH_ABSENT` stays the single-graph path's spelling
+  and no second mechanism is built. Tests in `union_test.odin`: the
+  cross-workspace `sh:class` case (`{B}` violates, `{B, A}` conforms);
+  `sh:targetClass` through `rdfs:subClassOf` held in an ontology graph;
+  a triple asserted in two graphs of the set is one focus node and one
+  value node; the empty set is an empty data graph; and a validator
+  wired with a union accepting a cross-graph link under `.Enforce`.
+  Then the ADR's dated amendment, the README's two passages, the
+  vision's two sentences, `make test`, `make check`, `make bench`.
+- **2026-08-27 — Done.** `Session` carries `scope: record.Graph_Scope`
+  and `graphs: []record.Term_ID`; `session_init` is unchanged and sets
+  `.All`; `session_init_union(se, snap, graphs)` binds `.Set` with the
+  caller's resolved ids, and — the one refinement to the plan — binds
+  `graph` to the set's member when there is exactly one, so the
+  one-element union takes `GPOS`'s prefix (`v0.6.0`) and the set is the
+  intersection it already is. `session_resolve_graphs(snap, labels,
+  out)` resolves labels, spells the default graph `MATCH_DEFAULT_GRAPH`,
+  drops misses and counts them. The three verbs read through
+  `session_filter(se)`. `Validator` gains `graphs` (owned copies) and
+  `scoped`; `validator_init_union` copies the labels and
+  `validator_check` resolves them against each candidate into a
+  per-check buffer. No `GRAPH_ABSENT` for the empty union: an empty
+  `.Set` admits nothing at the pinned record, and a second mechanism
+  for one rule is a divergence waiting to happen.
+
+  **A finding worth more than the feature.** The grep for `.graph`
+  outside `session.odin` found `shacl/query.odin:36-38` — the
+  compiler's `reader_match` has written its own `record.Pattern` with
+  its own `.All` filter since the port. Under a multi-graph union that
+  would have been `g = 0`, `.All`: **the whole store**, on the compile
+  path. Decision 5's "nothing above `session.odin` writes a pattern"
+  was not true of the compiler, and no test could have said so while
+  every session was one graph. `session_filter` is package-private now
+  for exactly that caller, and `reader_match` takes its filter from the
+  session; the ADR, README and `session.odin` header say so rather than
+  repeating the claim.
+
+  Five tests in `shacl/union_test.odin`: the filed case (`{B}`
+  violates, `{B, A}` conforms, and `session_init` over B agrees with the
+  one-element union); `sh:targetClass` through `rdfs:subClassOf` in an
+  ontology graph (`{B}` conforms for the uninteresting reason, `{B,
+  ont}` targets the subclass instance and reports); the same triples in
+  two graphs of the set — `sh:maxCount 1` conforms and an
+  always-violating shape reports exactly once; the empty union (a
+  never-loaded label, resolving to nothing) validates an empty data
+  graph — one result for the opposite reason from `{A}`'s one, which is
+  what tells an empty graph from the whole store; and a validator wired
+  with `{B, A}` accepting a risk in B linked to A's control under
+  `.Enforce` and refusing one linked to a control in C.
+
+  `make check` clean; `make test` green — 138 in the package (133 + 5),
+  13 + 7 + 1 + 23 elsewhere, 98/98; **`make bench`: 7503 reads, as
+  pinned** — the single-graph path's reads did not move, only where its
+  filter comes from. `SHACL-A-0001` decision 5 carries a dated
+  amendment on its own review trigger; the README's two passages and
+  the vision's two sentences are amended. Not tagged: `v0.2.0` stays
+  the release, no consumer pins this engine, and whether this warrants
+  one is the owner's call.

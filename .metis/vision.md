@@ -47,7 +47,10 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   in one file, `shacl/session.odin` (a `Session` over a `record.Snapshot` and
   six verbs: `session_term`, `session_resolve`, `session_kind`, `session_scan`,
   `session_step`, `session_outgoing`), with the graph of SHACL-A-0001 decision 5
-  bound into every pattern there. Ids are `record.Term_ID` natively.
+  bound into every pattern there. Ids are `record.Term_ID` natively. *(Amended 2026-08-27, SHACL-T-0039: or the **union of
+  a set of graphs** — `session_init_union`, `validator_init_union` — decision 5
+  generalised on its own review trigger for the application's workspace
+  design; the single graph is the one-element case and every pin holds.)*
 - **Two owner decisions shape it, recorded here because the next session will
   look here first (2026-08-20):** there is **no dual-backend goal, at any
   point** — the port was a replacement, not an addition — and **odin-rdf-record
@@ -212,7 +215,8 @@ that is still the most useful thing it records:**
 - **The store capabilities this project would "probably pull" were not pulled**, and the
   catalogue did not change that. Both predicted items stay retired. *A named-graph wildcard*
   (STORE-T-0017) cannot become needed without reversing SHACL-A-0001 decision 5, and the
-  core cannot express one — neither procedure pointer it reads through takes a graph.
+  core cannot express one — neither procedure pointer it reads through takes a graph. *(Decision 5 was generalised to a union on 2026-08-27, SHACL-T-0039, and the
+  wildcard is still not needed: a union is a set of graphs, not a class of them.)*
   *Dataset introspection* (STORE-T-0016) was wanted for target resolution, and all five
   target forms turned out to be ordinary match patterns; `sh:closed`, the last thing
   predicted to want it, did not either. **A validator with all twenty-nine components

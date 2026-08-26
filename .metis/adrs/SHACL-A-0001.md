@@ -329,6 +329,29 @@ entries with separate shapes files would otherwise need a special case for.
   named-graph wildcard this project did not need) is moot rather than
   retired — odin-rdf-store's backlog is no longer this repository's concern.
 
+  *Amended 2026-08-27 (SHACL-T-0039): **decision 5 is generalised, on its own
+  review trigger — "a consumer needs cross-graph validation with a semantics
+  it can defend."** The consumer is the application's workspace design: a
+  named graph per workspace, and a shape in workspace B whose risk links to a
+  control typed in ancestor A. The semantics: **the data graph is the union of
+  a set of graphs** — the set-union of their triples, an RDF graph; on the
+  record a union and not a merge, since blank nodes are global interned terms.
+  A one-element set is this decision exactly, so every suite result keeps its
+  meaning and every single-graph read pin holds. What changed is one file:
+  `Session` carries record's `Graph_Scope` and, under `.Set`, the resolved
+  ids; `session_init_union` binds them; the three verbs pass the set on
+  record's `Filter` beside the pattern they always bound. One correction to
+  the sentence above that this change surfaced: `query.odin`'s compile-time
+  `reader_match` has written a pattern of its own since the port, with its
+  own `.All` filter — it now takes the filter from the session
+  (`session_filter`, package-private for exactly that caller), so every read
+  in the package carries the session's scope. `validator_init_union` is the
+  hook's form, resolving the labels against each candidate. Duplicates across
+  graphs were already impossible to count twice (focus nodes and value nodes
+  are sets) and are pinned so. An empty set is an empty data graph, which
+  record guarantees per fact since `v0.5.0`. The wildcard this repository
+  "did not need" is still not needed: a union is a set, not a class.*
+
   **The compile-once caveat (2026-08-07 entry)** changes shape rather than
   disappearing. On the record, loading a shapes document twice into the same
   graph under the *same* `blank_prefix` is refused outright by `apply`

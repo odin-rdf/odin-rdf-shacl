@@ -10,7 +10,12 @@ import "record:record"
 // the session verbs below, so the graph discipline of SHACL-A-0001 decision 5
 // — validation reads one caller-named graph, never a union — is enforced in
 // one place: the graph is bound into every pattern and nothing above this file
-// ever writes one.
+// ever writes one. *(Amended 2026-08-27, SHACL-T-0039: decision 5 is
+// generalised, not reversed. A session may now read the **union of a set of
+// graphs** — `session_init_union` — with the single graph as the one-element
+// case; the set rides on record's `Filter` beside the pattern, and every read
+// in the package — these verbs and query.odin's `reader_match` — takes that
+// filter from `session_filter`.)*
 //
 // A record read cannot fail. The projection is memory-resident, so the error
 // plumbing the old kvstore instantiation carried — an error slot on the
@@ -27,11 +32,16 @@ import "record:record"
 // discipline is record's contract for `Validator` candidates too, which is
 // what makes the same engine usable inside one.)
 Session :: struct {
-	snap:  record.Snapshot,
-	graph: record.Term_ID, // the graph's resident id, resolved once from the caller's
-	//                        rdf.Graph_Label at session_init: MATCH_DEFAULT_GRAPH for
-	//                        nil, GRAPH_ABSENT for a label the store has never seen.
-	//                        Never 0 — that is "every graph" in a record Pattern.
+	snap:   record.Snapshot,
+	graph:  record.Term_ID, // the graph's resident id, resolved once from the caller's
+	//                         rdf.Graph_Label at session_init: MATCH_DEFAULT_GRAPH for
+	//                         nil, GRAPH_ABSENT for a label the store has never seen.
+	//                         Never 0 under .All — that is "every graph" in a record
+	//                         Pattern. Under .Set it is 0, or the set's one member.
+	scope:  record.Graph_Scope, // .All: the one graph above. .Set: the union of `graphs`
+	//                             (SHACL-T-0039). Never the zero value — record refuses it.
+	graphs: []record.Term_ID, // resolved ids, read under .Set only; borrowed like the
+	//                           snapshot, and an empty set admits nothing.
 }
 
 // GRAPH_ABSENT is the graph binding of a session whose graph label the store
@@ -54,6 +64,8 @@ GRAPH_ABSENT :: record.CONSUMER_ID_FIRST
 session_init :: proc(se: ^Session, snap: record.Snapshot, graph: rdf.Graph_Label = nil) -> (found: bool) {
 	se.snap = snap
 	se.graph = record.MATCH_DEFAULT_GRAPH
+	se.scope = .All
+	se.graphs = nil
 	found = true
 	if graph != nil {
 		term: rdf.Term
@@ -72,6 +84,64 @@ session_init :: proc(se: ^Session, snap: record.Snapshot, graph: rdf.Graph_Label
 		}
 	}
 	return found
+}
+
+// session_init_union binds a session to the union of a set of graphs
+// (SHACL-T-0039, reopening SHACL-A-0001 decision 5 on its own trigger): the
+// data graph is the set-union of the graphs' triples — an RDF graph, and on
+// the record a union rather than a merge, since blank nodes are global
+// interned terms. It is what a workspace and its ancestors make together.
+//
+// `graphs` holds resident ids resolved against `snap` — `session_resolve_graphs`
+// is the way to get them — and is borrowed like the snapshot. A one-element
+// set is session_init's semantics exactly, and is read the same way: the one
+// graph is bound into the pattern too, so record leads with it (GPOS, v0.6.0)
+// and the set is the intersection it already is. An empty set is an empty
+// data graph — record's Graph_Scope guarantees it per fact (RECORD-T-0029) —
+// and never the whole store.
+session_init_union :: proc(se: ^Session, snap: record.Snapshot, graphs: []record.Term_ID) {
+	se.snap = snap
+	se.scope = .Set
+	se.graphs = graphs
+	se.graph = graphs[0] if len(graphs) == 1 else 0
+}
+
+// session_resolve_graphs appends the resident id of every label `snap` knows to
+// `out`, spelling the default graph (nil) as MATCH_DEFAULT_GRAPH, and drops
+// the labels it does not know — a graph the store has never seen holds
+// nothing, which is GRAPH_ABSENT's rule applied per element, and a miss must
+// never reach a set as 0, which there means the default graph. Returns how
+// many were dropped, for the caller that wants to tell an empty graph from an
+// absent one.
+session_resolve_graphs :: proc(snap: record.Snapshot, labels: []rdf.Graph_Label, out: ^[dynamic]record.Term_ID) -> (missing: int) {
+	for label in labels {
+		if label == nil {
+			append(out, record.MATCH_DEFAULT_GRAPH)
+			continue
+		}
+		term: rdf.Term
+		switch g in label {
+		case rdf.IRI:
+			term = g
+		case rdf.Blank_Node:
+			term = g
+		}
+		if id, ok := record.snapshot_resolve(snap, term); ok {
+			append(out, id)
+		} else {
+			missing += 1
+		}
+	}
+	return missing
+}
+
+// session_filter is the filter every read goes through — the verbs below and
+// query.odin's one direct read: origin .Any, and the session's graph scope.
+// Package-private, not file-private, for exactly that second caller: a read
+// that built its own filter would bypass the union.
+@(private)
+session_filter :: proc(se: Session) -> record.Filter {
+	return {origin = .Any, scope = se.scope, graphs = se.graphs}
 }
 
 // Term_Buf is the stack buffer `session_term` materialises inlined ids into.
@@ -153,7 +223,7 @@ session_scan :: proc(
 		read_counts.scan += 1
 	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, p = predicate, o = object, g = se.graph})
-	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
+	sc := record.range_iter(rng, session_filter(se))
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {
@@ -179,7 +249,7 @@ session_step :: proc(se: Session, from, predicate: record.Term_ID, inverted: boo
 		? record.Pattern{p = predicate, o = from, g = se.graph} \
 		: record.Pattern{s = from, p = predicate, g = se.graph}
 	rng := record.snapshot_match(se.snap, p)
-	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
+	sc := record.range_iter(rng, session_filter(se))
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {
@@ -204,7 +274,7 @@ session_outgoing :: proc(
 		read_counts.outgoing += 1
 	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, g = se.graph})
-	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
+	sc := record.range_iter(rng, session_filter(se))
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {

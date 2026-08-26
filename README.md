@@ -551,6 +551,8 @@ Four things the binding decides, each stated in `validator.odin`:
   default), not only the nodes the changeset touched — a change to one node
   can make another violate. The candidate snapshot is never retained past
   the check, which is record's contract for it.
+  *(Or the whole union: `validator_init_union` reads a set of graphs, resolved
+  against each candidate — SHACL-T-0039.)*
 
 ### Validating the past
 
@@ -631,6 +633,15 @@ the record holds a quad dataset. The validator takes the graph to read — the
 default graph, or one named graph — and never a union of them; the graph is
 bound into every pattern `shacl/session.odin` issues.
 
+*(Amended 2026-08-27, SHACL-T-0039: **or the union of a set of graphs.**
+`session_init_union` / `validator_init_union` take a set of graph labels and
+validate the set-union of their triples as the data graph — a workspace and
+its ancestors, an instance graph and its ontology. The single graph is the
+one-element case and is read exactly as before; an empty set is an empty data
+graph, never the whole store; the same triple in two graphs of the set counts
+once. Every read in the package — the session verbs and the compiler's
+`reader_match` — takes its filter from the session.)*
+
 **`sh:class` needs the class hierarchy in the data graph.** It walks
 `rdfs:subClassOf*` in the graph being validated, not in the shapes graph. A
 shape that says `sh:class ex:Asset` will not see that `ex:ResourceAsset` is a
@@ -638,6 +649,9 @@ subclass of `ex:Asset` unless that triple is in the data graph. This is the
 most common way a shapes graph silently under-reports, and it follows from the
 single-graph decision above. `sh:targetClass` walks the same closure, so a
 target that unexpectedly finds nothing usually has the same cause.
+
+*(Since SHACL-T-0039 the answer is a union: put the ontology's graph in the
+session's set and the closure is there.)*
 
 **`sh:conforms` is false whenever there is any result at all**, whatever its
 severity. A warning sounds like it should not count against conformance, and

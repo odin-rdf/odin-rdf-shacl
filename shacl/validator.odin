@@ -58,6 +58,8 @@ import "record:record"
 Validator :: struct {
 	shapes:     ^Shapes,
 	graph:      rdf.Graph_Label, // owned copy; nil is the default graph
+	graphs:     []rdf.Graph_Label, // owned copies; the union, when `scoped` (SHACL-T-0039)
+	scoped:     bool, // validator_init_union: read the union of `graphs`, not `graph`
 	reporting:  bool,
 	report:     Report,
 	has_report: bool,
@@ -69,7 +71,7 @@ Validator :: struct {
 
 // validator_init binds a compiled model as a validator over one graph of the store
 // it will be wired into — nil for the default graph, or the graph's label;
-// validation reads one graph, never a union (SHACL-A-0001 decision 5). The
+// `validator_init_union` is the same over a set of graphs (SHACL-T-0039). The
 // label is copied. `reporting` chooses between the full report graph per
 // check (`validator_report`) and the verdict alone, which allocates nothing per
 // result (`Conformance`, SHACL-A-0002) and is the shape a gate that only
@@ -86,28 +88,68 @@ validator_init :: proc(
 	v.shapes = shapes
 	v.reporting = reporting
 	v.allocator = allocator
-	switch g in graph {
-	case rdf.IRI:
-		v.graph = rdf.IRI(strings.clone(string(g), allocator))
-	case rdf.Blank_Node:
-		v.graph = rdf.Blank_Node(strings.clone(string(g), allocator))
+	v.graph = label_clone(graph, allocator)
+}
+
+// validator_init_union binds a compiled model as a validator over the **union of
+// a set of graphs** (SHACL-T-0039) — the data graph a workspace and its
+// ancestors make together. The labels are copied (nil is the default graph)
+// and resolved against each candidate at check time, so a graph the changeset
+// itself is the first to name is validated rather than read as absent, and a
+// label the candidate does not know contributes nothing. An empty set
+// validates an empty data graph. Everything else is validator_init.
+validator_init_union :: proc(
+	v: ^Validator,
+	shapes: ^Shapes,
+	graphs: []rdf.Graph_Label,
+	reporting := true,
+	allocator := context.allocator,
+) {
+	v^ = {}
+	v.shapes = shapes
+	v.reporting = reporting
+	v.allocator = allocator
+	v.scoped = true
+	v.graphs = make([]rdf.Graph_Label, len(graphs), allocator)
+	for label, i in graphs {
+		v.graphs[i] = label_clone(label, allocator)
 	}
 }
 
-// validator_destroy frees the validator's report and its copy of the graph label.
-// The model is the caller's and is untouched. Close the store first: a
+// validator_destroy frees the validator's report and its copies of the graph
+// labels. The model is the caller's and is untouched. Close the store first: a
 // store whose validator is gone would call into freed state on its next apply.
 validator_destroy :: proc(v: ^Validator) {
 	if v.has_report {
 		report_destroy(&v.report)
 	}
-	switch g in v.graph {
-	case rdf.IRI:
-		delete(string(g), v.allocator)
-	case rdf.Blank_Node:
-		delete(string(g), v.allocator)
+	label_delete(v.graph, v.allocator)
+	for label in v.graphs {
+		label_delete(label, v.allocator)
 	}
+	delete(v.graphs, v.allocator)
 	v^ = {}
+}
+
+@(private = "file")
+label_clone :: proc(label: rdf.Graph_Label, allocator: runtime.Allocator) -> rdf.Graph_Label {
+	switch g in label {
+	case rdf.IRI:
+		return rdf.IRI(strings.clone(string(g), allocator))
+	case rdf.Blank_Node:
+		return rdf.Blank_Node(strings.clone(string(g), allocator))
+	}
+	return nil
+}
+
+@(private = "file")
+label_delete :: proc(label: rdf.Graph_Label, allocator: runtime.Allocator) {
+	switch g in label {
+	case rdf.IRI:
+		delete(string(g), allocator)
+	case rdf.Blank_Node:
+		delete(string(g), allocator)
+	}
 }
 
 // validator_hook is the `record.Validator` to pass to `store_open`. The
@@ -162,10 +204,19 @@ validator_check :: proc(
 	v.conforms = false
 	v.failure = .None
 
-	// The graph is resolved against the candidate, so a graph the changeset
-	// is the first to name is validated rather than read as absent.
+	// The graph — or every graph of the union — is resolved against the
+	// candidate, so a graph the changeset is the first to name is validated
+	// rather than read as absent.
 	se: Session
-	session_init(&se, candidate, v.graph)
+	ids: [dynamic]record.Term_ID
+	defer delete(ids)
+	if v.scoped {
+		ids = make([dynamic]record.Term_ID, allocator)
+		session_resolve_graphs(candidate, v.graphs, &ids)
+		session_init_union(&se, candidate, ids[:])
+	} else {
+		session_init(&se, candidate, v.graph)
+	}
 
 	b: Bindings
 	bindings_init(&b, v.shapes, se, allocator)
