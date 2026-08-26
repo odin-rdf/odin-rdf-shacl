@@ -119,7 +119,7 @@ epoch :: proc(
 // verdict is about.
 @(private = "file")
 visible :: proc(se: Session) -> (n: int) {
-	sc := record.range_iter(record.snapshot_match(se.snap, record.Pattern{g = se.graph}), {origin = .Any})
+	sc := record.range_iter(record.snapshot_match(se.snap, record.Pattern{g = se.graph}), {origin = .Any, scope = .All})
 	for _ in record.scan_next(&sc) {
 		n += 1
 	}

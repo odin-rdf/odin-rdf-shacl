@@ -158,3 +158,10 @@ rest; M with those.
   one graph by decision, and the workspace design makes that the common
   case rather than the corner. Not started; reopening decision 5 is the
   owner's call.
+- **2026-08-27 — `RECORD-T-0029` landed and `v0.5.0` is the floor
+  (`SHACL-T-0040`).** `record.Filter` now carries `scope: Graph_Scope`;
+  the three session verbs state `.All`. What this settles for the
+  Design above: the set path states `scope = .Set, graphs = se.graphs`,
+  and an empty set admits nothing at the record, so `GRAPH_ABSENT` for
+  the empty case is belt and braces rather than the guard. Still not
+  started; reopening decision 5 is still the owner's call.

@@ -144,10 +144,19 @@ jobs:
       #   - **python3**: the record's *own* `make test` needs it (the
       #     cross-implementation verifier); a consumer compiling the library
       #     does not, so this job installs nothing.
+      # **`v0.5.0` raised it a fifth time (SHACL-T-0040, 2026-08-27)**, again
+      # for an API change and not a capability: `record.Filter` gained
+      # `scope: Graph_Scope` with no valid zero, so a `Filter` that does not
+      # state `.All` or `.Set` is refused by `range_iter` at its first read
+      # (RECORD-T-0029 — an empty graph set had been reading every graph or
+      # nothing by allocation history). Seven sites here state `.All`: the
+      # three session verbs, `query.odin`, and three tests. Not a format
+      # change; no verdict and no read count moves. SHACL-T-0039 is where
+      # `.Set` arrives — validating the union of a workspace's graph set.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.4.0
+          ref: v0.5.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2

@@ -98,7 +98,7 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   switches on exhaustively, and `snapshot_term` can now return a term it owns,
   for which `snapshot_term_destroy` is paired with every decode. That pairing
   also closes the split-IRI leak `session_term`'s contract had admitted since
-  the port and had no verb to fix.)* odin-rdf-sparql is still
+  the port and had no verb to fix.)* *(Amended 2026-08-27, SHACL-T-0040: the floor is **`v0.5.0`** — `Filter.scope`, RECORD-T-0029; seven sites state `.All`, no verdict or read count moves.)* odin-rdf-sparql is still
   relevant only to the SHACL-SPARQL phase, which has not started; its handover
   (`docs/handover-sparql.md`) predates the port and carries a translation note.
 - **Term identity moved with the store, twice** (SHACL-T-0032/-0033): the record
@@ -157,7 +157,7 @@ validate-before-commit expressible here — and v0.4.0 fixed a Windows failure i
 `open_ephemeral` that this repository's own suite surfaced (STORE-T-0042). odin-rdf-parser
 and odin-rdf-sparql are unchanged at v0.1.0.)* *(Amended 2026-08-20: odin-rdf-store is no
 longer a dependency at any version; odin-rdf-record `v0.3.0` is the pin and a floor.)*
-*(Amended 2026-08-25: `v0.4.0`, RDF 1.2's two term kinds — SHACL-T-0038.)*
+*(Amended 2026-08-25: `v0.4.0`, RDF 1.2's two term kinds — SHACL-T-0038.)* *(Amended 2026-08-27, SHACL-T-0040: the floor is **`v0.5.0`** — `Filter.scope`, RECORD-T-0029; seven sites state `.All`, no verdict or read count moves.)*
 
 *(Amended 2026-08-08, SHACL-T-0030 — filed from odin-rdf-store's STORE-T-0052: **the store
 this validator sits on has gained a time dimension, and it reaches validation with no source
@@ -305,6 +305,6 @@ A complete, well-tested Odin library where:
 ## Constraints
 
 - Written in Odin with no external dependencies; odin-rdf-sparql is an optional dependency confined to the SHACL-SPARQL phase.
-- Depends on odin-rdf-parser (data model, shapes/report parsing and emitting) and odin-rdf-store (match interface); consumed as published. *(Amended 2026-08-20: and odin-rdf-record (snapshots, `apply`, the `Validator` hook, `record/ingest`) in place of odin-rdf-store; pinned at `v0.3.0` as a floor. The record is POSIX-only for durable storage; the suites here use its memory seam.)* *(Amended 2026-08-25: `v0.4.0`, SHACL-T-0038.)*
+- Depends on odin-rdf-parser (data model, shapes/report parsing and emitting) and odin-rdf-store (match interface); consumed as published. *(Amended 2026-08-20: and odin-rdf-record (snapshots, `apply`, the `Validator` hook, `record/ingest`) in place of odin-rdf-store; pinned at `v0.3.0` as a floor. The record is POSIX-only for durable storage; the suites here use its memory seam.)* *(Amended 2026-08-25: `v0.4.0`, SHACL-T-0038.)* *(Amended 2026-08-27, SHACL-T-0040: the floor is **`v0.5.0`** — `Filter.scope`, RECORD-T-0029; seven sites state `.All`, no verdict or read count moves.)*
 - Scope is SHACL Core validation plus the later SHACL-SPARQL phase. Out of scope: SHACL Advanced Features (rules, functions), inference/entailment regimes, and any server or protocol layer.
 - Validation performance is bounded by the store's match capabilities; correctness must never depend on backend-specific behavior. *(Amended 2026-08-20: there is one backend by decision, so the second clause now means: correctness must not depend on the record's representation — term identity is RDF's (language tags fold on intern; `"01"^^xsd:integer` and `"1"` are distinct terms) and value comparison is the engine's job, in `shacl/value.odin`.)*

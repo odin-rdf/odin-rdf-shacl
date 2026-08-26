@@ -175,7 +175,7 @@ shapes graph repeats a triple cannot load), `v0.3.0` is where the record's
 natively, and `v0.4.0` is where RDF 1.2's triple terms arrived — a fourth
 `record.Term_Kind`, which this engine switches on exhaustively, and
 `snapshot_term_destroy`, the verb for the two term kinds that own their memory.
-It names both, so it does not compile below `v0.4.0`.
+It names both, so it does not compile below `v0.4.0`. *(Since 2026-08-27 the pin is **`v0.5.0`**, SHACL-T-0040: `record.Filter` gained `scope`, which every read here states — a fifth floor, for an API change rather than a capability.)*
 
 ```
 make test    # the full suite, once — there is no width matrix

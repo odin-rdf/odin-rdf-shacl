@@ -35,7 +35,7 @@ reader_match :: proc(r: Reader, subject, predicate, object: record.Term_ID) -> r
 		r.se.snap,
 		record.Pattern{s = subject, p = predicate, o = object, g = r.se.graph},
 	)
-	return record.range_iter(rng, record.Filter{origin = .Any})
+	return record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
 }
 
 // objects_of returns the objects of (subject, predicate, *) in the graph.

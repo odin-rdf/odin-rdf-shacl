@@ -60,7 +60,7 @@ record_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, record.snapshot_kind(snap, sid), record.Term_Kind.IRI)
 
 	rng := record.snapshot_match(snap, record.Pattern{s = sid})
-	sc := record.range_iter(rng, record.Filter{origin = .Any})
+	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
 	count := 0
 	for {
 		id, ok := record.scan_next(&sc)

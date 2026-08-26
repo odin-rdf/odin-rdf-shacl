@@ -153,7 +153,7 @@ session_scan :: proc(
 		read_counts.scan += 1
 	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, p = predicate, o = object, g = se.graph})
-	sc := record.range_iter(rng, record.Filter{origin = .Any})
+	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {
@@ -179,7 +179,7 @@ session_step :: proc(se: Session, from, predicate: record.Term_ID, inverted: boo
 		? record.Pattern{p = predicate, o = from, g = se.graph} \
 		: record.Pattern{s = from, p = predicate, g = se.graph}
 	rng := record.snapshot_match(se.snap, p)
-	sc := record.range_iter(rng, record.Filter{origin = .Any})
+	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {
@@ -204,7 +204,7 @@ session_outgoing :: proc(
 		read_counts.outgoing += 1
 	}
 	rng := record.snapshot_match(se.snap, record.Pattern{s = subject, g = se.graph})
-	sc := record.range_iter(rng, record.Filter{origin = .Any})
+	sc := record.range_iter(rng, record.Filter{origin = .Any, scope = .All})
 	for {
 		id, ok := record.scan_next(&sc)
 		if !ok {

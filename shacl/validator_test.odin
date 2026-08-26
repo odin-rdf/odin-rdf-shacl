@@ -132,7 +132,7 @@ head_has :: proc(ws: ^Wired_Store, s, p, o: rdf.Term, graph: rdf.Graph_Label = n
 		return false
 	}
 	pat.g = se.graph
-	return record.snapshot_exists(snap, pat, {origin = .Any})
+	return record.snapshot_exists(snap, pat, {origin = .Any, scope = .All})
 }
 
 @(private = "file")
