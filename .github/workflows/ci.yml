@@ -153,10 +153,19 @@ jobs:
       # three session verbs, `query.odin`, and three tests. Not a format
       # change; no verdict and no read count moves. SHACL-T-0039 is where
       # `.Set` arrives — validating the union of a workspace's graph set.
+      # **`v0.6.0` raised it a sixth time (SHACL-T-0041, 2026-08-27)**, and
+      # for the first time for nothing this engine had to change: record
+      # gained a seventh order, `GPOS` (RECORD-T-0028), and `snapshot_match`
+      # chooses it whenever G is bound, S is not, and O is not bound without
+      # P. Every session verb binds `g = se.graph`, so the class-instance
+      # reads behind `sh:targetClass`, `sh:class` and the inverted path step
+      # become prefix windows that are exactly their answer. No source
+      # change, no verdict moves, and the read pins are this engine's own
+      # verb counts, which cannot move.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.5.0
+          ref: v0.6.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2
