@@ -65,7 +65,7 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   one run, no skip list, no expected-failure file, ignored-parameter record
   empty throughout. The suites open every store over the record's platform-free
   memory seam (`Mem_FS` + `mem_file_ops`), which is also why CI's three runners
-  all run the same `make test`: the record has no Windows `File_Ops`.
+  all run the same `make test`: the record has no Windows `File_Ops`. *(Amended 2026-09-01, SHACL-T-0042: **Windows is dropped**, `RECORD-A-0011` — the leg proved this engine passes on a platform its store cannot host on, and since record `v0.7.0` the package does not compile there at all. Two runners, ubuntu and macos.)*
 - **Validate-before-commit is the record's `Validator` hook**
   (`shacl/validator.odin`, SHACL-T-0034), which replaces `session_init_txn`:
   a compiled model wired in at `record.store_open`, handed the dataset a write

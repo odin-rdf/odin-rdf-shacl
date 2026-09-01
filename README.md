@@ -194,12 +194,17 @@ and the alias says nothing. `make bench` builds twice because read counting is
 a build-time switch in the engine (`-define:SHACL_COUNT_READS=true`,
 `shacl/counting.odin`) that is compiled out of the timing run entirely.
 
-**Platforms.** The record's real file operations are POSIX (`posix_file_ops`,
-`#+build linux, darwin`); there is no Windows `File_Ops`. The package still
-compiles on Windows without it, and every suite here opens its stores over the
-platform-free memory seam (`Mem_FS` + `mem_file_ops`), so CI runs on all three
-runners and nothing in this repository touches a real record directory. A
-consumer on Windows that wants durable storage supplies its own `File_Ops`.
+**Platforms: Linux and macOS.** The record's real file operations are POSIX
+(`posix_file_ops`, `#+build linux, darwin`); there is no Windows `File_Ops`,
+Linux is the production environment and darwin is development. **Windows is not
+supported** — dropped 2026-09-01, `RECORD-A-0011`. It had worked in the narrow
+sense that the suites open stores over the platform-free memory seam
+(`Mem_FS` + `mem_file_ops`) and never touch a real directory, so CI ran a
+Windows leg proving this engine passes on a platform its store cannot host on.
+That is a capability nobody wanted, and since odin-rdf-record `v0.7.0` the
+package does not compile there at all: its in-package test files call
+`posix_file_ops`, and Odin's `_test.odin` is a naming convention rather than a
+build tag, so those files are part of the package every consumer compiles.
 The record's *own* `make test` needs `python3` for its cross-implementation
 verifier; a consumer compiling the library does not.
 
@@ -370,9 +375,9 @@ _, open_err, _, _ := record.store_open(&db, "scratch", record.mem_file_ops(&fs))
 defer record.store_close(&db)
 ```
 
-Nothing to name, make unique, or clean up, and it is platform-free: there is
-no Windows `File_Ops` in the record, so this is also how the suites run on
-every CI runner. Every snapshot must be released before `store_close`; the
+Nothing to name, make unique, or clean up, and it is allocator-backed rather
+than filesystem-backed, which is how the suites run on every CI runner without
+leaving a directory behind. Every snapshot must be released before `store_close`; the
 record asserts it. A `Mem_FS` must stay where it is for the store's lifetime
 (the writer holds a pointer to it), so open the store in the scope that owns
 the `Mem_FS` rather than returning either by value.
