@@ -17,6 +17,7 @@ tags:
 
 exit_criteria_met: false
 initiative_id: NULL
+---
 
 # Adopt odin-rdf-record v0.7.0: the store's surface is its API, and this engine never reached past it
 
