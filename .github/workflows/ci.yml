@@ -204,10 +204,18 @@ jobs:
       #
       # Not a format change: a `v0.6.0` store reads and writes identically,
       # and every read pin here holds (7503 on the reference configuration).
+      #
+      # `v0.8.0` (2026-09-04, RECORD-I-0009 / RECORD-A-0012): the record's
+      # permutations are copy-on-write B+trees of fact ids — a commit there
+      # is 0.24 ms where it was 37, which is what validate-before-commit
+      # through the `Validator` hook now costs the application per edit.
+      # No source change here: every session read still goes through
+      # `snapshot_match` / `range_iter` / `scan_next`, whose fields this
+      # engine never named; `make test` green and 7503 as pinned.
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.7.0
+          ref: v0.8.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2

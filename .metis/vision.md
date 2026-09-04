@@ -272,6 +272,13 @@ that is still the most useful thing it records:**
   and what SHACL-I-0002 left open. Its first task is vendoring
   `data-shapes-test-suite/tests/sparql/`, not fixing `core/complex`.
 
+*(Amended 2026-09-04: **odin-rdf-record `v0.8.0`** — the record's permutations
+are copy-on-write B+trees of fact ids (`RECORD-A-0012`), and a commit there is
+0.24 ms where it was 37. For this engine that changes what validate-before-
+commit costs the application per edit, and nothing in the engine: every
+session read goes through the store's published verbs, `make test` is green
+and the reference configuration reads 7503 as pinned.)*
+
 ## Future State
 
 A complete, well-tested Odin library where:
