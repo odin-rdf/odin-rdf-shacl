@@ -279,6 +279,14 @@ commit costs the application per edit, and nothing in the engine: every
 session read goes through the store's published verbs, `make test` is green
 and the reference configuration reads 7503 as pinned.)*
 
+*(Amended 2026-09-04, later: **odin-rdf-record `v0.9.0`** — `snapshot_history`,
+every generation a pattern ever matched over the same window and scan with the
+interval test omitted, `api.md` §12.6 built as written at the application's
+asking (`RECORD-T-0044`). A validator judges the visible state of one
+snapshot and asks no temporal question; nothing here changed, `make test` is
+green and 7503 as pinned. The pin moves because the floor stated here should
+be the family's current tag.)*
+
 ## Future State
 
 A complete, well-tested Odin library where:
