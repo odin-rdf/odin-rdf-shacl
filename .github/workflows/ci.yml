@@ -126,10 +126,24 @@ jobs:
       # column instead of the EOF line and a negative column. Nothing this
       # repository reads changed; the bump is the family's walk-the-consumers
       # rule on release, and the bug was found by a sibling's W3C sweep.
+      #
+      # `v0.1.2` (2026-08-25, RDF-T-0026): one resolver fix, and the first
+      # of these two that could have changed a term this repository holds.
+      # `resolve()` had been running *absolute* IRIs through RFC 3986 §5.2
+      # and stripping their dot segments, base or no base, so a Turtle
+      # document loaded an IRI it does not contain — which Turtle §6.3 does
+      # not permit and RDF 1.1 Concepts §3.2 forbids outright. A shapes
+      # graph is an ordinary Turtle document loaded through this parser, so
+      # below v0.1.2 a shape naming `<http://ex/a/./b>` in `sh:targetNode`,
+      # `sh:class` or `sh:hasValue` was compiled against a term the document
+      # never stated. No vendored entry writes such an IRI and none of the
+      # 98 moves: `make test` green, 7503 on the reference configuration as
+      # pinned. This bump was overdue — it is the one pin in the family that
+      # had not moved since 2026-08-20 (SHACL-T-0047).
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-parser
-          ref: v0.1.1
+          ref: v0.1.2
           path: odin-rdf-parser
 
       # **odin-rdf-record `v0.4.0` is the pin and a floor**, the fourth; the
@@ -233,10 +247,21 @@ jobs:
       # format or API change on either side: `make test` green, 7503 as
       # pinned, and the pin moves only so that the floor this repository
       # states is the family's current tag.
+      #
+      # `v0.10.0` (2026-09-07, RECORD-T-0048/-T-0050/-T-0053): the record's
+      # CLI release, and the library is byte-identical to `v0.9.1` —
+      # `doc/api-surface.txt` unmoved at 74 exported names, no format
+      # change, a `v0.9.1` store read and written identically. The tool
+      # installs as `rdfrecord` now, it grew a `stats` subcommand, and the
+      # environment note states the real format version. This repository
+      # links the library and never the tool, so there is nothing here to
+      # adapt: no source change, `make test` green, 7503 as pinned. The pin
+      # moves so that the floor this repository states is the family's
+      # current tag (SHACL-T-0047).
       - uses: actions/checkout@v5
         with:
           repository: odin-rdf/odin-rdf-record
-          ref: v0.9.1
+          ref: v0.10.0
           path: odin-rdf-record
 
       - uses: laytan/setup-odin@v2

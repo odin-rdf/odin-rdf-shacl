@@ -91,7 +91,10 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   now a build-time switch in the engine (`SHACL_COUNT_READS`) rather than a
   seam. SHACL-A-0002's trigger stays discharged.
 - **Dependencies:** odin-rdf-parser `v0.1.1` (bumped the day it was tagged;
-  RDF-T-0025's scanner fix, found by the record's W3C sweep) and
+  RDF-T-0025's scanner fix, found by the record's W3C sweep) *(amended
+  2026-09-07, SHACL-T-0047: **`v0.1.2`**, RDF-T-0026 — `resolve()` no longer
+  strips an absolute IRI's dot segments, so a shapes graph naming one is
+  compiled against the term it states)* and
   **odin-rdf-record `v0.3.0` as a floor** (`v0.2.0` for `ingest`'s set semantics, `v0.3.0` for the distinct
   `Term_ID`/`Fact_ID`/`Epoch` types the engine holds). *(Amended 2026-08-25,
   SHACL-T-0038: the floor is **`v0.4.0`**, the release that brought RDF 1.2's
@@ -121,7 +124,13 @@ what no longer exists, a dated note beside it says what moved. What is true now:
   The owner's reading on tagging: the rewrite is complete and, barring a consumer
   saying otherwise or the record's API moving for the sparql port, this is the
   version to use for the foreseeable future. No shacl consumer pins a tag today, so
-  the release walk ends here.
+  the release walk ends here. *(Amended 2026-09-07: **`v0.3.0` is the release**, and
+  the "barring the record's API moving" clause is what happened — six adoptions
+  (`v0.4.0` through `v0.10.0`) and two capabilities of this engine's own landed after
+  `v0.2.0`, so a consumer pinning that tag gets neither `session_init_union` nor
+  `.Triple` as an ordinary value node. `v0.2.0` stands as the port's tag. The reading
+  on tagging is otherwise unchanged: SHACL Core is complete, and `v0.3.0` is the
+  version to use.)*
 
 ---
 
@@ -296,6 +305,27 @@ moved; this repository's own W3C harness has anchored `SUITE_ROOT` to
 `#directory` since it was written, so it never had the defect. `make test`
 green, 7503 as pinned, the floor stated here kept at the family's current
 tag.)*
+
+*(Amended 2026-09-07: **odin-rdf-record `v0.10.0` and odin-rdf-parser
+`v0.1.2`**, `SHACL-T-0047` — two pins in one walk. The record's is its CLI
+release (`rdfrecord`, a `stats` subcommand, the environment note stating
+the real format version) and its **library is byte-identical to `v0.9.1`**:
+74 exported names unmoved, no format change, and this repository links the
+library and never the tool. The parser's is the interesting half and the
+reason this was not bookkeeping: `RDF-T-0026` stopped `resolve()` from
+stripping an *absolute* IRI's dot segments, which Turtle §6.3 does not
+permit and RDF 1.1 Concepts §3.2 forbids. **A shapes graph is an ordinary
+Turtle document loaded through that parser**, so below `v0.1.2` a shape
+naming `<http://ex/a/./b>` in `sh:targetNode`, `sh:class` or `sh:hasValue`
+was compiled against a term the document never stated, and would silently
+fail to match. The pin had sat at `v0.1.1` since 2026-08-20 because the
+record built against the parser's `main` and had no CI; it has had both
+since `RECORD-I-0007`, so this was the family's last stale parser pin. No
+vendored entry writes such an IRI, so no verdict moves: `make test` green,
+7503 as pinned, every other read pin unmoved. **Released as `v0.3.0`** the
+same day — the second record-era tag, cut so that the union verbs and the
+RDF 1.2 term handling below have a fixed point a consumer can pin instead
+of tracking `main`.)*
 
 ## Future State
 
