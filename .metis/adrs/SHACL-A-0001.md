@@ -373,6 +373,18 @@ This decision should be revisited if any of the following occurs:
 
 - **A consumer needs cross-graph or dataset-wide validation** with a semantics it can defend.
   That reopens decision 5 and, with it, the STORE-T-0017 question.
+  *(Fired and discharged 2026-08-27, SHACL-T-0039: odin-rdf-app's workspace design
+  needed exactly this, and decision 5 was generalised to a **union of a set of
+  graphs** — `session_init_union`, `validator_init_union`, the single graph being
+  the one-element case. Every read pin held at 7503. **The STORE-T-0017 half of this
+  trigger is void**, and a session firing it again should not go looking: a union is
+  a set of graphs, not a class of them, so a named-graph wildcard was not what the
+  case wanted; and odin-rdf-store was retired on 2026-09-07 at `v0.7.0`, so its
+  backlog is nobody's to pull from. The wildcard did ship there, unconsumed, in that
+  final tag. What survives of this trigger is the first sentence: a consumer needing
+  a semantics **beyond** a union — the dataset as one graph, with the spec's silence
+  on it still unresolved — reopens decision 5 again, and that question is
+  odin-rdf-record's now.)*
 - **Recursive shapes turn out to be common** in real shapes graphs rather than a corner case —
   which would make decision 6's failure mode a recurring obstacle rather than a documented
   limit.
